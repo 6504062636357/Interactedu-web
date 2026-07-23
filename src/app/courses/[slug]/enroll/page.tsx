@@ -1,0 +1,171 @@
+import type { ReactElement } from "react";
+import Link from "next/link";
+import { redirect, notFound } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
+import { enrollFreeCourse } from "./actions";
+import OmiseQrPayment from "@/components/OmiseQrPayment";
+
+
+interface Course {
+  id: string;
+  title: string;
+  slug: string;
+  cover_image_url: string | null;
+  price: number;
+}
+
+function formatPrice(price: number): string {
+  if (price === 0) return "ฟรี";
+  return `฿${price.toLocaleString("th-TH")}`;
+}
+
+export default async function EnrollPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ submitted?: string; error?: string }>;
+}): Promise<ReactElement> {
+  const { slug } = await params;
+  const { submitted, error: submitError } = await searchParams;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?redirect=/courses/${slug}/enroll`);
+  }
+
+  const { data: course, error } = await supabase
+    .from("courses")
+    .select("id, title, slug, cover_image_url, price")
+    .eq("slug", slug)
+    .eq("status", "published")
+    .single();
+
+  if (error || !course) {
+    notFound();
+  }
+
+  const typedCourse = course as Course;
+
+  const { data: existingEnrollment } = await supabase
+    .from("enrollments")
+    .select("id, status")
+    .eq("student_id", user.id)
+    .eq("course_id", typedCourse.id)
+    .maybeSingle();
+
+  if (existingEnrollment?.status === "approved") {
+    redirect(`/play/${typedCourse.id}`);
+  }
+
+  const isPending = existingEnrollment?.status === "pending" || Boolean(submitted);
+  const isFree = typedCourse.price === 0;
+
+  return (
+    <div className="min-h-screen w-full bg-[#F7F8FA]">
+      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#0F1B3D]/8">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
+                  <path d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section className="max-w-5xl mx-auto px-6 lg:px-8 py-12">
+        <h1 className="text-[26px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] mb-8">คำสั่งซื้อ</h1>
+
+        {isPending ? (
+          <div className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-10 text-center">
+            <p className="text-[17px] font-bold text-[#0F1B3D] mb-2">ส่งคำขอลงทะเบียนแล้ว</p>
+            <p className="text-[14px] text-[#0F1B3D]/50 font-medium mb-6">
+              รอแอดมินตรวจสอบการชำระเงิน จะแจ้งผลให้ทราบเร็วๆ นี้
+            </p>
+            <Link
+              href="/"
+              className="inline-flex text-[14px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-6 py-3 rounded-full transition-colors"
+            >
+              กลับไปหน้าหลัก
+            </Link>
+          </div>
+        ) : (
+          <div className="grid lg:grid-cols-[1.4fr_1fr] gap-8">
+            <div className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-7">
+              <div className="flex items-center gap-1.5 mb-5">
+                <span className="w-1 h-4 bg-[#FF5A3C] rounded-full" />
+                <h2 className="text-[16px] font-bold text-[#0F1B3D]">รายการสินค้า</h2>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="relative w-28 h-20 rounded-xl overflow-hidden bg-gradient-to-br from-[#0F1B3D] to-[#182852] shrink-0">
+                  {typedCourse.cover_image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={typedCourse.cover_image_url} alt={typedCourse.title} className="absolute inset-0 w-full h-full object-cover" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="inline-flex text-[10.5px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-1 rounded-full mb-1.5">
+                    Online Course
+                  </span>
+                  <p className="text-[15px] font-bold text-[#0F1B3D] truncate">{typedCourse.title}</p>
+                </div>
+                <span className="text-[15px] font-bold text-[#0F1B3D] shrink-0">{formatPrice(typedCourse.price)}</span>
+              </div>
+
+              {submitError && (
+                <p className="mt-5 text-[13px] font-semibold text-[#EB4A2D]">
+                  เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง
+                </p>
+              )}
+            </div>
+
+            <div>
+              <div className="bg-[#FFF7E8] rounded-3xl border border-[#FFCB47]/30 p-7">
+                <h2 className="text-[15px] font-bold text-[#0F1B3D] mb-5">สรุปการสั่งซื้อ</h2>
+
+                <div className="flex items-center justify-between text-[14px] font-medium text-[#0F1B3D]/70 mb-2">
+                  <span>คอร์สออนไลน์</span>
+                  <span>{formatPrice(typedCourse.price)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[15px] font-bold text-[#0F1B3D] pt-3 border-t border-[#0F1B3D]/10 mb-5">
+                  <span>สรุปยอดชำระ</span>
+                  <span>{formatPrice(typedCourse.price)}</span>
+                </div>
+
+                <p className="text-[12px] text-[#0F1B3D]/50 leading-relaxed mb-5">
+                  เมื่อชำระเงิน ถือว่าท่านได้ยอมรับ{" "}
+                  <span className="text-[#FF5A3C] font-semibold">ข้อตกลงและเงื่อนไขการใช้บริการ</span>{" "}
+                  เรียบร้อยแล้ว
+                </p>
+
+                {isFree ? (
+                    <form action={enrollFreeCourse.bind(null, typedCourse.id, slug)}>
+                        <button
+                        type="submit"
+                        className="w-full inline-flex items-center justify-center text-[15px] font-bold text-white bg-[#FFCB47] hover:bg-[#f0bc3a] px-7 py-4 rounded-full transition-colors"
+                        >
+                        ลงทะเบียนฟรี
+                        </button>
+                    </form>
+                    ) : (
+                    <OmiseQrPayment courseId={typedCourse.id} slug={slug} />
+                    )}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

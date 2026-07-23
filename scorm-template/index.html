@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lesson</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="lesson-wrap">
+    <h1 id="lesson-title"></h1>
+
+    <video id="lesson-video" controls></video>
+
+    <div id="lesson-content" class="lesson-content"></div>
+
+    <div class="quiz-section">
+      <h2>แบบทดสอบท้ายบท</h2>
+      <div id="quiz-container"></div>
+      <button id="submit-quiz-btn">ส่งคำตอบ</button>
+      <p id="quiz-result" class="quiz-result"></p>
+    </div>
+  </div>
+
+  <script src="scorm-api.js"></script>
+  <script src="player.js"></script>
+</body>
+</html>
