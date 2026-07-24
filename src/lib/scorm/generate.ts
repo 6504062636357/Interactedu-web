@@ -784,11 +784,82 @@ interface LessonDraftRow {
   lessons: LessonInfo;
 }
 
-function buildPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
+// ============================================================
+// LESSON SCO (วิดีโอ + เนื้อหา) — ไม่มีควิซแล้ว
+// ============================================================
+
+function buildLessonPlayerJs(draft: LessonDraftRow): string {
   const lessonData = {
     title: draft.lessons.title,
     videoUrl: draft.video_url ?? "",
     contentHtml: draft.content_html ?? "",
+  };
+
+  return `var LESSON_DATA = ${JSON.stringify(lessonData)};
+
+function renderLesson() {
+  document.getElementById("lesson-title").textContent = LESSON_DATA.title;
+  document.getElementById("lesson-video").src = LESSON_DATA.videoUrl;
+  document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
+}
+
+window.addEventListener("load", function () {
+  ScormAPI.initialize();
+  ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
+  renderLesson();
+
+  var video = document.getElementById("lesson-video");
+  if (video) {
+    // ดูวิดีโอจบ = ถือว่าเรียนบทนี้เสร็จ (ไม่เกี่ยวกับควิซ ซึ่งเป็นคนละ SCO แล้ว)
+    video.addEventListener("ended", function () {
+      ScormAPI.setValue("cmi.core.lesson_status", "completed");
+      ScormAPI.commit();
+    });
+  }
+});
+
+window.addEventListener("beforeunload", function () {
+  ScormAPI.commit();
+  ScormAPI.terminate();
+});
+`;
+}
+
+const LESSON_HTML = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lesson</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="lesson-wrap">
+    <header class="lesson-header">
+      <h1 id="lesson-title"></h1>
+    </header>
+    <div class="video-wrap">
+      <video id="lesson-video" controls></video>
+    </div>
+    <div id="lesson-content" class="lesson-content"></div>
+  </div>
+  <script src="scorm-api.js"></script>
+  <script src="lesson-player.js"></script>
+</body>
+</html>`;
+
+// ============================================================
+// QUIZ SCO (แบบทดสอบอย่างเดียว) — แยกไฟล์ต่างหาก
+// ============================================================
+
+function buildQuizPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
+  const quizData = {
+    title: draft.lessons.title,
     questions: questions.map((q) => ({
       questionText: q.question_text,
       choices: q.quiz_choices
@@ -797,23 +868,13 @@ function buildPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): str
     })),
   };
 
-  return `var LESSON_DATA = ${JSON.stringify(lessonData)};
-
-var quizAnswered = false;
-var quizScore = 0;
-
-function renderLesson() {
-  document.getElementById("lesson-title").textContent = LESSON_DATA.title;
-  document.getElementById("lesson-video").src = LESSON_DATA.videoUrl;
-  document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
-  renderQuiz();
-}
+  return `var QUIZ_DATA = ${JSON.stringify(quizData)};
 
 function renderQuiz() {
   var container = document.getElementById("quiz-container");
   container.innerHTML = "";
 
-  LESSON_DATA.questions.forEach(function (q, qIndex) {
+  QUIZ_DATA.questions.forEach(function (q, qIndex) {
     var qDiv = document.createElement("div");
     qDiv.className = "quiz-question";
 
@@ -842,31 +903,31 @@ function renderQuiz() {
 }
 
 function submitQuiz() {
-  var total = LESSON_DATA.questions.length;
+  var total = QUIZ_DATA.questions.length;
   var correct = 0;
 
-  LESSON_DATA.questions.forEach(function (q, qIndex) {
+  QUIZ_DATA.questions.forEach(function (q, qIndex) {
     var selected = document.querySelector('input[name="question-' + qIndex + '"]:checked');
     if (selected && selected.dataset.correct === "true") {
       correct++;
     }
   });
 
-  quizScore = total > 0 ? Math.round((correct / total) * 100) : 0;
-  quizAnswered = true;
+  var score = total > 0 ? Math.round((correct / total) * 100) : 0;
 
   document.getElementById("quiz-result").textContent =
-    "คุณได้คะแนน " + correct + "/" + total + " (" + quizScore + "%)";
+    "คุณได้คะแนน " + correct + "/" + total + " (" + score + "%)";
 
-  ScormAPI.setValue("cmi.core.score.raw", String(quizScore));
-  ScormAPI.setValue("cmi.core.lesson_status", quizScore >= 60 ? "passed" : "failed");
+  ScormAPI.setValue("cmi.core.score.raw", String(score));
+  ScormAPI.setValue("cmi.core.lesson_status", score >= 60 ? "passed" : "failed");
   ScormAPI.commit();
 }
 
 window.addEventListener("load", function () {
   ScormAPI.initialize();
   ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
-  renderLesson();
+  document.getElementById("quiz-title").textContent = "แบบทดสอบหลังเรียน: " + QUIZ_DATA.title;
+  renderQuiz();
   document.getElementById("submit-quiz-btn").addEventListener("click", submitQuiz);
 });
 
@@ -877,46 +938,11 @@ window.addEventListener("beforeunload", function () {
 `;
 }
 
-function buildManifestXml(draft: LessonDraftRow): string {
-  const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;
-  const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  return `<?xml version="1.0" standalone="no" ?>
-<manifest identifier="${identifier}" version="1"
-  xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
-  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd
-                       http://www.imsglobal.org/xsd/imsmd_rootv1p2p1 imsmd_rootv1p2p1.xsd
-                       http://www.adlnet.org/xsd/adlcp_rootv1p2 adlcp_rootv1p2.xsd">
-  <metadata>
-    <schema>ADL SCORM</schema>
-    <schemaversion>1.2</schemaversion>
-  </metadata>
-  <organizations default="ORG-${draft.id}">
-    <organization identifier="ORG-${draft.id}">
-      <title>${escapedTitle}</title>
-      <item identifier="ITEM-${draft.id}" identifierref="RES-${draft.id}">
-        <title>${escapedTitle}</title>
-      </item>
-    </organization>
-  </organizations>
-  <resources>
-    <resource identifier="RES-${draft.id}" type="webcontent" adlcp:scormtype="sco" href="index.html">
-      <file href="index.html" />
-      <file href="scorm-api.js" />
-      <file href="player.js" />
-      <file href="style.css" />
-    </resource>
-  </resources>
-</manifest>`;
-}
-
-const INDEX_HTML = `<!DOCTYPE html>
+const QUIZ_HTML = `<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <title>Lesson</title>
+  <title>Quiz</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -927,24 +953,21 @@ const INDEX_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="lesson-wrap">
-    <header class="lesson-header">
-      <h1 id="lesson-title"></h1>
-    </header>
-    <div class="video-wrap">
-      <video id="lesson-video" controls></video>
-    </div>
-    <div id="lesson-content" class="lesson-content"></div>
     <div class="quiz-section">
-      <h2 class="quiz-heading">แบบทดสอบท้ายบท</h2>
+      <h2 id="quiz-title" class="quiz-heading">แบบทดสอบหลังเรียน</h2>
       <div id="quiz-container"></div>
       <button id="submit-quiz-btn">ส่งคำตอบ</button>
       <p id="quiz-result" class="quiz-result"></p>
     </div>
   </div>
   <script src="scorm-api.js"></script>
-  <script src="player.js"></script>
+  <script src="quiz-player.js"></script>
 </body>
 </html>`;
+
+// ============================================================
+// Shared: SCORM API wrapper (ใช้ร่วมกันทั้งสอง SCO)
+// ============================================================
 
 const SCORM_API_JS = `var ScormAPI = (function () {
   var apiHandle = null;
@@ -1065,7 +1088,7 @@ video {
 .lesson-content img { max-width: 100%; border-radius: 8px; }
 
 .quiz-section {
-  margin-top: 24px;
+  margin-top: 0;
   padding: 28px 24px;
   background: #fff;
   border-radius: 20px;
@@ -1144,6 +1167,109 @@ video {
 }
 `;
 
+// ============================================================
+// Manifest: 2 items / 2 resources (lesson.html, quiz.html)
+// ============================================================
+
+function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
+  const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;
+  const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const lessonItem = `<item identifier="ITEM-LESSON" identifierref="RES-LESSON">
+        <title>${escapedTitle}</title>
+      </item>`;
+
+  const quizItem = hasQuiz
+    ? `<item identifier="ITEM-QUIZ" identifierref="RES-QUIZ">
+        <title>แบบทดสอบหลังเรียน</title>
+      </item>`
+    : "";
+
+  const lessonResource = `<resource identifier="RES-LESSON" type="webcontent" adlcp:scormtype="sco" href="lesson.html">
+      <file href="lesson.html" />
+      <file href="scorm-api.js" />
+      <file href="lesson-player.js" />
+      <file href="style.css" />
+    </resource>`;
+
+  const quizResource = hasQuiz
+    ? `<resource identifier="RES-QUIZ" type="webcontent" adlcp:scormtype="sco" href="quiz.html">
+      <file href="quiz.html" />
+      <file href="scorm-api.js" />
+      <file href="quiz-player.js" />
+      <file href="style.css" />
+    </resource>`
+    : "";
+
+  return `<?xml version="1.0" standalone="no" ?>
+<manifest identifier="${identifier}" version="1"
+  xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd
+                       http://www.imsglobal.org/xsd/imsmd_rootv1p2p1 imsmd_rootv1p2p1.xsd
+                       http://www.adlnet.org/xsd/adlcp_rootv1p2 adlcp_rootv1p2.xsd">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="ORG-${draft.id}">
+    <organization identifier="ORG-${draft.id}">
+      <title>${escapedTitle}</title>
+      ${lessonItem}
+      ${quizItem}
+    </organization>
+  </organizations>
+  <resources>
+    ${lessonResource}
+    ${quizResource}
+  </resources>
+</manifest>`;
+}
+
+// ============================================================
+// Manifest JSON ที่จะเก็บลง lessons.scorm_manifest ให้ player อ่าน
+// โครงสร้างต้องตรงกับ ScormMenuItem ใน src/app/play/[courseId]/[lessonId]/page.tsx
+// เพิ่ม field "kind" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
+// ============================================================
+
+function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
+  const items: Array<{
+    identifier: string;
+    title: string;
+    href: string;
+    children: never[];
+    kind: "lesson" | "quiz";
+  }> = [
+    {
+      identifier: "ITEM-LESSON",
+      title: draft.lessons.title,
+      href: "lesson.html",
+      children: [],
+      kind: "lesson",
+    },
+  ];
+
+  if (hasQuiz) {
+    items.push({
+      identifier: "ITEM-QUIZ",
+      title: "แบบทดสอบหลังเรียน",
+      href: "quiz.html",
+      children: [],
+      kind: "quiz",
+    });
+  }
+
+  return {
+    organizationTitle: draft.lessons.title,
+    items,
+  };
+}
+
+// ============================================================
+// Main
+// ============================================================
+
 export async function generateScormPackage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>,
@@ -1183,21 +1309,28 @@ export async function generateScormPackage(
 
   const typedDraft = draft as unknown as LessonDraftRow;
   const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
+  const hasQuiz = typedQuestions.length > 0;
 
   const courseId = typedDraft.lessons.course_id;
 
-  const manifestXml = buildManifestXml(typedDraft);
-  const playerJs = buildPlayerJs(typedDraft, typedQuestions);
+  const manifestXml = buildManifestXml(typedDraft, hasQuiz);
+  const lessonPlayerJs = buildLessonPlayerJs(typedDraft);
+  const quizPlayerJs = hasQuiz ? buildQuizPlayerJs(typedDraft, typedQuestions) : null;
 
   // 3. สร้างไฟล์ ZIP ด้วย JSZip (เสถียร 100% บน Next.js / Turbopack)
   let zipBuffer: Buffer;
   try {
     const zip = new JSZip();
     zip.file("imsmanifest.xml", manifestXml);
-    zip.file("index.html", INDEX_HTML);
+    zip.file("lesson.html", LESSON_HTML);
     zip.file("scorm-api.js", SCORM_API_JS);
-    zip.file("player.js", playerJs);
+    zip.file("lesson-player.js", lessonPlayerJs);
     zip.file("style.css", STYLE_CSS);
+
+    if (hasQuiz && quizPlayerJs) {
+      zip.file("quiz.html", QUIZ_HTML);
+      zip.file("quiz-player.js", quizPlayerJs);
+    }
 
     zipBuffer = await zip.generateAsync({
       type: "nodebuffer",
@@ -1209,54 +1342,60 @@ export async function generateScormPackage(
     return { error: `Failed to generate ZIP package: ${err?.message || err}` };
   }
 
-  // 4. อัปโหลดเข้า Cloudflare R2 และแยกไฟล์ออกเป็น 5 ตัวตามมาตรฐานของ SCORM
-  // อัปโหลดแยกไฟล์ ให้ตรงกับที่ /api/scorm/[...] proxy 
-const basePath = `scorm-packages/${courseId}/${lessonId}`;
+  // 4. อัปโหลดเข้า Cloudflare R2 แยกไฟล์ ให้ตรงกับที่ /api/scorm/[...] proxy
+  const basePath = `scorm-packages/${courseId}/${lessonId}`;
 
-const filesToUpload: { name: string; content: string; contentType: string }[] = [
-  { name: "imsmanifest.xml", content: manifestXml, contentType: "application/xml" },
-  { name: "index.html", content: INDEX_HTML, contentType: "text/html" },
-  { name: "scorm-api.js", content: SCORM_API_JS, contentType: "application/javascript" },
-  { name: "player.js", content: playerJs, contentType: "application/javascript" },
-  { name: "style.css", content: STYLE_CSS, contentType: "text/css" },
-];
+  const filesToUpload: { name: string; content: string; contentType: string }[] = [
+    { name: "imsmanifest.xml", content: manifestXml, contentType: "application/xml" },
+    { name: "lesson.html", content: LESSON_HTML, contentType: "text/html" },
+    { name: "scorm-api.js", content: SCORM_API_JS, contentType: "application/javascript" },
+    { name: "lesson-player.js", content: lessonPlayerJs, contentType: "application/javascript" },
+    { name: "style.css", content: STYLE_CSS, contentType: "text/css" },
+  ];
 
-try {
-  await Promise.all(
-    filesToUpload.map((file) =>
-      r2Client.send(
-        new PutObjectCommand({
-          Bucket: R2_BUCKET_NAME,
-          Key: `${basePath}/${file.name}`,
-          Body: file.content,
-          ContentType: file.contentType,
-        })
+  if (hasQuiz && quizPlayerJs) {
+    filesToUpload.push(
+      { name: "quiz.html", content: QUIZ_HTML, contentType: "text/html" },
+      { name: "quiz-player.js", content: quizPlayerJs, contentType: "application/javascript" }
+    );
+  }
+
+  try {
+    await Promise.all(
+      filesToUpload.map((file) =>
+        r2Client.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET_NAME,
+            Key: `${basePath}/${file.name}`,
+            Body: file.content,
+            ContentType: file.contentType,
+          })
+        )
       )
-    )
-  );
-} catch (err: any) {
-  console.error("[generateScormPackage] Failed to upload SCORM files to R2:", err);
-  return { error: "Failed to upload package to storage" };
-}
+    );
+  } catch (err: any) {
+    console.error("[generateScormPackage] Failed to upload SCORM files to R2:", err);
+    return { error: "Failed to upload package to storage" };
+  }
 
-// ยังเก็บ zip ไว้ด้วยเผื่อใช้ดาวน์โหลด/export ทีหลัง (optional)
-try {
-  await r2Client.send(
-    new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: `${basePath}/package.zip`,
-      Body: zipBuffer,
-      ContentType: "application/zip",
-    })
-  );
-} catch (err: any) {
-  console.error("[generateScormPackage] Failed to upload zip archive:", err);
-  // ไม่ return error ตรงนี้ เพราะไฟล์ที่ต้องใช้เล่นจริงอัปโหลดสำเร็จแล้ว
-}
+  // ยังเก็บ zip ไว้ด้วยเผื่อใช้ดาวน์โหลด/export ทีหลัง (optional)
+  try {
+    await r2Client.send(
+      new PutObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: `${basePath}/package.zip`,
+        Body: zipBuffer,
+        ContentType: "application/zip",
+      })
+    );
+  } catch (err: any) {
+    console.error("[generateScormPackage] Failed to upload zip archive:", err);
+    // ไม่ return error ตรงนี้ เพราะไฟล์ที่ต้องใช้เล่นจริงอัปโหลดสำเร็จแล้ว
+  }
 
-const packageUrl = `${R2_PUBLIC_URL}/${basePath}/index.html`;
+  const packageUrl = `${R2_PUBLIC_URL}/${basePath}/lesson.html`;
 
-  // 5. บันทึก Record ลง Supabase
+  // 5. บันทึก Record ลง Supabase (scorm_packages เดิม)
   const { error: insertError } = await supabase
     .from("scorm_packages")
     .upsert(
@@ -1271,8 +1410,27 @@ const packageUrl = `${R2_PUBLIC_URL}/${basePath}/index.html`;
 
   if (insertError) {
     console.error("[generateScormPackage] Failed to record SCORM package:", insertError);
-    // ⚡ ปรับตรงนี้: ส่ง error message จริงจาก Supabase ออกมาโชว์บนหน้าเว็บเลย
     return { error: `Failed to save package record: ${insertError.message}` };
+  }
+
+  // 6. อัปเดต lessons table ให้ player (/api/lessons/[lessonId]/scorm-info) อ่านได้ตรง
+  //    entryPoint ต้องชี้ไป lesson.html (SCO แรก) ไม่ใช่ quiz.html
+  //    manifest เป็น JSON ที่มี item ควิซแยกออกมา (kind: "quiz") ให้ page.tsx แสดงเป็นบล็อกต่างหาก
+  const manifestJson = buildManifestJson(typedDraft, hasQuiz);
+
+  const { error: lessonUpdateError } = await supabase
+    .from("lessons")
+    .update({
+      is_scorm: true,
+      scorm_entry_point: "lesson.html",
+      scorm_version: "1.2",
+      scorm_manifest: manifestJson,
+    })
+    .eq("id", lessonId);
+
+  if (lessonUpdateError) {
+    console.error("[generateScormPackage] Failed to update lessons row:", lessonUpdateError);
+    return { error: `Failed to update lesson record: ${lessonUpdateError.message}` };
   }
 
   console.log("✅ SCORM Package Generated & Uploaded Successfully!", packageUrl);

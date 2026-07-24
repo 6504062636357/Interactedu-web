@@ -27,31 +27,59 @@ const STATUS_LABEL: Record<LessonDraftStatus, string> = {
 };
 
 const STATUS_STYLE: Record<LessonDraftStatus, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  pending_review: "bg-amber-50 text-amber-700",
-  approved: "bg-emerald-50 text-emerald-700",
-  rejected: "bg-red-50 text-red-600",
+  draft: "bg-slate-100 text-slate-500",
+  pending_review: "bg-amber-50 text-amber-600",
+  approved: "bg-emerald-50 text-emerald-600",
+  rejected: "bg-red-50 text-red-500",
 };
 
-function StatCard({ label, value, icon, badge }: { label: string; value: string | number; icon: ReactElement; badge?: boolean }): ReactElement {
+function StatCard({ label, value }: { label: string; value: string | number }): ReactElement {
   return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-4 flex items-center gap-4">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${badge ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-950"}`}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-[12.5px] text-slate-500 mb-0.5">{label}</p>
-        <p className="text-[22px] font-bold text-blue-950 leading-tight truncate">{value}</p>
-      </div>
+    <div className="bg-white rounded-xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-4">
+      <p className="text-[13px] text-slate-500 mb-1">{label}</p>
+      <p className="text-[24px] font-bold text-blue-950">{value}</p>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: LessonDraftStatus }): ReactElement {
   return (
-    <span className={`inline-flex items-center text-[11.5px] font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLE[status]}`}>
+    <span className={`inline-flex items-center text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0 ${STATUS_STYLE[status]}`}>
       {STATUS_LABEL[status]}
     </span>
+  );
+}
+
+function CourseRowItem({ course }: { course: CourseRow }): ReactElement {
+  return (
+    <div className="flex items-center gap-4 py-4 border-b border-slate-100 last:border-0">
+      <div className="w-11 h-11 rounded-lg bg-white flex items-center justify-center shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="5" width="18" height="14" rx="2" stroke="#1e293b" strokeWidth="1.5" />
+          <path d="M8 9H16M8 13H13" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-[14px] font-semibold text-slate-900 truncate">{course.title}</p>
+          {course.latestStatus && <StatusBadge status={course.latestStatus} />}
+        </div>
+        <p className="text-[12px] text-slate-400 mt-1">
+          {course.lessonCount} บทเรียน · {course.studentCount} นักเรียน · ฿{course.price.toLocaleString()}
+        </p>
+        {course.latestStatus === "rejected" && course.latestRejectionReason && (
+          <p className="text-[12px] text-red-500 mt-1">เหตุผล: {course.latestRejectionReason}</p>
+        )}
+      </div>
+
+      <Link
+        href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
+        className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-[12.5px] font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+      >
+        จัดการบทเรียน
+      </Link>
+    </div>
   );
 }
 
@@ -99,7 +127,6 @@ export default function TeacherDashboardPage(): ReactElement {
       return;
     }
 
-    // ใช้ courses.created_by ตรงๆ (ตรงกับ logic ที่ createCourse action ใช้จริง)
     const { data: courseRows, error: courseError } = await supabase
       .from("courses")
       .select("id, title, price, status")
@@ -176,7 +203,7 @@ export default function TeacherDashboardPage(): ReactElement {
     <div>
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-bold text-blue-950 tracking-[-0.01em]">ภาพรวม</h1>
+          <h1 className="text-[26px] font-bold text-blue-950 tracking-[-0.01em]">ภาพรวม</h1>
           <p className="mt-1.5 text-[14.5px] text-slate-500">ภาพรวมคอร์สและนักเรียนของคุณ</p>
         </div>
         <Link
@@ -193,89 +220,65 @@ export default function TeacherDashboardPage(): ReactElement {
         </div>
       )}
 
-      {/* B. Stat cards แถวเดียว 4 อัน */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="คอร์สทั้งหมด" value={isLoading ? "—" : courses.length} icon={<span>📚</span>} />
-        <StatCard label="นักเรียนทั้งหมด" value={isLoading ? "—" : studentCount} icon={<span>👥</span>} />
-        <StatCard label="เผยแพร่แล้ว" value={isLoading ? "—" : publishedCount} icon={<span>✅</span>} />
-        <StatCard label="รอการตรวจสอบ" value={isLoading ? "—" : pendingCount} icon={<span>⏳</span>} badge={pendingCount > 0} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        <StatCard label="คอร์สทั้งหมด" value={isLoading ? "—" : courses.length} />
+        <StatCard label="นักเรียนทั้งหมด" value={isLoading ? "—" : studentCount} />
+        <StatCard label="เผยแพร่แล้ว" value={isLoading ? "—" : publishedCount} />
+        <StatCard label="รอการตรวจสอบ" value={isLoading ? "—" : pendingCount} />
       </div>
 
-      {/* C. Grid 70/30 */}
-      <div className="grid grid-cols-1 lg:grid-cols-[70%_1fr] gap-6">
-        {/* ฝั่งซ้าย: คอร์สล่าสุด */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-6 py-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[16px] font-bold text-slate-900">คอร์สล่าสุดของฉัน</h2>
-            {courses.length > 0 && (
-              <Link href="/dashboard/teacher/courses" className="text-[12.5px] font-semibold text-blue-950 hover:underline">
-                ดูคอร์สทั้งหมด →
-              </Link>
-            )}
-          </div>
-
-          {isLoading ? (
-            <p className="text-[13.5px] text-slate-400 py-6">กำลังโหลด...</p>
-          ) : recentCourses.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {recentCourses.map((course) => (
-                <div key={course.id} className="border border-slate-100 rounded-xl p-4 flex flex-col">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <p className="text-[14px] font-semibold text-slate-900 leading-snug truncate">{course.title}</p>
-                    {course.latestStatus && <StatusBadge status={course.latestStatus} />}
-                  </div>
-                  <p className="text-[12.5px] text-slate-500 mb-1">
-                    {course.lessonCount} บทเรียน · {course.studentCount} นักเรียน
-                  </p>
-                  <p className="text-[12.5px] text-slate-500 mb-4">฿{course.price.toLocaleString()}</p>
-                  {course.latestStatus === "rejected" && course.latestRejectionReason && (
-                    <p className="text-[12px] text-red-500 mb-3">เหตุผล: {course.latestRejectionReason}</p>
-                  )}
-                  <Link
-                    href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
-                    className="mt-auto inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    จัดการบทเรียน
-                  </Link>
-                </div>
-              ))}
-            </div>
+      <div className="bg-slate-50 rounded-2xl border border-slate-100 px-6 py-5">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-[16px] font-bold text-slate-900">คอร์สล่าสุดของฉัน</h2>
+          {courses.length > 0 && (
+            <Link href="/dashboard/teacher/courses" className="text-[13px] font-semibold text-blue-950 hover:underline">
+              ดูทั้งหมด
+            </Link>
           )}
         </div>
 
-        {/* ฝั่งขวา: analytics preview + quick links */}
-        <div className="flex flex-col gap-6">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-5">
-            <h3 className="text-[14.5px] font-bold text-slate-900 mb-1">สรุปการวิเคราะห์</h3>
-            <p className="text-[12.5px] text-slate-500 mb-4">
-              คอร์สเผยแพร่แล้ว {isLoading ? "—" : publishedCount} จาก {isLoading ? "—" : courses.length} คอร์ส
-            </p>
-            <Link
-              href="/dashboard/teacher/analytics"
-              className="inline-flex items-center justify-center w-full text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              ดูรายงานเต็ม
-            </Link>
+        {isLoading ? (
+          <p className="text-[13.5px] text-slate-400 py-8 text-center">กำลังโหลด...</p>
+        ) : recentCourses.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div>
+            {recentCourses.map((course) => (
+              <CourseRowItem key={course.id} course={course} />
+            ))}
           </div>
+        )}
+      </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-5">
-            <h3 className="text-[14.5px] font-bold text-slate-900 mb-3">เมนูลัด</h3>
-            <div className="flex flex-col gap-2">
-              <Link
-                href="/dashboard/teacher/students"
-                className="text-[13px] font-medium text-slate-700 hover:text-blue-950 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                จัดการนักเรียน
-              </Link>
-              <Link
-                href="/dashboard/teacher/courses"
-                className="text-[13px] font-medium text-slate-700 hover:text-blue-950 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                คอร์สทั้งหมด
-              </Link>
-            </div>
+      <div className="grid sm:grid-cols-2 gap-4 mt-6">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-5">
+          <h3 className="text-[14.5px] font-bold text-slate-900 mb-1">สรุปการวิเคราะห์</h3>
+          <p className="text-[12.5px] text-slate-500 mb-4">
+            คอร์สเผยแพร่แล้ว {isLoading ? "—" : publishedCount} จาก {isLoading ? "—" : courses.length} คอร์ส
+          </p>
+          <Link
+            href="/dashboard/teacher/analytics"
+            className="inline-flex items-center justify-center w-full text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            ดูรายงานเต็ม
+          </Link>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-5">
+          <h3 className="text-[14.5px] font-bold text-slate-900 mb-3">เมนูลัด</h3>
+          <div className="flex flex-col gap-1">
+            <Link
+              href="/dashboard/teacher/students"
+              className="text-[13px] font-medium text-slate-700 hover:text-blue-950 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              จัดการนักเรียน
+            </Link>
+            <Link
+              href="/dashboard/teacher/courses"
+              className="text-[13px] font-medium text-slate-700 hover:text-blue-950 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              คอร์สทั้งหมด
+            </Link>
           </div>
         </div>
       </div>

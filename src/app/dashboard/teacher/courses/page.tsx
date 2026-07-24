@@ -222,6 +222,12 @@ export default function TeacherCoursesPage(): ReactElement {
               >
                 จัดการบทเรียน
               </Link>
+               <Link
+                  href={`/dashboard/teacher/courses/${course.id}/materials`}
+                  className="flex-1 inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  เอกสารประกอบ
+                </Link>
             </div>
           ))}
         </div>

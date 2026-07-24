@@ -1,3 +1,4 @@
+// src/app/courses/[slug]/success/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
@@ -9,6 +10,17 @@ interface Course {
   id: string;
   title: string;
   slug: string;
+}
+
+interface LessonRef {
+  id: string;
+  order_index: number;
+}
+
+interface ModuleWithLessons {
+  id: string;
+  order_index: number;
+  lessons: LessonRef[];
 }
 
 export default async function EnrollSuccessPage({
@@ -53,8 +65,36 @@ export default async function EnrollSuccessPage({
     redirect(`/courses/${slug}/enroll`);
   }
 
+  // หา role ของ user ไปให้ ProfileDropdown (แก้ TS error: Property 'role' is missing)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
   const displayName =
     (user.user_metadata?.full_name as string | undefined) ?? user.email?.split("@")[0] ?? "ผู้ใช้";
+  const role = profile?.role ?? "student";
+
+  // หาบทเรียนแรกของคอร์ส เพราะ /play ต้องการ courseId + lessonId (แก้ 404)
+  const { data: modulesData } = await supabase
+    .from("modules")
+    .select("id, order_index, lessons(id, order_index)")
+    .eq("course_id", typedCourse.id)
+    .order("order_index", { ascending: true });
+
+  let firstLessonId: string | null = null;
+  for (const m of (modulesData ?? []) as ModuleWithLessons[]) {
+    const lessons = [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index);
+    if (lessons.length > 0) {
+      firstLessonId = lessons[0].id;
+      break;
+    }
+  }
+
+  const enterClassroomHref = firstLessonId
+    ? `/play/${typedCourse.id}/${firstLessonId}`
+    : `/dashboard/student/courses/${typedCourse.id}`;
 
   return (
     <div className="min-h-screen w-full bg-[#F7F8FA] flex flex-col">
@@ -76,7 +116,7 @@ export default async function EnrollSuccessPage({
               </div>
               <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
             </div>
-            <ProfileDropdown displayName={displayName} />
+            <ProfileDropdown displayName={displayName} role={role} />
           </div>
         </div>
       </header>
@@ -93,7 +133,7 @@ export default async function EnrollSuccessPage({
         </p>
 
         <Link
-          href={`/play/${typedCourse.id}`}
+          href={enterClassroomHref}
           className="mt-8 inline-flex items-center justify-center text-[15px] font-bold text-white bg-[#FFCB47] hover:bg-[#f0bc3a] px-8 py-4 rounded-full transition-colors"
         >
           เข้าสู่ห้องเรียน

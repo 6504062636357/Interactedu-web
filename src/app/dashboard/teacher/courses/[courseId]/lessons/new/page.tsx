@@ -21,7 +21,7 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect(`/login?redirect=/teacher/courses/${courseId}/lessons/new`);
+  if (!user) redirect(`/login?redirect=/dashboard/teacher/courses/${courseId}/lessons/new`);
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
@@ -69,10 +69,10 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
       <main className="max-w-3xl mx-auto">
         <div className="mb-6">
           <Link
-            href={`/teacher/courses/${course.id}`}
+            href={`/dashboard/teacher/courses/${course.id}`}
             className="text-[12.5px] font-semibold text-[#0F1B3D]/40 hover:text-[#0F1B3D] mb-2 inline-block"
-          >
-            ← กลับไปที่คอร์ส
+            >
+              ← กลับไปที่คอร์ส
           </Link>
           <p className="text-[13px] font-bold text-[#FF5A3C] mb-1">{course.title}</p>
           <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">

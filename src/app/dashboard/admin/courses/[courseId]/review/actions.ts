@@ -54,16 +54,8 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     if ("error" in genResult) {
       return { error: `สร้างไฟล์ SCORM ของบทเรียน ${lessonId} ไม่สำเร็จ: ${genResult.error}` };
     }
-
-    const { error: lessonUpdateError } = await supabase
-      .from("lessons")
-      .update({ is_scorm: true, scorm_entry_point: "index.html", scorm_version: "1.2" })
-      .eq("id", lessonId);
-
-    if (lessonUpdateError) {
-      console.error("[approveCourse] lesson update failed:", lessonUpdateError);
-      return { error: `อัปเดตบทเรียนไม่สำเร็จ: ${lessonUpdateError.message}` };
-    }
+    // หมายเหตุ: generateScormPackage อัปเดต lessons (is_scorm, scorm_entry_point,
+    // scorm_version, scorm_manifest) ให้ครบอยู่แล้วภายในตัวมันเอง ไม่ต้อง update ซ้ำตรงนี้
   }
 
   // อัปเดต draft ทุกอันเป็น approved
@@ -174,16 +166,8 @@ export async function regenerateScormPackage(lessonId: string): Promise<{ error?
     console.error("[regenerateScormPackage] generate failed:", genResult.error);
     return { error: `สร้าง SCORM ใหม่ไม่สำเร็จ: ${genResult.error}` };
   }
-
-  const { error: lessonUpdateError } = await supabase
-    .from("lessons")
-    .update({ is_scorm: true, scorm_entry_point: "index.html", scorm_version: "1.2" })
-    .eq("id", lessonId);
-
-  if (lessonUpdateError) {
-    console.error("[regenerateScormPackage] lesson update failed:", lessonUpdateError);
-    return { error: `อัปเดตบทเรียนไม่สำเร็จ: ${lessonUpdateError.message}` };
-  }
+  // หมายเหตุ: generateScormPackage อัปเดต lessons ให้ครบอยู่แล้ว (รวม scorm_entry_point
+  // ที่ต้องเป็น "lesson.html" ไม่ใช่ "index.html") ไม่ต้อง update ซ้ำตรงนี้
 
   revalidatePath("/dashboard/admin/courses");
   return {};
