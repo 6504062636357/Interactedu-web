@@ -29,6 +29,11 @@ interface CourseMaterial {
   file_url: string;
 }
 
+interface LessonProgress {
+  videoCompleted: boolean;
+  quizPassed: boolean;
+}
+
 // เดินทุกกิ่งของเมนู แปลงเป็น flat list ตามลำดับ ไว้ใช้ทำปุ่มก่อนหน้า/ถัดไป
 function flattenPlayableItems(items: ScormMenuItem[]): ScormMenuItem[] {
   const result: ScormMenuItem[] = [];
@@ -57,6 +62,12 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   // เอกสารประกอบ
   const [materials, setMaterials] = useState<CourseMaterial[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
+
+  // ความคืบหน้าจริงของนักเรียนคนนี้ในบทเรียนนี้
+  const [progress, setProgress] = useState<LessonProgress>({
+    videoCompleted: false,
+    quizPassed: false,
+  });
 
   // --- Effect ที่ 1: ดึงข้อมูล scorm-info ---
   useEffect(() => {
@@ -109,6 +120,8 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
         const suspendData = scormInstance.cmi.suspend_data;
 
+        const scoType = currentPath?.includes('quiz') ? 'quiz' : 'lesson';
+
         fetch('/api/scorm/tracking', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -118,7 +131,19 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             lessonStatus: lessonStatus || 'incomplete',
             scoreRaw: scoreRaw || 0,
             suspendData: suspendData || '',
+            scoType,
           }),
+        }).then(() => {
+          // อัปเดต progress ใน state ทันที ไม่ต้องรอ reload หน้า
+          if (scoType === 'quiz') {
+            if (lessonStatus === 'passed') {
+              setProgress((prev) => ({ ...prev, quizPassed: true }));
+            }
+          } else {
+            if (lessonStatus === 'completed') {
+              setProgress((prev) => ({ ...prev, videoCompleted: true }));
+            }
+          }
         });
       });
     }
@@ -154,7 +179,36 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     loadMaterials();
   }, [courseId]);
 
-  const flatItems = useMemo(() => flattenPlayableItems(manifest?.items ?? []), [manifest]);
+  // --- Effect ที่ 4: ดึงความคืบหน้าจริงของนักเรียนคนนี้สำหรับบทเรียนนี้ ---
+  useEffect(() => {
+    async function loadProgress() {
+      try {
+        const res = await fetch(`/api/lessons/${lessonId}/progress`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setProgress({
+          videoCompleted: !!data.videoCompleted,
+          quizPassed: !!data.quizPassed,
+        });
+      } catch (err) {
+        console.error('Failed to load progress', err);
+      }
+    }
+    loadProgress();
+  }, [lessonId]);
+
+  // แนบ completed จริงเข้ากับแต่ละ item ตามประเภท (lesson ใช้ videoCompleted, quiz ใช้ quizPassed)
+  const flatItems = useMemo(() => {
+    const items = flattenPlayableItems(manifest?.items ?? []);
+    return items.map((item) => {
+      const isQuiz = item.type === 'quiz' || item.identifier.includes('QUIZ');
+      return {
+        ...item,
+        completed: isQuiz ? progress.quizPassed : progress.videoCompleted,
+      };
+    });
+  }, [manifest, progress]);
+
   const currentIndex = flatItems.findIndex((i) => i.href === currentPath);
   const currentItem = currentIndex >= 0 ? flatItems[currentIndex] : null;
   const prevItem = currentIndex > 0 ? flatItems[currentIndex - 1] : null;
@@ -166,18 +220,18 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const displayCourseTitle = courseTitle ?? manifest?.organizationTitle ?? 'กำลังโหลด...';
   const displayLessonTitle = lessonTitle ?? currentItem?.title ?? null;
 
-  // แยก Item ปกติกับ Item ควิซ (มี Fallback ตรวจจาก identifier นำหน้าด้วย ITEM-QUIZ)
+  // แยก Item ปกติกับ Item ควิซ — ใช้ flatItems (มี completed จริงติดมาแล้ว) แทน manifest.items ตรงๆ
   const lessonItems = useMemo(() => {
-    return (manifest?.items ?? []).filter(
+    return flatItems.filter(
       (item) => item.type === 'lesson' || (!item.type && !item.identifier.includes('QUIZ'))
     );
-  }, [manifest]);
+  }, [flatItems]);
 
   const quizItems = useMemo(() => {
-    return (manifest?.items ?? []).filter(
+    return flatItems.filter(
       (item) => item.type === 'quiz' || (!item.type && item.identifier.includes('QUIZ'))
     );
-  }, [manifest]);
+  }, [flatItems]);
 
   function handleSelectItem(href: string | null) {
     if (!href || href === currentPath) return;
