@@ -29,9 +29,11 @@ interface CourseMaterial {
   file_url: string;
 }
 
-interface LessonProgress {
-  videoCompleted: boolean;
-  quizPassed: boolean;
+interface CourseLessonRef {
+  id: string;
+  title: string;
+  moduleTitle: string;
+  completed: boolean;
 }
 
 // เดินทุกกิ่งของเมนู แปลงเป็น flat list ตามลำดับ ไว้ใช้ทำปุ่มก่อนหน้า/ถัดไป
@@ -63,16 +65,19 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const [materials, setMaterials] = useState<CourseMaterial[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
 
-  // ความคืบหน้าจริงของนักเรียนคนนี้ในบทเรียนนี้
-  const [progress, setProgress] = useState<LessonProgress>({
-    videoCompleted: false,
-    quizPassed: false,
-  });
+  // รายชื่อบทเรียนทั้งหมดในคอร์ส (ไว้สลับเลสสันโดยไม่ต้องออกจากห้องเรียน)
+  const [courseLessons, setCourseLessons] = useState<CourseLessonRef[]>([]);
+  const [lessonListOpen, setLessonListOpen] = useState(true);
 
-  // --- Effect ที่ 1: ดึงข้อมูล scorm-info ---
+  // ความคืบหน้าราย SCO ของเลสสันปัจจุบัน
+  const [completedScos, setCompletedScos] = useState<string[]>([]);
+
+  // --- Effect ที่ 1: ดึงข้อมูล scorm-info (รันใหม่ทุกครั้งที่ lessonId เปลี่ยน คือตอนสลับบทเรียน) ---
   useEffect(() => {
     async function loadInfo() {
       try {
+        setLoadError(null);
+        setCurrentPath(null);
         const res = await fetch(`/api/lessons/${lessonId}/scorm-info`);
         if (!res.ok) throw new Error('Failed to fetch scorm info');
         const data = await res.json();
@@ -121,6 +126,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
         const suspendData = scormInstance.cmi.suspend_data;
 
         const scoType = currentPath?.includes('quiz') ? 'quiz' : 'lesson';
+        const thisCompleted = scoType === 'quiz' ? lessonStatus === 'passed' : lessonStatus === 'completed';
 
         fetch('/api/scorm/tracking', {
           method: 'POST',
@@ -132,17 +138,18 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             scoreRaw: scoreRaw || 0,
             suspendData: suspendData || '',
             scoType,
+            scoIdentifier: currentPath,
           }),
         }).then(() => {
-          // อัปเดต progress ใน state ทันที ไม่ต้องรอ reload หน้า
-          if (scoType === 'quiz') {
-            if (lessonStatus === 'passed') {
-              setProgress((prev) => ({ ...prev, quizPassed: true }));
-            }
-          } else {
-            if (lessonStatus === 'completed') {
-              setProgress((prev) => ({ ...prev, videoCompleted: true }));
-            }
+          // อัปเดต progress ใน state ทันที ไม่ต้องรอ reload หน้า — เก็บเป็นรายการ SCO ที่จบ ไม่ใช่ boolean เดี่ยว
+          if (thisCompleted && currentPath) {
+            setCompletedScos((prev) => (prev.includes(currentPath) ? prev : [...prev, currentPath]));
+          }
+          // ถ้าเลสสันนี้เพิ่งจบ ให้รีเฟรชสถานะในลิสต์บทเรียนทั้งคอร์สด้วย (ติ๊กถูกที่ sidebar ล่างสุด)
+          if (thisCompleted && scoType === 'lesson') {
+            setCourseLessons((prev) =>
+              prev.map((l) => (l.id === lessonId ? { ...l, completed: true } : l))
+            );
           }
         });
       });
@@ -179,17 +186,14 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     loadMaterials();
   }, [courseId]);
 
-  // --- Effect ที่ 4: ดึงความคืบหน้าจริงของนักเรียนคนนี้สำหรับบทเรียนนี้ ---
+  // --- Effect ที่ 4: ดึงความคืบหน้าราย SCO ของเลสสันปัจจุบัน (รันใหม่ทุกครั้งที่สลับเลสสัน) ---
   useEffect(() => {
     async function loadProgress() {
       try {
         const res = await fetch(`/api/lessons/${lessonId}/progress`);
         if (!res.ok) return;
         const data = await res.json();
-        setProgress({
-          videoCompleted: !!data.videoCompleted,
-          quizPassed: !!data.quizPassed,
-        });
+        setCompletedScos(Array.isArray(data.completedScos) ? data.completedScos : []);
       } catch (err) {
         console.error('Failed to load progress', err);
       }
@@ -197,17 +201,29 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     loadProgress();
   }, [lessonId]);
 
-  // แนบ completed จริงเข้ากับแต่ละ item ตามประเภท (lesson ใช้ videoCompleted, quiz ใช้ quizPassed)
+  // --- Effect ที่ 5: ดึงรายชื่อบทเรียนทั้งหมดในคอร์ส (โหลดครั้งเดียวตอนเข้าคอร์ส ไม่ต้องรันซ้ำตอนสลับเลสสัน) ---
+  useEffect(() => {
+    async function loadCourseLessons() {
+      try {
+        const res = await fetch(`/api/courses/${courseId}/lessons`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setCourseLessons(Array.isArray(data.lessons) ? data.lessons : []);
+      } catch (err) {
+        console.error('Failed to load course lessons', err);
+      }
+    }
+    loadCourseLessons();
+  }, [courseId]);
+
+  // แนบ completed จริงเข้ากับแต่ละ SCO ของเลสสันปัจจุบัน
   const flatItems = useMemo(() => {
     const items = flattenPlayableItems(manifest?.items ?? []);
-    return items.map((item) => {
-      const isQuiz = item.type === 'quiz' || item.identifier.includes('QUIZ');
-      return {
-        ...item,
-        completed: isQuiz ? progress.quizPassed : progress.videoCompleted,
-      };
-    });
-  }, [manifest, progress]);
+    return items.map((item) => ({
+      ...item,
+      completed: item.href ? completedScos.includes(item.href) : false,
+    }));
+  }, [manifest, completedScos]);
 
   const currentIndex = flatItems.findIndex((i) => i.href === currentPath);
   const currentItem = currentIndex >= 0 ? flatItems[currentIndex] : null;
@@ -233,9 +249,18 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     );
   }, [flatItems]);
 
+  // ลำดับบทเรียนถัดไป/ก่อนหน้าในคอร์ส (ไว้ทำปุ่มข้ามเลสสันในอนาคตถ้าต้องการ)
+  const courseLessonIndex = courseLessons.findIndex((l) => l.id === lessonId);
+
   function handleSelectItem(href: string | null) {
     if (!href || href === currentPath) return;
     setCurrentPath(href);
+  }
+
+  // สลับไปเลสสันอื่นในคอร์ส — เปลี่ยน route ทำให้ effect ที่ผูกกับ lessonId รันใหม่ทั้งหมด
+  function handleSelectLesson(targetLessonId: string) {
+    if (targetLessonId === lessonId) return;
+    router.push(`/play/${courseId}/${targetLessonId}`);
   }
 
   function handleExit() {
@@ -315,7 +340,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             {flatItems.length > 0 && (
               <>
                 <div className="flex items-center justify-between text-[11.5px] text-slate-400 mb-1.5">
-                  <span>ความคืบหน้า</span>
+                  <span>ความคืบหน้าบทเรียนนี้</span>
                   <span className="font-bold text-blue-300">{progressPercent}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
@@ -329,7 +354,63 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
-            {/* โซนที่ 1: รายการบทเรียนปกติ */}
+            {/* โซนที่ 0: บทเรียนทั้งหมดในคอร์ส — สลับได้เลยไม่ต้องออกจากห้องเรียน */}
+            {courseLessons.length > 1 && (
+              <div className="mb-4 pb-3 border-b border-white/[0.06]">
+                <button
+                  onClick={() => setLessonListOpen((v) => !v)}
+                  className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-500 px-2 py-2"
+                >
+                  <span>บทเรียนในคอร์สนี้ ({courseLessonIndex >= 0 ? courseLessonIndex + 1 : '–'}/{courseLessons.length})</span>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`transition-transform ${lessonListOpen ? 'rotate-180' : ''}`}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+
+                {lessonListOpen && (
+                  <ul className="px-1">
+                    {courseLessons.map((l, idx) => {
+                      const isCurrentLesson = l.id === lessonId;
+                      return (
+                        <li key={l.id} className="my-0.5">
+                          <button
+                            onClick={() => handleSelectLesson(l.id)}
+                            className={`w-full flex items-center gap-2.5 text-left text-[12.5px] px-2.5 py-2.5 rounded-lg transition-colors ${
+                              isCurrentLesson
+                                ? 'bg-blue-500/15 text-white font-semibold border-l-2 border-blue-400 -ml-[2px] pl-[12px]'
+                                : 'text-slate-300/80 hover:bg-white/5 hover:text-white'
+                            }`}
+                          >
+                            <span className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center bg-white/[0.06] text-[10.5px] font-bold">
+                              {l.completed ? (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M5 12l5 5L20 7" />
+                                </svg>
+                              ) : (
+                                idx + 1
+                              )}
+                            </span>
+                            <span className="truncate">{l.title}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* โซนที่ 1: รายการ SCO ของบทเรียนปัจจุบัน */}
             {lessonItems.length > 0 ? (
               renderMenuItems(lessonItems)
             ) : (

@@ -84,7 +84,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               {course.title}
             </h1>
             <Link
-              href={`/teacher/courses/${course.id}/lessons/new`}
+              href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
               className="text-[13px] font-bold text-white bg-[#FF5A3C] hover:bg-[#EB4A2D] px-5 py-2.5 rounded-full transition-colors shrink-0"
             >
               + เพิ่มบทเรียนใหม่
@@ -115,7 +115,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
                   </div>
                 </div>
                 <Link
-                  href={`/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`}
+                  href={`/dashboard/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`}
                   className="text-[13px] font-bold text-[#FF5A3C] hover:underline shrink-0"
                 >
                   แก้ไข

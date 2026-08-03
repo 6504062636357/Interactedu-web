@@ -91,6 +91,9 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     }
 
     for (const e of enrollments) {
+      // e.courses เป็น null ได้ถ้า RLS บล็อกคอร์สนี้ (เช่นสถานะไม่ใช่ published ชั่วคราว)
+      if (!e.courses) continue;
+
       const modules = [...(modulesByCourse.get(e.course_id) ?? [])].sort(
         (a, b) => a.order_index - b.order_index
       );

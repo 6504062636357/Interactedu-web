@@ -129,7 +129,45 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
       trackingByLesson.set(t.lesson_id, t);
     }
 
+    // for (const e of enrollments) {
+    //   const modules = [...(modulesByCourse.get(e.course_id) ?? [])].sort(
+    //     (a, b) => a.order_index - b.order_index
+    //   );
+    //   const allLessons = modules.flatMap((m) =>
+    //     [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index)
+    //   );
+
+    //   const totalLessons = allLessons.length;
+    //   const completedLessons = allLessons.filter((l) => {
+    //     const s = trackingByLesson.get(l.id)?.lesson_status;
+    //     return s === "completed" || s === "passed";
+    //   }).length;
+
+    //   const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+
+    //   // บทเรียนถัดไปที่ยังไม่จบ -> ถ้าจบหมดแล้วกลับไปบทแรก, ถ้ายังไม่มีบทเรียนเลยไปหน้ารายละเอียดคอร์สแทน
+    //   const nextLesson = allLessons.find((l) => {
+    //     const s = trackingByLesson.get(l.id)?.lesson_status;
+    //     return s !== "completed" && s !== "passed";
+    //   });
+    //   const targetLessonId = nextLesson?.id ?? allLessons[0]?.id ?? null;
+
+    //   cards.push({
+    //     enrollmentId: e.id,
+    //     courseId: e.course_id,
+    //     title: e.courses.title,
+    //     coverImageUrl: e.courses.cover_image_url,
+    //     progress,
+    //     href: targetLessonId
+    //       ? `/play/${e.course_id}/${targetLessonId}`
+    //       : `/dashboard/student/courses/${e.course_id}`,
+    //   });
+    // }
     for (const e of enrollments) {
+      // e.courses เป็น null ได้ถ้า RLS ของตาราง courses บล็อกแถวนี้
+      // (เช่น คอร์สถูกแก้ไขจน status ไม่ใช่ published ชั่วคราว) ข้ามไปเพื่อไม่ให้หน้าพัง
+      if (!e.courses) continue;
+
       const modules = [...(modulesByCourse.get(e.course_id) ?? [])].sort(
         (a, b) => a.order_index - b.order_index
       );

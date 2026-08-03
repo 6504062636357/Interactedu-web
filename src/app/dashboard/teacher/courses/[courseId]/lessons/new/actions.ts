@@ -11,6 +11,8 @@ export interface DraftChoiceInput {
 export interface DraftQuestionInput {
   questionText: string;
   choices: DraftChoiceInput[];
+  timestampSeconds: number | null; // null = ควิซท้ายบท, มีค่า = ควิซแทรกกลางวิดีโอ
+  explanation: string | null;
 }
 
 interface SaveLessonDraftInput {
@@ -90,9 +92,20 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     const q = input.questions[i];
     if (!q.questionText.trim()) continue;
 
+    // const { data: question, error: questionError } = await supabase
+    //   .from("quiz_questions")
+    //   .insert({ lesson_draft_id: draft.id, question_text: q.questionText, order_index: i })
+    //   .select("id")
+    //   .single();
     const { data: question, error: questionError } = await supabase
       .from("quiz_questions")
-      .insert({ lesson_draft_id: draft.id, question_text: q.questionText, order_index: i })
+      .insert({
+        lesson_draft_id: draft.id,
+        question_text: q.questionText,
+        order_index: i,
+        video_timestamp_seconds: q.timestampSeconds,
+        explanation: q.explanation,
+      })
       .select("id")
       .single();
 
@@ -131,6 +144,8 @@ export interface ExistingDraftData {
   status: string;
   questions: {
     questionText: string;
+    timestampSeconds: number | null;
+    explanation: string | null;
     choices: { text: string; isCorrect: boolean }[];
   }[];
 }
@@ -146,11 +161,22 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
 
   if (lessonError || !lesson) return { error: "ไม่พบบทเรียนนี้" };
 
+  // const { data: draft, error: draftError } = await supabase
+  //   .from("lesson_drafts")
+  //   .select(
+  //     `id, video_url, content_html, status,
+  //      quiz_questions ( question_text, order_index,
+  //        quiz_choices ( choice_text, is_correct, order_index ) )`
+  //   )
+  //   .eq("lesson_id", lessonId)
+  //   .order("created_at", { ascending: false })
+  //   .limit(1)
+  //   .maybeSingle();
   const { data: draft, error: draftError } = await supabase
     .from("lesson_drafts")
     .select(
       `id, video_url, content_html, status,
-       quiz_questions ( question_text, order_index,
+       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation,
          quiz_choices ( choice_text, is_correct, order_index ) )`
     )
     .eq("lesson_id", lessonId)
@@ -165,6 +191,8 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
     .sort((a: any, b: any) => a.order_index - b.order_index)
     .map((q: any) => ({
       questionText: q.question_text,
+      timestampSeconds: q.video_timestamp_seconds,
+      explanation: q.explanation,
       choices: (q.quiz_choices ?? [])
         .sort((a: any, b: any) => a.order_index - b.order_index)
         .map((c: any) => ({ text: c.choice_text, isCorrect: c.is_correct })),
@@ -234,9 +262,15 @@ export async function updateLessonDraft(input: {
     const q = input.questions[i];
     if (!q.questionText.trim()) continue;
 
-    const { data: question, error: questionError } = await supabase
+   const { data: question, error: questionError } = await supabase
       .from("quiz_questions")
-      .insert({ lesson_draft_id: input.draftId, question_text: q.questionText, order_index: i })
+      .insert({
+        lesson_draft_id: input.draftId,
+        question_text: q.questionText,
+        order_index: i,
+        video_timestamp_seconds: q.timestampSeconds,
+        explanation: q.explanation,
+      })
       .select("id")
       .single();
 

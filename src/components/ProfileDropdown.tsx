@@ -91,9 +91,8 @@ function IconLogout(): ReactElement {
 function getMenuItems(role: UserRole): MenuItem[] {
   if (role === "teacher") {
     return [
-      { label: "โปรไฟล์", href: "/profile", icon: <IconUser /> },
-      { label: "พื้นที่ครูผู้สอน", href: "/dashboard/teacher", icon: <IconPlay /> },
-      { label: "การตั้งค่า", href: "/settings", icon: <IconSettings /> },
+      { label: "โปรไฟล์", href: "/dashboard/teacher/profile", icon: <IconUser /> },
+      { label: "การตั้งค่า", href: "/dashboard/teacher/settings", icon: <IconSettings /> },
     ];
   }
 
@@ -108,12 +107,12 @@ function getMenuItems(role: UserRole): MenuItem[] {
 
   // student (default)
   return [
-    { label: "โปรไฟล์", href: "/profile", icon: <IconUser /> },
-    { label: "คอร์สของฉัน", href: "/dashboard/student", icon: <IconPlay /> },
-    { label: "ใบประกาศฯ", href: "/certificates", icon: <IconAward /> },
-    { label: "คอร์สโปรดของฉัน", href: "/favorites", icon: <IconHeart /> },
-    { label: "การชำระเงิน", href: "/billing", icon: <IconCard /> },
-    { label: "การตั้งค่า", href: "/settings", icon: <IconSettings /> },
+    { label: "โปรไฟล์", href: "/dashboard/student/profile", icon: <IconUser /> },
+    { label: "คอร์สของฉัน", href: "/dashboard/student/courses", icon: <IconPlay /> },
+    { label: "ใบประกาศฯ", href: "/dashboard/student/certificates", icon: <IconAward /> },
+    { label: "คอร์สโปรดของฉัน", href: "/dashboard/student/favorites", icon: <IconHeart /> },
+    { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: <IconCard /> },
+    { label: "การตั้งค่า", href: "/dashboard/student/settings", icon: <IconSettings /> },
   ];
 }
 

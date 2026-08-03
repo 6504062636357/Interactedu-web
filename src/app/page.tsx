@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import { redirect } from "next/navigation";
+import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 interface Course {
   id: string;
   title: string;
@@ -248,6 +249,9 @@ function CourseCard({ course }: { course: Course }): ReactElement {
             {course.category}
           </span>
         )}
+        <div className="absolute top-2 right-2 bg-white/90 rounded-full">
+          <FavoriteHeartButton courseId={course.id} />
+        </div>
       </div>
 
       <div className="p-5 flex flex-col flex-1">
@@ -257,7 +261,9 @@ function CourseCard({ course }: { course: Course }): ReactElement {
         </p>
 
         <div className="mt-auto pt-4 border-t border-[#0F1B3D]/[0.06] flex items-center justify-between">
-          <span className="text-[17px] font-extrabold text-[#0F1B3D]">{formatPrice(course.price)}</span>
+          <span className={`text-[17px] font-extrabold ${course.price === 0 ? "text-[#00B37E]" : "text-[#0F1B3D]"}`}>
+            {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
+          </span>
           <Link
             href={`/courses/${course.slug}`}
             className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"

@@ -172,3 +172,112 @@ export async function regenerateScormPackage(lessonId: string): Promise<{ error?
   revalidatePath("/dashboard/admin/courses");
   return {};
 }
+
+export async function approveLesson(draftId: string, lessonId: string): Promise<{ error?: string }> {
+  const { supabase, user, error: authError } = await requireAdmin();
+  if (authError) return { error: authError };
+
+  const genResult = await generateScormPackage(supabase, draftId, lessonId);
+  if ("error" in genResult) {
+    return { error: `สร้างไฟล์ SCORM ไม่สำเร็จ: ${genResult.error}` };
+  }
+
+  const { data: updatedDraft, error: draftUpdateError } = await supabase
+    .from("lesson_drafts")
+    .update({ status: "approved", reviewed_by: user!.id, reviewed_at: new Date().toISOString() })
+    .eq("id", draftId)
+    .select()
+    .single();
+
+  if (draftUpdateError || !updatedDraft) {
+    console.error("[approveLesson] draft status update failed:", draftUpdateError);
+    return { error: "อัปเดตสถานะ draft ไม่สำเร็จ (อาจติด RLS)" };
+  }
+
+  // ดึง course_id ของ lesson นี้ เพื่อ revalidate หน้า review และเช็คว่าควร publish คอร์สหรือยัง
+  const { data: lessonRow } = await supabase
+    .from("lessons")
+    .select("course_id")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  if (lessonRow?.course_id) {
+    const courseId = lessonRow.course_id;
+
+    // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้ เพื่อเช็คว่าทุกบทอนุมัติครบหรือยัง
+    const { data: lessons } = await supabase
+      .from("lessons")
+      .select("id, lesson_drafts(id, status, created_at)")
+      .eq("course_id", courseId);
+
+    if (lessons && lessons.length > 0) {
+      const allApproved = lessons.every((lesson) => {
+        const drafts =
+          (lesson as unknown as { lesson_drafts: { id: string; status: string; created_at: string }[] })
+            .lesson_drafts ?? [];
+        // เอา draft ล่าสุดของแต่ละบท (เรียงตาม created_at)
+        const sorted = [...drafts].sort(
+          (a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+        );
+        return sorted[0]?.status === "approved";
+      });
+
+      if (allApproved) {
+        const { error: courseUpdateError } = await supabase
+          .from("courses")
+          .update({ status: "published" })
+          .eq("id", courseId);
+
+        if (courseUpdateError) {
+          console.error("[approveLesson] course status update failed:", courseUpdateError);
+          // ไม่ return error ตรงนี้ เพราะ lesson อนุมัติสำเร็จแล้ว แค่ course status อัปเดตไม่ทัน
+        }
+      }
+    }
+
+    revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
+  }
+  revalidatePath("/dashboard/admin/courses");
+  return {};
+}
+
+export async function rejectLesson(draftId: string, reason: string): Promise<{ error?: string }> {
+  const { supabase, user, error: authError } = await requireAdmin();
+  if (authError) return { error: authError };
+  if (!reason.trim()) return { error: "กรุณาระบุเหตุผลที่ปฏิเสธ" };
+
+  const { data: updatedDraft, error: draftError } = await supabase
+    .from("lesson_drafts")
+    .update({
+      status: "rejected",
+      rejection_reason: reason.trim(),
+      reviewed_by: user!.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", draftId)
+    .select("*, lessons(course_id)")
+    .single();
+
+  if (draftError || !updatedDraft) {
+    console.error("[rejectLesson] draft reject failed:", draftError);
+    return { error: "ปฏิเสธ draft ไม่สำเร็จ" };
+  }
+
+  // ถ้าคอร์สนี้เคย publish ไปแล้ว แต่มีบทถูก reject ภายหลัง ให้ดึงกลับเป็น pending
+  const courseId = (updatedDraft as unknown as { lessons: { course_id: string } }).lessons?.course_id;
+  if (courseId) {
+    const { data: course } = await supabase
+      .from("courses")
+      .select("status")
+      .eq("id", courseId)
+      .maybeSingle();
+
+    if (course?.status === "published") {
+      await supabase.from("courses").update({ status: "pending" }).eq("id", courseId);
+    }
+    revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
+  }
+
+  revalidatePath("/dashboard/admin/courses");
+  return {};
+}

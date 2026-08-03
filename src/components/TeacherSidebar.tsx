@@ -2,104 +2,58 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactElement } from "react";
-import { createClient } from "@/utils/supabase/client";
+import { usePathname } from "next/navigation";
+import type { ReactElement } from "react";
 
-const supabase = createClient();
-
-const navItems = [
-  { label: "ภาพรวม", href: "/dashboard/teacher", icon: "home" },
-  { label: "คอร์สทั้งหมด", href: "/dashboard/teacher/courses", icon: "book" },
-  { label: "วิเคราะห์ข้อมูล", href: "/dashboard/teacher/analytics", icon: "chart" },
-  { label: "นักเรียน", href: "/dashboard/teacher/students", icon: "users" },
+const NAV_ITEMS = [
+  { href: "/dashboard/teacher", label: "ภาพรวม", icon: "home" },
+  { href: "/dashboard/teacher/courses", label: "คอร์สทั้งหมด", icon: "book" },
+  { href: "/dashboard/teacher/analytics", label: "วิเคราะห์ข้อมูล", icon: "chart" },
+  { href: "/dashboard/teacher/students", label: "นักเรียน", icon: "users" },
 ] as const;
 
 function Icon({ name }: { name: string }): ReactElement {
-  const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none" };
-  switch (name) {
-    case "home":
-      return (
-        <svg {...common}>
-          <path d="M4 10.5L12 4L20 10.5V19C20 19.5523 19.5523 20 19 20H15V14H9V20H5C4.44772 20 4 19.5523 4 19V10.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        </svg>
-      );
-    case "book":
-      return (
-        <svg {...common}>
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M8 9H16M8 13H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      );
-    case "chart":
-      return (
-        <svg {...common}>
-          <path d="M4 20V13M12 20V4M20 20V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "users":
-      return (
-        <svg {...common}>
-          <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M3 20C3 16.6863 5.68629 14 9 14C12.3137 14 15 16.6863 15 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M15 8C16.6569 8 18 9.34315 18 11M17 14C19.2091 14 21 16.2417 21 19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    default:
-      return <svg {...common} />;
-  }
-}
-
-function isActive(pathname: string, href: string): boolean {
-  if (href === "/dashboard/teacher") return pathname === href;
-  return pathname.startsWith(href);
+  const paths: Record<string, ReactElement> = {
+    home: (
+      <path d="M4 11L12 4L20 11V19C20 19.6 19.6 20 19 20H5C4.4 20 4 19.6 4 19V11Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    ),
+    book: (
+      <path d="M4 5H10C11.1 5 12 5.9 12 7V20C12 19 11 18.5 10 18.5H4V5Z M20 5H14C12.9 5 12 5.9 12 7V20C12 19 13 18.5 14 18.5H20V5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    ),
+    chart: (
+      <path d="M5 20V10 M12 20V4 M19 20V14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    ),
+    users: (
+      <path d="M9 12C10.7 12 12 10.7 12 9C12 7.3 10.7 6 9 6C7.3 6 6 7.3 6 9C6 10.7 7.3 12 9 12ZM3 20C3 16.7 5.7 15 9 15C12.3 15 15 16.7 15 20 M15 8C16.3 8 17.5 9 17.5 10.5 M17 15C19.3 15.3 21 16.8 21 20" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    ),
+  };
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      {paths[name]}
+    </svg>
+  );
 }
 
 export default function TeacherSidebar(): ReactElement {
   const pathname = usePathname();
-  const router = useRouter();
-  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
-
-  const handleLogout = async (): Promise<void> => {
-    setIsLoggingOut(true);
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  };
 
   return (
-    <nav className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-3 lg:sticky lg:top-28 flex flex-col">
-      <div className="flex-1">
-        {navItems.map((item) => {
-          const active = isActive(pathname, item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-[14px] font-bold transition-colors mb-1 last:mb-0 ${
-                active ? "bg-[#FF5A3C]/10 text-[#FF5A3C]" : "text-[#0F1B3D]/60 hover:bg-[#0F1B3D]/[0.04] hover:text-[#0F1B3D]"
-              }`}
-            >
-              <Icon name={item.icon} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </div>
-
-      <button
-        type="button"
-        onClick={() => void handleLogout()}
-        disabled={isLoggingOut}
-        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-[14px] font-bold text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-2 pt-3 border-t border-[#0F1B3D]/[0.06]"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M9 4H6C4.89543 4 4 4.89543 4 6V18C4 19.1046 4.89543 20 6 20H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M15 16L20 12L15 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M20 12H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {isLoggingOut ? "กำลังออกจากระบบ..." : "ออกจากระบบ"}
-      </button>
+    <nav className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-3 flex flex-col gap-1 sticky top-28">
+      {NAV_ITEMS.map((item) => {
+        const active = pathname === item.href;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[13.5px] font-medium transition-colors ${
+              active ? "bg-[#FF5A3C]/10 text-[#FF5A3C]" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <Icon name={item.icon} />
+            {item.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

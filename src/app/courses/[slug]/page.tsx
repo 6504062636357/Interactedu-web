@@ -94,11 +94,23 @@ function StatItem({ label, value }: { label: string; value: string }): ReactElem
   );
 }
 
-function EnrollCta({ course, isEnrolled }: { course: Course; isEnrolled: boolean }): ReactElement {
+function EnrollCta({
+  course,
+  isEnrolled,
+  firstLessonId,
+}: {
+  course: Course;
+  isEnrolled: boolean;
+  firstLessonId: string | null;
+}): ReactElement {
   if (isEnrolled) {
+    const href = firstLessonId
+      ? `/play/${course.id}/${firstLessonId}`
+      : `/play/${course.id}`;
+
     return (
       <Link
-        href={`/play/${course.id}`}
+        href={href}
         className="inline-flex items-center justify-center gap-2 text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-colors shadow-[0_12px_28px_-10px_rgba(15,27,61,0.55)] w-full"
       >
         เข้าเรียนต่อ
@@ -156,6 +168,11 @@ export default async function CourseDetailPage({
     0
   );
   const totalLessons = modules.reduce((sum, m) => sum + m.lessons.length, 0);
+
+  const firstLessonId: string | null =
+    [...modules]
+      .sort((a, b) => a.order_index - b.order_index)
+      .flatMap((m) => [...m.lessons].sort((a, b) => a.order_index - b.order_index))[0]?.id ?? null;
 
   const {
     data: { user },
@@ -226,7 +243,7 @@ export default async function CourseDetailPage({
               </p>
 
               <div className="mt-6">
-                <EnrollCta course={typedCourse} isEnrolled={isEnrolled} />
+                <EnrollCta course={typedCourse} isEnrolled={isEnrolled} firstLessonId={firstLessonId} />
               </div>
             </div>
           </div>
@@ -252,7 +269,7 @@ export default async function CourseDetailPage({
                 {formatPrice(typedCourse.price)}
               </p>
 
-              <EnrollCta course={typedCourse} isEnrolled={isEnrolled} />
+              <EnrollCta course={typedCourse} isEnrolled={isEnrolled} firstLessonId={firstLessonId} />
 
               <ul className="mt-7 space-y-3">
                 <li className="flex items-center gap-2.5 text-[13.5px] text-[#0F1B3D]/60 font-medium">
