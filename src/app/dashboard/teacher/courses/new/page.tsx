@@ -91,7 +91,7 @@ export default function NewCoursePage(): ReactElement {
         throw new Error(result.error ?? "สร้างคอร์สไม่สำเร็จ");
       }
 
-      router.push(`/teacher/courses/${result.courseId}/lessons/new`);
+      router.push(`/dashboard/teacher/courses/${result.courseId}/lessons/new`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ");
       setSaving(false);

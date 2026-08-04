@@ -30,7 +30,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect(`/login?redirect=/teacher/courses/${courseId}`);
+  if (!user) redirect(`/login?redirect=/dashboard/teacher/courses/${courseId}`);
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
@@ -127,7 +127,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
           <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
             <p className="text-[14px] text-[#0F1B3D]/40 font-medium mb-4">คอร์สนี้ยังไม่มีบทเรียน</p>
             <Link
-              href={`/teacher/courses/${course.id}/lessons/new`}
+              href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
               className="text-[13px] font-bold text-[#FF5A3C] hover:underline"
             >
               เริ่มเพิ่มบทเรียนแรก

@@ -26,11 +26,13 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
-  const { data: course } = await supabase
+  const { data: course, error: courseError } = await supabase
     .from("courses")
     .select("id, title, created_by")
     .eq("id", courseId)
     .maybeSingle();
+
+  console.log("[lessons/new] courseId:", courseId, "course:", course, "error:", courseError);
 
   if (!course) notFound();
   if (profile.role === "teacher" && course.created_by !== user.id) redirect("/dashboard/teacher")

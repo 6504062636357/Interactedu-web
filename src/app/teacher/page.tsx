@@ -62,7 +62,7 @@ export default async function TeacherHomePage(): Promise<ReactElement> {
             {ownedCourses.map((course) => (
               <Link
                 key={course.id}
-                href={`/teacher/courses/${course.id}/lessons/new`}
+                href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
                 className="flex items-center justify-between bg-white rounded-2xl border border-[#0F1B3D]/[0.06] p-5 hover:shadow-[0_15px_35px_-15px_rgba(15,27,61,0.2)] transition-shadow"
               >
                 <div>
