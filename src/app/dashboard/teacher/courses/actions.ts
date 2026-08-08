@@ -11,6 +11,8 @@ interface CreateCourseInput {
   isFree: boolean;
   price: number;
   coverImageUrl: string | null;
+  certificateEnabled: boolean;
+  certificatePassPercentage: number;
 }
 
 interface CreateCourseResult {
@@ -50,6 +52,13 @@ export async function createCourse(input: CreateCourseInput): Promise<CreateCour
   if (Number.isNaN(priceValue) || priceValue < 0) {
     return { error: "ราคาต้องเป็นตัวเลขที่มากกว่าหรือเท่ากับ 0" };
   }
+  if (
+    !Number.isFinite(input.certificatePassPercentage) ||
+    input.certificatePassPercentage < 0 ||
+    input.certificatePassPercentage > 100
+  ) {
+    return { error: "คะแนนผ่านต้องอยู่ระหว่าง 0 ถึง 100" };
+  }
 
   const slug = `${slugify(input.courseCode)}-${Date.now().toString(36)}`;
 
@@ -65,6 +74,8 @@ export async function createCourse(input: CreateCourseInput): Promise<CreateCour
       course_code: input.courseCode.trim().toUpperCase(),
       status: "draft",
       created_by: user.id,
+      certificate_enabled: input.certificateEnabled,
+      certificate_pass_percentage: input.certificatePassPercentage,
     })
     .select("id")
     .single();

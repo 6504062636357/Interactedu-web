@@ -74,7 +74,7 @@ function CourseRowItem({ course }: { course: CourseRow }): ReactElement {
       </div>
 
       <Link
-        href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
+        href={`/dashboard/teacher/courses/${course.id}`}
         className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-[12.5px] font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
       >
         จัดการบทเรียน

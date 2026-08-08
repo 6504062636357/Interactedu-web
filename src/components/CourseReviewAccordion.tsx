@@ -251,10 +251,6 @@ export default function CourseReviewAccordion({
                       const videoQuizzes = draft.quiz_questions
                         .filter((q) => q.video_timestamp_seconds != null)
                         .sort((a, b) => (a.video_timestamp_seconds ?? 0) - (b.video_timestamp_seconds ?? 0));
-                      const finalQuizzes = draft.quiz_questions
-                        .filter((q) => q.video_timestamp_seconds == null)
-                        .sort((a, b) => a.order_index - b.order_index);
-
                       const renderQuestion = (q: QuizQuestion, qi: number, showTimestamp: boolean) => (
                         <div key={q.id}>
                           <div className="flex items-center gap-2 mb-1.5">
@@ -302,18 +298,6 @@ export default function CourseReviewAccordion({
                             </div>
                           )}
 
-                          <div>
-                            <h3 className="text-[13px] font-bold text-[#0F1B3D] mb-3">
-                              แบบทดสอบท้ายบท ({finalQuizzes.length} ข้อ)
-                            </h3>
-                            {finalQuizzes.length === 0 ? (
-                              <p className="text-[13px] text-[#0F1B3D]/40">ไม่มีแบบทดสอบท้ายบท</p>
-                            ) : (
-                              <div className="space-y-4">
-                                {finalQuizzes.map((q, qi) => renderQuestion(q, qi, false))}
-                              </div>
-                            )}
-                          </div>
                         </>
                       );
                     })()}

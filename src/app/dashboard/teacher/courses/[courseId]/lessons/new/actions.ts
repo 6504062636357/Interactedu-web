@@ -2,6 +2,7 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
+import { revalidatePath } from "next/cache";
 
 export interface DraftChoiceInput {
   text: string;
@@ -11,8 +12,22 @@ export interface DraftChoiceInput {
 export interface DraftQuestionInput {
   questionText: string;
   choices: DraftChoiceInput[];
-  timestampSeconds: number | null; // null = ควิซท้ายบท, มีค่า = ควิซแทรกกลางวิดีโอ
+  timestampSeconds: number | null; // หน้านี้บันทึกเฉพาะควิซแทรกกลางวิดีโอ
   explanation: string | null;
+}
+
+interface StoredDraftChoice {
+  choice_text: string;
+  is_correct: boolean;
+  order_index: number;
+}
+
+interface StoredDraftQuestion {
+  question_text: string;
+  order_index: number;
+  video_timestamp_seconds: number | null;
+  explanation: string | null;
+  quiz_choices: StoredDraftChoice[];
 }
 
 interface SaveLessonDraftInput {
@@ -26,6 +41,7 @@ interface SaveLessonDraftInput {
 
 interface SaveLessonDraftResult {
   draftId?: string;
+  lessonId?: string;
   error?: string;
 }
 
@@ -132,7 +148,7 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     }
   }
 
-  return { draftId: draft.id };
+  return { draftId: draft.id, lessonId: lesson.id };
 }
 
 export interface ExistingDraftData {
@@ -187,15 +203,17 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
   if (draftError) return { error: "โหลดฉบับร่างไม่สำเร็จ" };
   if (!draft) return { error: "ยังไม่มีฉบับร่างของบทเรียนนี้" };
 
-  const questions = ((draft as any).quiz_questions ?? [])
-    .sort((a: any, b: any) => a.order_index - b.order_index)
-    .map((q: any) => ({
+  const storedQuestions =
+    (draft as unknown as { quiz_questions: StoredDraftQuestion[] }).quiz_questions ?? [];
+  const questions = storedQuestions
+    .sort((a, b) => a.order_index - b.order_index)
+    .map((q) => ({
       questionText: q.question_text,
       timestampSeconds: q.video_timestamp_seconds,
       explanation: q.explanation,
       choices: (q.quiz_choices ?? [])
-        .sort((a: any, b: any) => a.order_index - b.order_index)
-        .map((c: any) => ({ text: c.choice_text, isCorrect: c.is_correct })),
+        .sort((a, b) => a.order_index - b.order_index)
+        .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
     }));
 
   return {
@@ -213,6 +231,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
 
 // ---- เพิ่มใหม่: อัปเดต draft เดิม แทนที่จะ insert ใหม่ ----
 export async function updateLessonDraft(input: {
+  courseId: string;
   draftId: string;
   lessonId: string;
   title: string;
@@ -250,11 +269,20 @@ export async function updateLessonDraft(input: {
 
   if (draftError) return { error: "อัปเดตฉบับร่างไม่สำเร็จ" };
 
-  // 3. ลบคำถาม/ตัวเลือกเก่าทิ้งแล้วสร้างใหม่ (ง่ายและชัวร์สุดสำหรับกรณีนี้)
+  // เมื่อเปิดรายการที่ส่งตรวจแล้วกลับมาแก้ ให้ถอนคอร์สออกจากคิวจนกว่าจะส่งใหม่
+  const { error: courseStatusError } = await supabase
+    .from("courses")
+    .update({ status: "draft" })
+    .eq("id", input.courseId);
+
+  if (courseStatusError) return { error: "อัปเดตสถานะคอร์สเป็นฉบับร่างไม่สำเร็จ" };
+
+  // 3. ลบเฉพาะควิซในวิดีโอ ส่วนคำถามท้ายคอร์สจัดการจากหน้าบททดสอบโดยเฉพาะ
   const { error: deleteError } = await supabase
     .from("quiz_questions")
     .delete()
-    .eq("lesson_draft_id", input.draftId);
+    .eq("lesson_draft_id", input.draftId)
+    .not("video_timestamp_seconds", "is", null);
 
   if (deleteError) return { error: "ลบคำถามเก่าไม่สำเร็จ" };
 
@@ -291,7 +319,7 @@ export async function updateLessonDraft(input: {
     }
   }
 
-  return { draftId: input.draftId };
+  return { draftId: input.draftId, lessonId: input.lessonId };
 }
 
 export async function submitDraftForReview(draftId: string, courseId: string): Promise<{ error?: string }> {
@@ -303,28 +331,37 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
 
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
 
-  const { error } = await supabase
+  const { data: submittedDraft, error } = await supabase
     .from("lesson_drafts")
     .update({ status: "pending_review", submitted_at: new Date().toISOString() })
     .eq("id", draftId)
-    .eq("teacher_id", user.id);
+    .eq("teacher_id", user.id)
+    .select("id")
+    .maybeSingle();
 
-  if (error) {
-    console.error("Failed to submit draft:", error.message);
-    return { error: "ส่งตรวจสอบไม่สำเร็จ กรุณาลองใหม่" };
+  if (error || !submittedDraft) {
+    console.error("Failed to submit draft:", error?.message ?? "no rows updated");
+    return { error: error?.message ?? "ไม่พบฉบับร่าง หรือไม่มีสิทธิ์ส่งตรวจสอบ" };
   }
 
-  // เพิ่มใหม่: อัปเดตสถานะคอร์สเป็นรออนุมัติ
-  const { error: courseError } = await supabase
+  const { data: pendingCourse, error: courseError } = await supabase
     .from("courses")
     .update({ status: "pending" })
-    .eq("id", courseId);
+    .eq("id", courseId)
+    .eq("created_by", user.id)
+    .select("id")
+    .maybeSingle();
 
-  if (courseError) {
-    console.error("Failed to update course status:", courseError.message);
-    return { error: "อัปเดตสถานะคอร์สไม่สำเร็จ กรุณาลองใหม่" };
+  if (courseError || !pendingCourse) {
+    console.error("Failed to update course status:", courseError?.message ?? "no rows updated");
+    return { error: courseError?.message ?? "ไม่พบคอร์ส หรือไม่มีสิทธิ์อัปเดตสถานะ" };
   }
 
+  revalidatePath("/dashboard/teacher");
+  revalidatePath("/dashboard/teacher/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/admin/review");
   return {};
 }
 

@@ -39,6 +39,7 @@ interface CourseCardData {
   title: string;
   coverImageUrl: string | null;
   progress: number;
+  certified: boolean;
   href: string;
 }
 
@@ -57,6 +58,11 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
             alt={course.title}
             className="absolute inset-0 w-full h-full object-cover"
           />
+        )}
+        {course.certified && (
+          <span className="absolute left-3 top-3 rounded-full bg-emerald-500 px-2.5 py-1 text-[10.5px] font-bold text-white shadow-sm">
+            ✓ Certified
+          </span>
         )}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/25">
           <div className="w-12 h-12 rounded-full bg-white/95 flex items-center justify-center">
@@ -99,6 +105,16 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
 
   const enrollments = (data ?? []) as unknown as EnrollmentRow[];
   const courseIds = enrollments.map((e) => e.course_id);
+
+  const { data: certificateRows } = courseIds.length
+    ? await supabase
+        .from("certificates")
+        .select("course_id")
+        .eq("user_id", user!.id)
+        .eq("status", "issued")
+        .in("course_id", courseIds)
+    : { data: [] };
+  const certifiedCourseIds = new Set((certificateRows ?? []).map((row) => row.course_id as string));
 
   const cards: CourseCardData[] = [];
 
@@ -196,6 +212,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         title: e.courses.title,
         coverImageUrl: e.courses.cover_image_url,
         progress,
+        certified: certifiedCourseIds.has(e.course_id),
         href: targetLessonId
           ? `/play/${e.course_id}/${targetLessonId}`
           : `/dashboard/student/courses/${e.course_id}`,

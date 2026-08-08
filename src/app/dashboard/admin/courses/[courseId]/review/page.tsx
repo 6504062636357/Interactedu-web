@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import CourseReviewAccordion from "@/components/CourseReviewAccordion";
+import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
 
 interface QuizChoiceRow {
   choice_text: string;
@@ -40,6 +41,13 @@ interface CourseWithLessons {
   title: string;
   status: string;
   lessons: LessonRow[];
+}
+
+interface CourseCertificateSettings {
+  certificate_enabled: boolean;
+  certificate_pass_percentage: number;
+  certificate_title: string | null;
+  certificate_description: string | null;
 }
 
 // export default async function AdminCourseReviewPage({
@@ -143,7 +151,7 @@ export default async function AdminCourseReviewPage({
 
   if (!user) redirect(`/login?redirect=/admin/courses/${courseId}/review`);
 
-  const [profileRes, courseRes] = await Promise.all([
+  const [profileRes, courseRes, certificateRes] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
     supabase
       .from("courses")
@@ -164,6 +172,11 @@ export default async function AdminCourseReviewPage({
       )
       .eq("id", courseId)
       .maybeSingle(),
+    supabase
+      .from("courses")
+      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description")
+      .eq("id", courseId)
+      .maybeSingle(),
   ]);
 
   if (profileRes.data?.role !== "admin") redirect("/");
@@ -176,6 +189,7 @@ export default async function AdminCourseReviewPage({
   if (!courseRes.data) notFound();
 
   const course = courseRes.data as unknown as CourseWithLessons;
+  const certificateSettings = certificateRes.data as CourseCertificateSettings | null;
 
   // คัดเลือก Draft ล่าสุดของแต่ละบทเรียน
   const lessonsWithDraft = (course.lessons ?? [])
@@ -215,6 +229,27 @@ export default async function AdminCourseReviewPage({
         <p className="text-[13px] text-[#0F1B3D]/50 mb-8">
           {lessonsWithDraft.length} บทเรียน — สถานะคอร์ส: {course.status}
         </p>
+
+        <div className="mb-6 flex flex-wrap gap-2">
+          <a href={`/dashboard/admin/courses/${course.id}`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">จัดการเนื้อหา</a>
+          <a href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">ตรวจบททดสอบท้ายคอร์ส</a>
+        </div>
+
+        {certificateSettings ? (
+          <div className="mb-8">
+            <CertificateSettingsForm
+              courseId={course.id}
+              initialEnabled={certificateSettings.certificate_enabled}
+              initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
+              initialTitle={certificateSettings.certificate_title}
+              initialDescription={certificateSettings.certificate_description}
+            />
+          </div>
+        ) : (
+          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[12.5px] text-amber-800">
+            ยังโหลดการตั้งค่าใบประกาศไม่ได้ แต่สามารถตรวจและอนุมัติเนื้อหาคอร์สต่อได้ตามปกติ
+          </div>
+        )}
 
         <CourseReviewAccordion
           courseId={course.id}

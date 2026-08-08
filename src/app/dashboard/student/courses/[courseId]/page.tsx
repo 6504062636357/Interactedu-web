@@ -23,6 +23,7 @@ interface TrackingRow {
   lesson_id: string;
   lesson_status: string | null;
   score_raw: number | null;
+  video_completed: boolean;
 }
 
 function StatusBadge({ status }: { status: string | null }): ReactElement {
@@ -91,6 +92,19 @@ export default async function CourseLessonsPage({
 
   const course = Array.isArray(enrollment.courses) ? enrollment.courses[0] : enrollment.courses;
 
+  const { data: courseCertificateSettings } = await supabase
+    .from("courses")
+    .select("certificate_enabled, certificate_pass_percentage")
+    .eq("id", courseId)
+    .maybeSingle();
+
+  const { data: certificate } = await supabase
+    .from("certificates")
+    .select("id, status")
+    .eq("user_id", user.id)
+    .eq("course_id", courseId)
+    .maybeSingle();
+
   const { data: modulesData } = await supabase
     .from("modules")
     .select("id, title, order_index, lessons(id, title, order_index, video_url, video_duration_seconds, is_scorm)")
@@ -104,7 +118,7 @@ export default async function CourseLessonsPage({
 
   const { data: trackingData } = await supabase
     .from("scorm_tracking")
-    .select("lesson_id, lesson_status, score_raw")
+    .select("lesson_id, lesson_status, score_raw, video_completed")
     .eq("enrollment_id", enrollment.id);
 
   const trackingByLesson = new Map<string, TrackingRow>();
@@ -117,11 +131,12 @@ export default async function CourseLessonsPage({
     (sum, m) =>
       sum +
       m.lessons.filter((l) => {
-        const s = trackingByLesson.get(l.id)?.lesson_status;
-        return s === "completed" || s === "passed";
+        return Boolean(trackingByLesson.get(l.id)?.video_completed);
       }).length,
     0
   );
+  const allLessonsComplete = totalLessons > 0 && completedLessons === totalLessons;
+  const passPercentage = Number(courseCertificateSettings?.certificate_pass_percentage ?? 70);
 
   return (
     <div>
@@ -141,6 +156,14 @@ export default async function CourseLessonsPage({
           <p className="mt-1 text-[13.5px] text-[#0F1B3D]/50">
             {completedLessons} / {totalLessons} บทเรียนเรียนจบแล้ว
           </p>
+          {certificate?.status === "issued" && (
+            <a
+              href={`/api/me/certificates/${certificate.id}/download`}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-[11.5px] font-bold text-emerald-700"
+            >
+              <span>✓</span> ได้รับใบรับรองแล้ว · ดาวน์โหลด PDF
+            </a>
+          )}
         </div>
         {totalLessons > 0 && (
           <div className="w-14 h-14 rounded-full border-4 border-[#0F1B3D]/[0.06] relative shrink-0 flex items-center justify-center">
@@ -198,6 +221,29 @@ export default async function CourseLessonsPage({
             </div>
           ))}
         </div>
+      )}
+
+      {totalLessons > 0 && certificate?.status !== "issued" && (
+        <section className={`mt-8 overflow-hidden rounded-3xl border p-6 sm:p-7 ${allLessonsComplete ? "border-[#FF5A3C]/20 bg-[#FFF7F4]" : "border-[#0F1B3D]/[0.08] bg-[#F7F8FA]"}`}>
+          <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#FF5A3C]">Course Final Exam</p>
+              <h2 className="mt-1 text-[19px] font-extrabold text-[#0F1B3D]">บททดสอบท้ายคอร์ส</h2>
+              <p className="mt-1.5 max-w-xl text-[13px] leading-5 text-[#0F1B3D]/50">
+                รวมคำถามท้ายบทจากทุกบท คะแนนชุดนี้ใช้ตัดสินการออกใบรับรอง โดยต้องได้อย่างน้อย {passPercentage}%
+              </p>
+            </div>
+            {allLessonsComplete ? (
+              <Link href={`/dashboard/student/courses/${courseId}/final-exam`} className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#FF5A3C] px-6 py-3 text-[13px] font-extrabold text-white shadow-lg shadow-orange-200 transition hover:brightness-105">
+                เริ่มทำข้อสอบ →
+              </Link>
+            ) : (
+              <span className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#0F1B3D]/[0.06] px-5 py-3 text-[12px] font-bold text-[#0F1B3D]/40">
+                เรียนให้ครบทุกบทก่อน
+              </span>
+            )}
+          </div>
+        </section>
       )}
     </div>
   );

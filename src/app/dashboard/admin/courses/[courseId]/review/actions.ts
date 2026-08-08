@@ -83,6 +83,8 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
   }
 
   revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/admin/review");
   revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
   return {};
 }
@@ -139,6 +141,8 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
   }
 
   revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/admin/review");
   revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
   return {};
 }
@@ -170,6 +174,8 @@ export async function regenerateScormPackage(lessonId: string): Promise<{ error?
   // ที่ต้องเป็น "lesson.html" ไม่ใช่ "index.html") ไม่ต้อง update ซ้ำตรงนี้
 
   revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/admin/review");
   return {};
 }
 
@@ -238,6 +244,8 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
     revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
   }
   revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/admin/review");
   return {};
 }
 
@@ -279,5 +287,7 @@ export async function rejectLesson(draftId: string, reason: string): Promise<{ e
   }
 
   revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/admin/review");
   return {};
 }

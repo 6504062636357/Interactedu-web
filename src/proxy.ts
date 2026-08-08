@@ -10,7 +10,7 @@ const ROLE_ROUTES: Record<string, string> = {
 const PROTECTED_PREFIXES = ["/dashboard"];
 const AUTH_ONLY_PAGES = ["/login", "/signup"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { supabaseResponse, supabase, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
