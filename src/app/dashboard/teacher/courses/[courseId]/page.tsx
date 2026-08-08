@@ -3,16 +3,48 @@ import type { ReactElement } from "react";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
+import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
 
 interface PageProps {
   params: Promise<{ courseId: string }>;
+}
+
+interface QuizChoiceRow {
+  choice_text: string;
+  is_correct: boolean;
+  order_index: number;
+}
+
+interface QuizQuestionRow {
+  id: string;
+  question_text: string;
+  video_timestamp_seconds: number | null;
+  explanation: string | null;
+  order_index: number;
+  quiz_choices: QuizChoiceRow[];
+}
+
+interface LessonDraftRow {
+  id: string;
+  status: string;
+  created_at: string;
+  video_url: string | null;
+  content_html: string | null;
+  quiz_questions: QuizQuestionRow[];
 }
 
 interface LessonRow {
   id: string;
   title: string;
   order_index: number;
-  lesson_drafts: { status: string; created_at: string }[] | null;
+  lesson_drafts: LessonDraftRow[] | null;
+}
+
+interface CertificateSettings {
+  certificate_enabled: boolean;
+  certificate_pass_percentage: number;
+  certificate_title: string | null;
+  certificate_description: string | null;
 }
 
 const statusLabel: Record<string, { text: string; color: string }> = {
@@ -35,29 +67,54 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
-  const { data: course } = await supabase
-    .from("courses")
-    .select("id, title, status, created_by")
-    .eq("id", courseId)
-    .maybeSingle();
+  // ข้อมูลคอร์สหลักต้องเปิดได้ แม้ฐานข้อมูลยังไม่มีคอลัมน์ certificate
+  const [courseRes, certificateRes] = await Promise.all([
+    supabase
+      .from("courses")
+      .select("id, title, status, created_by")
+      .eq("id", courseId)
+      .maybeSingle(),
+    supabase
+      .from("courses")
+      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description")
+      .eq("id", courseId)
+      .maybeSingle(),
+  ]);
+
+  if (courseRes.error) {
+    console.error("[teacher/course] Failed to load course:", courseRes.error);
+  }
+
+  const course = courseRes.data;
+  const certificateSettings = certificateRes.data as CertificateSettings | null;
 
   if (!course) notFound();
-  if (profile.role === "teacher" && course.created_by !== user.id) redirect("/dashboard/teacher")
+  if (profile.role === "teacher" && course.created_by !== user.id) redirect("/dashboard/teacher");
 
-  // ดึงบทเรียนทั้งหมดของคอร์สนี้ พร้อม draft ล่าสุดของแต่ละบทเรียน (เพื่อโชว์สถานะ)
-  const { data: lessonsData } = await supabase
+  // ดึงข้อมูล draft ล่าสุดมาใช้เป็นหน้ารายละเอียดแบบ read-only พร้อมปุ่มแก้ไข
+  const { data: lessonsData, error: lessonsError } = await supabase
     .from("lessons")
     .select(
       `id, title, order_index,
-       lesson_drafts ( status, created_at )`
+       lesson_drafts (
+         id, status, created_at, video_url, content_html,
+         quiz_questions (
+           id, question_text, video_timestamp_seconds, explanation, order_index,
+           quiz_choices ( choice_text, is_correct, order_index )
+         )
+       )`
     )
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
 
-  const lessons = (lessonsData ?? []) as LessonRow[];
+  if (lessonsError) {
+    console.error("[teacher/course] Failed to load lessons:", lessonsError);
+  }
+
+  const lessons = (lessonsData ?? []) as unknown as LessonRow[];
 
   // หา draft ล่าสุดของแต่ละ lesson (เผื่อมีหลาย draft เก่าสะสมอยู่)
-  const lessonsWithStatus = lessons.map((lesson) => {
+  const lessonsWithDetails = lessons.map((lesson) => {
     const drafts = lesson.lesson_drafts ?? [];
     const latestDraft = [...drafts].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -66,6 +123,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
       id: lesson.id,
       title: lesson.title,
       status: latestDraft?.status ?? null,
+      latestDraft: latestDraft ?? null,
     };
   });
 
@@ -79,49 +137,113 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
           >
             ← กลับไปหน้ารวมคอร์ส
           </Link>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
               {course.title}
             </h1>
-            <Link
-              href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
-              className="text-[13px] font-bold text-white bg-[#FF5A3C] hover:bg-[#EB4A2D] px-5 py-2.5 rounded-full transition-colors shrink-0"
-            >
-              + เพิ่มบทเรียนใหม่
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/dashboard/teacher/courses/${course.id}/materials`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">เอกสารประกอบ</Link>
+              <Link href={`/dashboard/teacher/courses/${course.id}/exam`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">บททดสอบท้ายคอร์ส</Link>
+              <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new`} className="shrink-0 rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">+ เพิ่มบทเรียนใหม่</Link>
+            </div>
           </div>
         </div>
 
-        {lessonsWithStatus.length > 0 ? (
+        {certificateSettings ? (
+          <div className="mb-8">
+            <CertificateSettingsForm
+              courseId={course.id}
+              initialEnabled={certificateSettings.certificate_enabled}
+              initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
+              initialTitle={certificateSettings.certificate_title}
+              initialDescription={certificateSettings.certificate_description}
+            />
+          </div>
+        ) : (
+          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+            <p className="text-[13px] font-bold text-amber-800">การตั้งค่าใบประกาศยังไม่พร้อม</p>
+            <p className="mt-1 text-[12px] text-amber-700">
+              คุณยังจัดการบทเรียนและแบบทดสอบได้ตามปกติ ส่วนนี้จะพร้อมหลังอัปเดตฐานข้อมูล
+            </p>
+          </div>
+        )}
+
+        {lessonsError && (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-[13px] font-medium text-red-700">
+            โหลดรายละเอียดบทเรียนไม่สำเร็จ กรุณารีเฟรชหน้าอีกครั้ง
+          </div>
+        )}
+
+        {lessonsWithDetails.length > 0 ? (
           <div className="space-y-3">
-            {lessonsWithStatus.map((lesson, index) => (
-              <div
-                key={lesson.id}
-                className="flex items-center justify-between bg-white rounded-2xl border border-[#0F1B3D]/[0.06] p-5"
-              >
-                <div className="flex items-center gap-4">
-                  <span className="text-[13px] font-bold text-[#0F1B3D]/30 shrink-0">
-                    {index + 1}
-                  </span>
-                  <div>
-                    <span className="text-[15px] font-bold text-[#0F1B3D] block">{lesson.title}</span>
-                    <span
-                      className={`text-[12px] font-bold ${
-                        lesson.status ? statusLabel[lesson.status]?.color ?? "text-[#0F1B3D]/40" : "text-[#0F1B3D]/30"
-                      }`}
-                    >
-                      {lesson.status ? statusLabel[lesson.status]?.text ?? lesson.status : "ยังไม่มีฉบับร่าง"}
-                    </span>
+            {lessonsWithDetails.map((lesson, index) => {
+              const draft = lesson.latestDraft;
+              const questions = [...(draft?.quiz_questions ?? [])].sort((a, b) => a.order_index - b.order_index);
+              const videoQuizzes = questions.filter((question) => question.video_timestamp_seconds != null);
+
+              return (
+                <article key={lesson.id} className="overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.06] bg-white">
+                  <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#0F1B3D]/[0.05] text-[12px] font-extrabold text-[#0F1B3D]/50">{index + 1}</span>
+                      <div>
+                        <h2 className="text-[15px] font-bold text-[#0F1B3D]">{lesson.title}</h2>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className={`text-[11.5px] font-bold ${lesson.status ? statusLabel[lesson.status]?.color ?? "text-[#0F1B3D]/40" : "text-[#0F1B3D]/30"}`}>
+                            {lesson.status ? statusLabel[lesson.status]?.text ?? lesson.status : "ยังไม่มีฉบับร่าง"}
+                          </span>
+                          {draft && <span className="text-[11px] text-slate-400">ควิซในวิดีโอ {videoQuizzes.length} ข้อ</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`} className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[12.5px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">
+                      Edit บทเรียน
+                    </Link>
                   </div>
-                </div>
-                <Link
-                  href={`/dashboard/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`}
-                  className="text-[13px] font-bold text-[#FF5A3C] hover:underline shrink-0"
-                >
-                  แก้ไข
-                </Link>
-              </div>
-            ))}
+
+                  {draft ? (
+                    <details className="border-t border-[#0F1B3D]/[0.06] group">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-3.5 text-[12.5px] font-bold text-[#0F1B3D]/65 hover:bg-slate-50">
+                        ดูข้อมูลที่บันทึกไว้
+                        <span className="text-[16px] transition-transform group-open:rotate-180">⌄</span>
+                      </summary>
+                      <div className="space-y-6 border-t border-[#0F1B3D]/[0.05] bg-slate-50/60 p-5">
+                        {draft.video_url && (
+                          <section>
+                            <h3 className="mb-2 text-[12px] font-bold text-[#0F1B3D]/50">วิดีโอบทเรียน</h3>
+                            <video src={draft.video_url} controls preload="metadata" className="max-h-80 w-full rounded-xl bg-black" />
+                          </section>
+                        )}
+
+                        <section>
+                          <h3 className="mb-2 text-[12px] font-bold text-[#0F1B3D]/50">เนื้อหาบทเรียน</h3>
+                          <div className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-6 text-slate-600">
+                            {draft.content_html?.trim() || "ยังไม่มีเนื้อหาเพิ่มเติม"}
+                          </div>
+                        </section>
+
+                        {videoQuizzes.length > 0 && (
+                          <section>
+                            <h3 className="mb-3 text-[12px] font-bold text-[#0F1B3D]/50">ควิซแทรกระหว่างวิดีโอ ({videoQuizzes.length} ข้อ)</h3>
+                            <div className="space-y-2">
+                              {videoQuizzes.map((question) => (
+                                <div key={question.id} className="rounded-xl border border-violet-100 bg-white p-4">
+                                  <p className="text-[12px] font-bold text-violet-600">เวลา {Math.floor((question.video_timestamp_seconds ?? 0) / 60)}:{String((question.video_timestamp_seconds ?? 0) % 60).padStart(2, "0")}</p>
+                                  <p className="mt-1 text-[13px] font-semibold text-[#0F1B3D]">{question.question_text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        )}
+
+                      </div>
+                    </details>
+                  ) : (
+                    <p className="border-t border-[#0F1B3D]/[0.06] px-5 py-4 text-[12.5px] text-slate-400">กด Edit เพื่อเริ่มกรอกข้อมูลบทเรียน</p>
+                  )}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">

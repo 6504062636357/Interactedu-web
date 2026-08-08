@@ -135,8 +135,11 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     }
   }
 
-  // TODO: ยังไม่ทราบว่าตาราง certificates ใช้ schema แบบไหน ใส่ 0 ไว้ก่อน — ถ้ามีตารางจริงบอกชื่อ column มาแก้ query ให้ได้
-  const certificateCount = 0;
+  const { count: certificateCount } = await supabase
+    .from("certificates")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user!.id)
+    .eq("status", "issued");
 
   return (
     <div>
@@ -150,7 +153,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
         <StatCard label="คอร์สที่ลงทะเบียน" value={enrollments.length} />
         <StatCard label="คอร์สที่เรียนจบ" value={completedCourseCount} />
-        <StatCard label="ใบรับรองที่ได้รับ" value={certificateCount} />
+        <StatCard label="ใบรับรองที่ได้รับ" value={certificateCount ?? 0} />
       </div>
 
       <div className="bg-slate-50 rounded-2xl border border-slate-100 px-6 py-5">

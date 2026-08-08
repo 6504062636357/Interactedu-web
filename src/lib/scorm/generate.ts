@@ -1338,13 +1338,14 @@ const LESSON_HTML = `<!DOCTYPE html>
 //   };
 function buildQuizPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
   const quizData = {
+    lessonId: draft.lessons.id,
     title: draft.lessons.title,
     questions: questions.map((q) => ({
+      id: q.id,
       questionText: q.question_text,
-      explanation: q.explanation ?? null,
       choices: q.quiz_choices
         .sort((a, b) => a.order_index - b.order_index)
-        .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
+        .map((c) => ({ text: c.choice_text })),
     })),
   };
   return `var QUIZ_DATA = ${JSON.stringify(quizData)};
@@ -1370,7 +1371,6 @@ function renderQuiz() {
       input.type = "radio";
       input.name = "question-" + qIndex;
       input.value = cIndex;
-      input.dataset.correct = c.isCorrect;
 
       label.appendChild(input);
       label.appendChild(document.createTextNode(" " + c.text));
@@ -1382,58 +1382,78 @@ function renderQuiz() {
 }
 
 function submitQuiz() {
-  var total = QUIZ_DATA.questions.length;
-  var correct = 0;
-
+  var answers = [];
+  var allAnswered = true;
   QUIZ_DATA.questions.forEach(function (q, qIndex) {
     var selected = document.querySelector('input[name="question-' + qIndex + '"]:checked');
-    var isCorrect = !!(selected && selected.dataset.correct === "true");
-    if (isCorrect) correct++;
+    if (!selected) allAnswered = false;
+    else answers.push({ questionId: q.id, selectedChoiceIndex: Number(selected.value) });
+  });
+  var resultBox = document.getElementById("quiz-result");
+  var submitButton = document.getElementById("submit-quiz-btn");
+  if (!allAnswered) {
+    resultBox.textContent = "กรุณาตอบคำถามให้ครบทุกข้อก่อนส่งคำตอบ";
+    return;
+  }
 
-    // โชว์เฉลย + คำอธิบายต่อข้อ หลังส่งคำตอบ
-    var qDiv = document.querySelectorAll(".quiz-question")[qIndex];
-    if (qDiv) {
-      // ไฮไลต์ตัวเลือกที่ถูก/ที่เลือกผิด
-      var labels = qDiv.querySelectorAll(".quiz-choice");
-      labels.forEach(function (label) {
-        var input = label.querySelector("input");
-        if (input.dataset.correct === "true") {
-          label.classList.add("choice-correct");
-        } else if (input.checked) {
-          label.classList.add("choice-incorrect");
+  submitButton.disabled = true;
+  resultBox.textContent = "กำลังตรวจคำตอบ...";
+  fetch("/api/lessons/" + QUIZ_DATA.lessonId + "/final-quiz", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers: answers })
+  })
+    .then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok) throw new Error(data.error || "ส่งคำตอบไม่สำเร็จ");
+        return data;
+      });
+    })
+    .then(function (result) {
+      result.details.forEach(function (detail, qIndex) {
+        var qDiv = document.querySelectorAll(".quiz-question")[qIndex];
+        if (!qDiv) return;
+        var labels = qDiv.querySelectorAll(".quiz-choice");
+        labels.forEach(function (label, choiceIndex) {
+          var input = label.querySelector("input");
+          input.disabled = true;
+          if (choiceIndex === detail.correctChoiceIndex) label.classList.add("choice-correct");
+          else if (input.checked) label.classList.add("choice-incorrect");
+        });
+        var feedback = document.createElement("div");
+        feedback.className = "quiz-question-feedback " + (detail.isCorrect ? "is-correct" : "is-incorrect");
+        var resultLine = document.createElement("p");
+        resultLine.className = "quiz-question-result-text";
+        resultLine.textContent = detail.isCorrect ? "ตอบถูกต้อง" : "ตอบไม่ถูกต้อง";
+        feedback.appendChild(resultLine);
+        if (detail.explanation) {
+          var explanationText = document.createElement("p");
+          explanationText.className = "quiz-question-explanation";
+          explanationText.textContent = detail.explanation;
+          feedback.appendChild(explanationText);
         }
-        input.disabled = true;
+        qDiv.appendChild(feedback);
       });
 
-      var feedback = document.createElement("div");
-      feedback.className = "quiz-question-feedback " + (isCorrect ? "is-correct" : "is-incorrect");
-
-      var resultLine = document.createElement("p");
-      resultLine.className = "quiz-question-result-text";
-      resultLine.textContent = isCorrect ? "ตอบถูกต้อง" : "ตอบไม่ถูกต้อง";
-      feedback.appendChild(resultLine);
-
-      if (q.explanation) {
-        var explanationText = document.createElement("p");
-        explanationText.className = "quiz-question-explanation";
-        explanationText.textContent = q.explanation;
-        feedback.appendChild(explanationText);
+      resultBox.textContent = (result.passed ? "ผ่านเกณฑ์" : "ยังไม่ผ่านเกณฑ์") +
+        " — คะแนน " + result.score_percentage + "% / เกณฑ์ " + result.pass_percentage + "%";
+      if (result.certificate_download_url) {
+        var downloadLink = document.createElement("a");
+        downloadLink.href = result.certificate_download_url;
+        downloadLink.textContent = "ดาวน์โหลด Certificate";
+        downloadLink.target = "_blank";
+        downloadLink.rel = "noopener";
+        downloadLink.style.cssText = "display:inline-block;margin-left:12px;color:#FF5A3C;font-weight:700";
+        resultBox.appendChild(downloadLink);
       }
-
-      qDiv.appendChild(feedback);
-    }
-  });
-
-  var score = total > 0 ? Math.round((correct / total) * 100) : 0;
-
-  document.getElementById("quiz-result").textContent =
-    "คุณได้คะแนน " + correct + "/" + total + " (" + score + "%)";
-
-  document.getElementById("submit-quiz-btn").disabled = true;
-
-  ScormAPI.setValue("cmi.core.score.raw", String(score));
-  ScormAPI.setValue("cmi.core.lesson_status", score >= 60 ? "passed" : "failed");
-  ScormAPI.commit();
+      ScormAPI.setValue("cmi.core.score.raw", String(result.score_percentage));
+      ScormAPI.setValue("cmi.core.lesson_status", result.passed ? "passed" : "failed");
+      ScormAPI.commit();
+    })
+    .catch(function (error) {
+      resultBox.textContent = error.message || "ส่งคำตอบไม่สำเร็จ กรุณาลองใหม่";
+      submitButton.disabled = false;
+    });
 }
 
 window.addEventListener("load", function () {
@@ -1846,7 +1866,7 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
 // ============================================================
 // Manifest JSON ที่จะเก็บลง lessons.scorm_manifest ให้ player อ่าน
 // โครงสร้างต้องตรงกับ ScormMenuItem ใน src/app/play/[courseId]/[lessonId]/page.tsx
-// เพิ่ม field "kind" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
+// เพิ่ม field "type" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
 // ============================================================
 
 function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
@@ -1855,14 +1875,14 @@ function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
     title: string;
     href: string;
     children: never[];
-    kind: "lesson" | "quiz";
+    type: "lesson" | "quiz";
   }> = [
     {
       identifier: "ITEM-LESSON",
       title: draft.lessons.title,
       href: "lesson.html",
       children: [],
-      kind: "lesson",
+      type: "lesson",
     },
   ];
 
@@ -1872,7 +1892,7 @@ function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
       title: "แบบทดสอบหลังเรียน",
       href: "quiz.html",
       children: [],
-      kind: "quiz",
+      type: "quiz",
     });
   }
 
@@ -1945,8 +1965,10 @@ export async function generateScormPackage(
 
   // ควิซแทรกกลางวิดีโอ (มี timestamp) vs ควิซท้ายบทแบบเดิม (ไม่มี timestamp)
   const videoQuizQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds != null);
+  // คำถามที่ไม่มี timestamp จะถูกรวมเป็นข้อสอบหลังเรียนระดับคอร์สโดย API
+  // ไม่สร้าง quiz SCO แยกในแต่ละบทอีก เพื่อให้มีคะแนนตัดสินใบรับรองเพียงชุดเดียว
   const postExamQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds == null);
-  const hasQuiz = postExamQuestions.length > 0; // ตัดสินใจสร้าง quiz.html จาก post-exam เท่านั้น
+  const hasQuiz = false;
 
   const courseId = typedDraft.lessons.course_id;
 
@@ -2052,7 +2074,7 @@ export async function generateScormPackage(
 
   // 6. อัปเดต lessons table ให้ player (/api/lessons/[lessonId]/scorm-info) อ่านได้ตรง
   //    entryPoint ต้องชี้ไป lesson.html (SCO แรก) ไม่ใช่ quiz.html
-  //    manifest เป็น JSON ที่มี item ควิซแยกออกมา (kind: "quiz") ให้ page.tsx แสดงเป็นบล็อกต่างหาก
+  //    manifest เป็น JSON ที่มี item ควิซแยกออกมา (type: "quiz") ให้ page.tsx แสดงเป็นบล็อกต่างหาก
   const manifestJson = buildManifestJson(typedDraft, hasQuiz);
 
   const { error: lessonUpdateError } = await supabase

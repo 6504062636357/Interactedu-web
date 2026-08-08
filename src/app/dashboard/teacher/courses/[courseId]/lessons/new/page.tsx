@@ -5,14 +5,17 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import LessonDraftForm from "@/components/teacher/LessonDraftForm";
 import { getLessonDraftForEdit } from "./actions";
-import RegenerateScormButton from "@/components/RegenerateScormButton";
 
 interface PageProps {
   params: Promise<{ courseId: string }>;
   searchParams: Promise<{ lessonId?: string }>;
 }
 
-export default async function NewLessonPage({ params, searchParams }: PageProps): Promise<ReactElement> {
+export async function CourseLessonEditorPage({
+  params,
+  searchParams,
+  workspace = "teacher",
+}: PageProps & { workspace?: "teacher" | "admin" }): Promise<ReactElement> {
   const { courseId } = await params;
   const { lessonId } = await searchParams;
   const supabase = await createClient();
@@ -21,7 +24,7 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect(`/login?redirect=/dashboard/teacher/courses/${courseId}/lessons/new`);
+  if (!user) redirect(`/login?redirect=/dashboard/${workspace}/courses/${courseId}/lessons/new`);
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
@@ -35,7 +38,7 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
   console.log("[lessons/new] courseId:", courseId, "course:", course, "error:", courseError);
 
   if (!course) notFound();
-  if (profile.role === "teacher" && course.created_by !== user.id) redirect("/dashboard/teacher")
+  if (profile.role === "teacher" && course.created_by !== user.id) redirect(`/dashboard/${workspace}`)
 
   let { data: courseModule } = await supabase
     .from("modules")
@@ -71,7 +74,7 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
       <main className="max-w-3xl mx-auto">
         <div className="mb-6">
           <Link
-            href={`/dashboard/teacher/courses/${course.id}`}
+            href={`/dashboard/${workspace}/courses/${course.id}`}
             className="text-[12.5px] font-semibold text-[#0F1B3D]/40 hover:text-[#0F1B3D] mb-2 inline-block"
             >
               ← กลับไปที่คอร์ส
@@ -91,4 +94,8 @@ export default async function NewLessonPage({ params, searchParams }: PageProps)
       </main>
     </div>
   );
+}
+
+export default async function NewLessonPage(props: PageProps): Promise<ReactElement> {
+  return CourseLessonEditorPage({ ...props, workspace: "teacher" });
 }

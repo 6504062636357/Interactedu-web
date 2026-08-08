@@ -28,7 +28,7 @@ interface ScormTrackingRow {
 interface CertificateRow {
   id: string;
   issued_at: string;
-  pdf_url: string | null;
+  status: "issued" | "revoked";
   courses: { title: string } | null;
 }
 
@@ -116,8 +116,8 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
 
   const { data: certsRaw } = await supabase
     .from("certificates")
-    .select("id, issued_at, pdf_url, courses(title)")
-    .eq("student_id", user.id)
+    .select("id, issued_at, status, courses(title)")
+    .eq("user_id", user.id)
     .order("issued_at", { ascending: false })
     .limit(3);
 
@@ -254,13 +254,16 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
                     ออกเมื่อ {new Date(c.issued_at).toLocaleDateString("th-TH")}
                   </p>
                 </div>
-                <button
-                  disabled={!c.pdf_url}
-                  title={!c.pdf_url ? "ไฟล์ PDF กำลังจัดเตรียม" : undefined}
-                  className="shrink-0 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#0F1B3D] border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ดาวน์โหลด PDF
-                </button>
+                {c.status === "issued" ? (
+                  <a
+                    href={`/api/me/certificates/${c.id}/download`}
+                    className="shrink-0 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#0F1B3D] border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    ดาวน์โหลด PDF
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-[11px] font-semibold text-red-500">Revoked</span>
+                )}
               </div>
             ))}
           </div>

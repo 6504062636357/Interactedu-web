@@ -1,234 +1,65 @@
-import LogoutButton from "@/components/LogoutButton";
-import { createClient } from "@/utils/supabase/server";
 import Link from "next/link";
 import type { ReactElement } from "react";
+import { createClient } from "@/utils/supabase/server";
 
 type ProfileRole = "student" | "teacher" | "admin";
-
-type ProfileRow = {
+type UserDirectoryRow = {
   id: string;
+  email: string | null;
   full_name: string | null;
   role: ProfileRole;
+  phone: string | null;
+  university: string | null;
+  faculty: string | null;
   created_at: string;
+  last_sign_in_at: string | null;
+  enrollment_count: number;
+  certificate_count: number;
 };
 
-const sidebarLinks = [
-  { label: "ภาพรวมระบบ", href: "/dashboard/admin", active: false },
-  { label: "จัดการผู้ใช้", href: "/dashboard/admin/users", active: true },
-  { label: "จัดการคอร์ส", href: "/dashboard/admin/courses", active: false },
-  { label: "รายงาน", href: "/dashboard/admin/reports", active: false },
-  { label: "ตั้งค่าระบบ", href: "/dashboard/admin/settings", active: false },
-];
-
 const roleFilters: { label: string; value: ProfileRole | "all" }[] = [
-  { label: "ทั้งหมด", value: "all" },
-  { label: "นักเรียน", value: "student" },
-  { label: "ครูผู้สอน", value: "teacher" },
-  { label: "แอดมิน", value: "admin" },
+  { label: "ทั้งหมด", value: "all" }, { label: "นักเรียน", value: "student" },
+  { label: "ครูผู้สอน", value: "teacher" }, { label: "แอดมิน", value: "admin" },
 ];
 
-function formatDateThai(iso: string): string {
-  return new Date(iso).toLocaleDateString("th-TH", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+const roleLabels: Record<ProfileRole, string> = { student: "นักเรียน", teacher: "ครูผู้สอน", admin: "แอดมิน" };
+const roleStyles: Record<ProfileRole, string> = { student: "bg-blue-50 text-blue-700", teacher: "bg-violet-50 text-violet-700", admin: "bg-slate-100 text-slate-700" };
 
-function initials(name: string | null): string {
-  if (!name) return "?";
-  return name.trim().charAt(0).toUpperCase();
-}
-
-function SidebarLink({
-  label,
-  href,
-  active,
-}: {
-  label: string;
-  href: string;
-  active: boolean;
-}): ReactElement {
-  return (
-    <Link
-      href={href}
-      className={`block px-4 py-2.5 rounded-lg text-[14px] font-medium transition-colors ${
-        active ? "bg-blue-950 text-white" : "text-slate-600 hover:bg-slate-100"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-}
-
-function RoleBadge({ role }: { role: string }): ReactElement {
-  const map: Record<string, string> = {
-    student: "bg-blue-50 text-blue-700",
-    teacher: "bg-violet-50 text-violet-700",
-    admin: "bg-slate-100 text-slate-700",
-  };
-  const labelMap: Record<string, string> = {
-    student: "นักเรียน",
-    teacher: "ครูผู้สอน",
-    admin: "แอดมิน",
-  };
-  return (
-    <span
-      className={`inline-flex items-center text-[11px] font-semibold px-2.5 py-1 rounded-full ${
-        map[role] ?? "bg-slate-100 text-slate-700"
-      }`}
-    >
-      {labelMap[role] ?? role}
-    </span>
-  );
-}
-
-function EmptyState({ message }: { message: string }): ReactElement {
-  return (
-    <div className="py-16 text-center">
-      <p className="text-[13px] text-slate-400">{message}</p>
-    </div>
-  );
-}
-
-export default async function ManageUsersPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ role?: string }>;
-}): Promise<ReactElement> {
-  const { role } = await searchParams;
-  const activeRole: ProfileRole | "all" =
-    role === "student" || role === "teacher" || role === "admin" ? role : "all";
-
+export default async function ManageUsersPage({ searchParams }: { searchParams: Promise<{ role?: string; q?: string }> }): Promise<ReactElement> {
+  const { role, q } = await searchParams;
+  const activeRole: ProfileRole | "all" = role === "student" || role === "teacher" || role === "admin" ? role : "all";
+  const searchTerm = q?.trim().toLocaleLowerCase("th-TH") ?? "";
   const supabase = await createClient();
 
-  let query = supabase
-    .from("profiles")
-    .select("id, full_name, role, created_at")
-    .order("created_at", { ascending: false });
+  const directoryRes = await supabase.rpc("admin_list_users");
+  let allUsers = (directoryRes.data ?? []) as UserDirectoryRow[];
+  let loadError = directoryRes.error?.message ?? null;
 
-  if (activeRole !== "all") {
-    query = query.eq("role", activeRole);
+  // ทำให้หน้ารายชื่อยังใช้งานได้ระหว่างรัน migration โดยข้อมูล Auth จะเพิ่มเข้ามาหลัง migration สำเร็จ
+  if (directoryRes.error) {
+    const fallback = await supabase.from("profiles").select("id, full_name, role, phone, university, faculty, created_at").order("created_at", { ascending: false });
+    allUsers = (fallback.data ?? []).map((profile) => ({ ...profile, email: null, last_sign_in_at: null, enrollment_count: 0, certificate_count: 0 })) as UserDirectoryRow[];
+    loadError = fallback.error?.message ?? directoryRes.error.message;
   }
 
-  const { data, error } = await query;
-  const users = (data ?? []) as ProfileRow[];
+  const users = allUsers.filter((user) => {
+    const matchesRole = activeRole === "all" || user.role === activeRole;
+    const searchable = `${user.full_name ?? ""} ${user.email ?? ""} ${user.phone ?? ""}`.toLocaleLowerCase("th-TH");
+    return matchesRole && (!searchTerm || searchable.includes(searchTerm));
+  });
+  const countRole = (target: ProfileRole) => allUsers.filter((user) => user.role === target).length;
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 flex">
-      {/* Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col bg-white border-r border-slate-100 px-4 py-6">
-        <div className="flex items-center gap-2.5 px-2 mb-8">
-          <div className="w-8 h-8 rounded-lg bg-blue-950 flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="white" strokeWidth="1.6" strokeLinejoin="round" />
-              <path d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <span className="text-[15.5px] font-bold text-blue-950">Interact Edu</span>
+    <div>
+      <div className="mb-7"><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#FF5A3C]">User management</p><h1 className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[#0F1B3D]">ข้อมูลผู้ใช้</h1><p className="mt-1.5 text-[13.5px] text-slate-500">ค้นหาและเปิดดูโปรไฟล์ ประวัติการเรียน และใบรับรองของผู้ใช้</p></div>
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["ผู้ใช้ทั้งหมด", allUsers.length, ""], ["นักเรียน", countRole("student"), "text-blue-700"], ["ครูผู้สอน", countRole("teacher"), "text-violet-700"], ["แอดมิน", countRole("admin"), "text-slate-700"]].map(([label, count, color]) => <div key={String(label)} className="rounded-2xl border border-slate-200/70 bg-white px-5 py-4"><p className="text-[11.5px] text-slate-400">{label}</p><p className={`mt-1 text-[22px] font-extrabold ${color || "text-[#0F1B3D]"}`}>{count}</p></div>)}</div>
+      {loadError && <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">ข้อมูลอีเมล/กิจกรรมจะพร้อมหลังรัน migration ล่าสุด: {loadError}</div>}
+      <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
+        <div className="border-b border-slate-100 p-4 sm:p-5"><form method="get" className="flex flex-col gap-3 sm:flex-row">{activeRole !== "all" && <input type="hidden" name="role" value={activeRole} />}<input name="q" defaultValue={q ?? ""} placeholder="ค้นหาชื่อ อีเมล หรือเบอร์โทร" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] outline-none focus:border-[#3157D5] focus:bg-white" /><button className="rounded-xl bg-slate-100 px-5 py-2.5 text-[12.5px] font-bold text-slate-700">ค้นหา</button></form>
+          <div className="mt-4 flex gap-2 overflow-x-auto">{roleFilters.map((filter) => { const params = new URLSearchParams(); if (filter.value !== "all") params.set("role", filter.value); if (q) params.set("q", q); return <Link key={filter.value} href={params.size ? `/dashboard/admin/users?${params}` : "/dashboard/admin/users"} className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold ${activeRole === filter.value ? "bg-[#0F1B3D] text-white" : "border border-slate-200 text-slate-600"}`}>{filter.label}</Link>; })}</div>
         </div>
-        <nav className="space-y-1">
-          {sidebarLinks.map((l) => (
-            <SidebarLink key={l.label} {...l} />
-          ))}
-        </nav>
-        <div className="mt-auto pt-6 border-t border-slate-100">
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-[13px] font-bold text-slate-700">
-              A
-            </div>
-            <div className="min-w-0">
-              <p className="text-[13.5px] font-semibold text-slate-800 truncate">Admin</p>
-              <p className="text-[12px] text-slate-400">Administrator</p>
-            </div>
-          </div>
-          <div className="mt-3 px-2">
-            <LogoutButton />
-          </div>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex-1 px-6 py-8 lg:px-10 lg:py-10 max-w-6xl">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div>
-            <Link
-              href="/dashboard/admin"
-              className="text-[12.5px] font-semibold text-slate-400 hover:text-slate-600 mb-2 inline-block"
-            >
-              ← กลับภาพรวมระบบ
-            </Link>
-            <h1 className="text-[26px] font-bold text-blue-950 tracking-[-0.01em]">
-              จัดการผู้ใช้
-            </h1>
-            <p className="mt-1.5 text-[14.5px] text-slate-500">
-              ผู้ใช้ทั้งหมด {users.length} คน
-            </p>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-6 text-[13px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-4 py-3">
-            โหลดข้อมูลผู้ใช้ไม่สำเร็จ กรุณารีเฟรชหน้านี้อีกครั้ง
-          </div>
-        )}
-
-        {/* Role filter tabs */}
-        <div className="flex items-center gap-2 mb-5">
-          {roleFilters.map((f) => (
-            <Link
-              key={f.value}
-              href={f.value === "all" ? "/dashboard/admin/users" : `/dashboard/admin/users?role=${f.value}`}
-              className={`text-[13px] font-semibold px-3.5 py-1.5 rounded-full transition-colors ${
-                activeRole === f.value
-                  ? "bg-blue-950 text-white"
-                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              {f.label}
-            </Link>
-          ))}
-        </div>
-
-        {/* Users table */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
-          {users.length === 0 ? (
-            <EmptyState message="ไม่พบผู้ใช้ในกลุ่มนี้" />
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <th className="text-left text-[12px] font-semibold text-slate-400 px-6 py-3">ผู้ใช้</th>
-                  <th className="text-left text-[12px] font-semibold text-slate-400 px-6 py-3">บทบาท</th>
-                  <th className="text-left text-[12px] font-semibold text-slate-400 px-6 py-3">เข้าร่วมเมื่อ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                    <td className="px-6 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[12.5px] font-bold text-slate-600 shrink-0">
-                          {initials(u.full_name)}
-                        </div>
-                        <p className="text-[13.5px] font-semibold text-slate-900">
-                          {u.full_name ?? "ไม่ระบุชื่อ"}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-3.5">
-                      <RoleBadge role={u.role} />
-                    </td>
-                    <td className="px-6 py-3.5 text-[13px] text-slate-500">
-                      {formatDateThai(u.created_at)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </main>
+        {users.length ? <div className="overflow-x-auto"><table className="w-full min-w-[820px]"><thead><tr className="border-b border-slate-100 bg-slate-50/70"><th className="px-5 py-3 text-left text-[11px] text-slate-400">ผู้ใช้</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">ติดต่อ</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">บทบาท</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">กิจกรรม</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">เข้าใช้ล่าสุด</th><th /></tr></thead><tbody>{users.map((user) => <tr key={user.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60"><td className="px-5 py-4"><p className="text-[13.5px] font-bold text-slate-800">{user.full_name ?? "ไม่ระบุชื่อ"}</p><p className="mt-0.5 font-mono text-[10px] text-slate-300">{user.id.slice(0, 8)}</p></td><td className="px-5 py-4"><p className="text-xs text-slate-600">{user.email ?? "—"}</p><p className="mt-1 text-[11px] text-slate-400">{user.phone ?? "ไม่ระบุเบอร์โทร"}</p></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${roleStyles[user.role]}`}>{roleLabels[user.role]}</span></td><td className="px-5 py-4 text-xs text-slate-500">{user.enrollment_count} คอร์ส · {user.certificate_count} ใบรับรอง</td><td className="px-5 py-4 text-xs text-slate-500">{user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "—"}</td><td className="px-5 py-4 text-right"><Link href={`/dashboard/admin/users/${user.id}`} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-[#3157D5]">ดูรายละเอียด</Link></td></tr>)}</tbody></table></div> : <div className="py-16 text-center text-sm text-slate-400">ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข</div>}
+      </div>
     </div>
   );
 }

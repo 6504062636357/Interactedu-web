@@ -25,7 +25,7 @@ export async function approveDraft(draftId: string): Promise<{ error?: string }>
     console.error("[approveDraft] draft fetch failed", draftError);
     return { error: "ไม่พบ draft นี้" };
   }
-  if (draft.status !== "pending_review") {
+  if (draft.status !== "pending_review" && draft.status !== "submitted") {
     return { error: "draft นี้ยังไม่ถูกส่งตรวจสอบ หรือถูกดำเนินการไปแล้ว" };
   }
 
@@ -65,6 +65,8 @@ export async function approveDraft(draftId: string): Promise<{ error?: string }>
   }
 
   revalidatePath("/admin/review");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/admin/courses");
   return {};
 }
 
@@ -82,7 +84,7 @@ export async function rejectDraft(draftId: string, reason: string): Promise<{ er
 
   if (!reason.trim()) return { error: "กรุณาระบุเหตุผลที่ปฏิเสธ" };
 
-  const { error } = await supabase
+  const { data: updatedDrafts, error } = await supabase
     .from("lesson_drafts")
     .update({
       status: "rejected",
@@ -91,13 +93,16 @@ export async function rejectDraft(draftId: string, reason: string): Promise<{ er
       reviewed_at: new Date().toISOString(),
     })
     .eq("id", draftId)
-    .eq("status", "submitted");
+    .in("status", ["pending_review", "submitted"])
+    .select("id");
 
-  if (error) {
-    console.error("Failed to reject draft:", error.message);
-    return { error: "ปฏิเสธ draft ไม่สำเร็จ" };
+  if (error || !updatedDrafts?.length) {
+    console.error("Failed to reject draft:", error?.message ?? "no rows updated");
+    return { error: error?.message ?? "ไม่พบ draft ที่กำลังรอตรวจสอบ" };
   }
 
   revalidatePath("/admin/review");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/admin/courses");
   return {};
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState, type ChangeEvent, type ReactElement } from "react";
-import { createClient } from "@/utils/supabase/client";
 import {
   saveLessonDraft,
   updateLessonDraft,
@@ -21,7 +20,7 @@ interface QuestionState extends DraftQuestionInput {
   key: string;
 }
 
-type TabKey = "info" | "video-quiz" | "final-quiz";
+type TabKey = "info" | "video-quiz";
 
 function createEmptyQuestion(timestampSeconds: number | null): QuestionState {
   return {
@@ -53,19 +52,15 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
   const [videoUrl, setVideoUrl] = useState<string | null>(initialData?.videoUrl ?? null);
   const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
 
-  // แยกคำถามเป็น 2 ชุดตั้งแต่ต้น — video quiz (มี timestamp) กับ final quiz (ไม่มี)
+  // แบบทดสอบท้ายคอร์สจัดการจากหน้าคอร์สโดยเฉพาะ ส่วนนี้เก็บเฉพาะควิซในวิดีโอ
   const initialVideoQuizzes =
     initialData?.questions.filter((q) => q.timestampSeconds != null).map((q) => ({ key: crypto.randomUUID(), ...q })) ?? [];
-  const initialFinalQuizzes =
-    initialData?.questions.filter((q) => q.timestampSeconds == null).map((q) => ({ key: crypto.randomUUID(), ...q })) ?? [];
 
   const [videoQuizQuestions, setVideoQuizQuestions] = useState<QuestionState[]>(initialVideoQuizzes);
-  const [finalQuizQuestions, setFinalQuizQuestions] = useState<QuestionState[]>(
-    initialFinalQuizzes.length > 0 ? initialFinalQuizzes : [createEmptyQuestion(null)]
-  );
 
   const [saving, setSaving] = useState<boolean>(false);
   const [savedDraftId, setSavedDraftId] = useState<string | null>(initialData?.draftId ?? null);
+  const [savedLessonId, setSavedLessonId] = useState<string | null>(initialData?.lessonId ?? null);
   const [error, setError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -76,8 +71,6 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [videoCurrentTime, setVideoCurrentTime] = useState<number>(0);
 
-  const supabase = createClient();
-
   const handleVideoChange = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -86,9 +79,7 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
     setUploadingVideo(true);
 
     try {
-      const url = await uploadVideoToR2(file, (percent) => {
-        // ถ้าอยากโชว์ % ค่อยเพิ่ม state ทีหลังได้
-      });
+      const url = await uploadVideoToR2(file, () => undefined);
       setVideoUrl(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "อัปโหลดวิดีโอไม่สำเร็จ กรุณาลองใหม่");
@@ -97,11 +88,7 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
     }
   };
 
-  // ---------- Generic question helpers (ใช้ร่วมกันทั้ง 2 แท็บ ผ่าน setter ที่ส่งเข้ามา) ----------
-
-  function addQuestion(setter: typeof setVideoQuizQuestions, timestampSeconds: number | null): void {
-    setter((prev) => [...prev, createEmptyQuestion(timestampSeconds)]);
-  }
+  // ---------- ตัวช่วยจัดการคำถามในวิดีโอ ----------
 
   function removeQuestion(setter: typeof setVideoQuizQuestions, key: string): void {
     setter((prev) => prev.filter((q) => q.key !== key));
@@ -176,21 +163,44 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
 
   // ---------- Save / submit ----------
 
-  const handleSaveDraft = async (): Promise<void> => {
-    setError(null);
-
+  const saveCurrentDraft = async (): Promise<{ draftId?: string; lessonId?: string; error?: string }> => {
     if (!title.trim()) {
-      setError("กรุณาใส่ชื่อบทเรียน");
       setActiveTab("info");
-      return;
+      return { error: "กรุณาใส่ชื่อบทเรียน" };
     }
     if (videoFile && !videoUrl) {
-      setError("กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน");
       setActiveTab("info");
-      return;
+      return { error: "กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน" };
     }
 
-    const allQuestions = [...videoQuizQuestions, ...finalQuizQuestions].map(
+    const questionGroups: { questions: QuestionState[]; tab: TabKey; label: string }[] = [
+      { questions: videoQuizQuestions, tab: "video-quiz", label: "ควิซแทรกระหว่างวิดีโอ" },
+    ];
+
+    for (const group of questionGroups) {
+      for (const question of group.questions) {
+        const hasPartialContent = question.choices.some((choice) => choice.text.trim()) || Boolean(question.explanation?.trim());
+        if (!question.questionText.trim()) {
+          if (hasPartialContent) {
+            setActiveTab(group.tab);
+            return { error: `กรุณากรอกคำถามของ${group.label}ให้ครบ` };
+          }
+          continue;
+        }
+
+        const filledChoices = question.choices.filter((choice) => choice.text.trim());
+        if (filledChoices.length < 2) {
+          setActiveTab(group.tab);
+          return { error: `${group.label}แต่ละข้อต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก` };
+        }
+        if (!filledChoices.some((choice) => choice.isCorrect)) {
+          setActiveTab(group.tab);
+          return { error: `กรุณากำหนดคำตอบที่ถูกของ${group.label}` };
+        }
+      }
+    }
+
+    const allQuestions = videoQuizQuestions.map(
       ({ questionText, choices, timestampSeconds, explanation }) => ({
         questionText,
         choices,
@@ -199,12 +209,11 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
       })
     );
 
-    setSaving(true);
-
-    const result = isEditMode
+    return savedDraftId && savedLessonId
       ? await updateLessonDraft({
-          draftId: initialData!.draftId,
-          lessonId: initialData!.lessonId,
+          courseId,
+          draftId: savedDraftId,
+          lessonId: savedLessonId,
           title,
           videoUrl,
           contentHtml,
@@ -218,7 +227,13 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
           contentHtml,
           questions: allQuestions,
         });
+  };
 
+  const handleSaveDraft = async (): Promise<void> => {
+    setError(null);
+    setSubmitError(null);
+    setSaving(true);
+    const result = await saveCurrentDraft();
     setSaving(false);
 
     if (result.error) {
@@ -227,17 +242,29 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
     }
 
     setSubmitted(false);
-    setSubmitError(null);
-    setSavedDraftId(result.draftId ?? null);
+    setSavedDraftId(result.draftId ?? savedDraftId);
+    setSavedLessonId(result.lessonId ?? savedLessonId);
   };
 
   const handleSubmitForReview = async (): Promise<void> => {
-    if (!savedDraftId) return;
-
     setSubmitting(true);
     setSubmitError(null);
+    setError(null);
 
-    const result = await submitDraftForReview(savedDraftId, courseId);
+    // บันทึกค่าล่าสุดก่อนส่งทุกครั้ง ป้องกันคำถามที่เพิ่งแก้หายไปจาก draft
+    const savedResult = await saveCurrentDraft();
+    if (savedResult.error || !savedResult.draftId || !savedResult.lessonId) {
+      const message = savedResult.error ?? "บันทึกฉบับร่างล่าสุดไม่สำเร็จ";
+      setError(message);
+      setSubmitError(message);
+      setSubmitting(false);
+      return;
+    }
+
+    setSavedDraftId(savedResult.draftId);
+    setSavedLessonId(savedResult.lessonId);
+
+    const result = await submitDraftForReview(savedResult.draftId, courseId);
 
     setSubmitting(false);
 
@@ -255,7 +282,6 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
   const tabs: { key: TabKey; label: string; badge?: number }[] = [
     { key: "info", label: "รายละเอียดบทเรียน" },
     { key: "video-quiz", label: "In-Video Quiz", badge: videoQuizQuestions.length || undefined },
-    { key: "final-quiz", label: "แบบทดสอบท้ายบท", badge: finalQuizQuestions.length || undefined },
   ];
 
   return (
@@ -485,94 +511,6 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
         </div>
       )}
 
-      {/* ===================== TAB 3: แบบทดสอบท้ายบท ===================== */}
-      {activeTab === "final-quiz" && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <label className="text-[13px] font-bold text-[#0F1B3D]/70">แบบทดสอบท้ายบท</label>
-            <button
-              type="button"
-              onClick={() => addQuestion(setFinalQuizQuestions, null)}
-              className="text-[13px] font-bold text-[#FF5A3C] hover:underline"
-            >
-              + เพิ่มคำถาม
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            {finalQuizQuestions.map((q, qIndex) => (
-              <div key={q.key} className="rounded-2xl border border-[#0F1B3D]/[0.08] p-5">
-                <div className="flex items-start gap-3 mb-4">
-                  <span className="text-[13px] font-bold text-[#0F1B3D]/30 mt-3 shrink-0">ข้อ {qIndex + 1}</span>
-                  <input
-                    value={q.questionText}
-                    onChange={(e) => updateQuestionText(setFinalQuizQuestions, q.key, e.target.value)}
-                    placeholder="พิมพ์คำถาม"
-                    className="flex-1 px-4 py-2.5 text-[14px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
-                  />
-                  {finalQuizQuestions.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeQuestion(setFinalQuizQuestions, q.key)}
-                      className="text-[12.5px] font-bold text-[#0F1B3D]/40 hover:text-[#EB4A2D] mt-3 shrink-0"
-                    >
-                      ลบ
-                    </button>
-                  )}
-                </div>
-
-                <div className="pl-8 space-y-2.5 mb-3">
-                  {q.choices.map((choice, cIndex) => (
-                    <div key={cIndex} className="flex items-center gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setCorrectChoice(setFinalQuizQuestions, q.key, cIndex)}
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                          choice.isCorrect ? "border-[#00B37E]" : "border-[#0F1B3D]/20"
-                        }`}
-                        title="ตั้งเป็นคำตอบที่ถูก"
-                      >
-                        {choice.isCorrect && <span className="w-2.5 h-2.5 rounded-full bg-[#00B37E]" />}
-                      </button>
-                      <input
-                        value={choice.text}
-                        onChange={(e) => updateChoiceText(setFinalQuizQuestions, q.key, cIndex, e.target.value)}
-                        placeholder={`ตัวเลือกที่ ${cIndex + 1}`}
-                        className="flex-1 px-3.5 py-2 text-[13.5px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-lg outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
-                      />
-                      {q.choices.length > 2 && (
-                        <button
-                          type="button"
-                          onClick={() => removeChoice(setFinalQuizQuestions, q.key, cIndex)}
-                          className="text-[12px] font-bold text-[#0F1B3D]/30 hover:text-[#EB4A2D] shrink-0"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => addChoice(setFinalQuizQuestions, q.key)}
-                    className="text-[12.5px] font-bold text-[#7C5CFF] hover:underline pl-7"
-                  >
-                    + เพิ่มตัวเลือก
-                  </button>
-                </div>
-
-                <textarea
-                  value={q.explanation ?? ""}
-                  onChange={(e) => updateQuestionExplanation(setFinalQuizQuestions, q.key, e.target.value)}
-                  placeholder="คำอธิบายเฉลย (ไม่บังคับ)"
-                  rows={2}
-                  className="w-full pl-8 pr-0 text-[13px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-lg outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all resize-y box-content py-2"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ===================== ปุ่มบันทึก/ส่งตรวจ (แสดงทุกแท็บ) ===================== */}
       {error && (
         <div className="mt-6 mb-5 rounded-xl bg-[#FF5A3C]/[0.08] border border-[#FF5A3C]/20 px-4 py-3">
@@ -581,37 +519,50 @@ export default function LessonDraftForm({ courseId, moduleId, initialData }: Les
       )}
 
       <div className="mt-8">
-        {!savedDraftId ? (
-          <button
-            type="button"
-            onClick={handleSaveDraft}
-            disabled={saving || uploadingVideo}
-            className="w-full sm:w-auto inline-flex items-center justify-center text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-colors disabled:opacity-60"
-          >
-            {saving ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "บันทึกฉบับร่าง"}
-          </button>
-        ) : submitted ? (
-          <div className="rounded-2xl bg-[#00B37E]/[0.08] border border-[#00B37E]/20 p-5">
-            <p className="text-[13.5px] font-semibold text-[#00885F]">
-              ส่งให้แอดมินตรวจสอบเรียบร้อยแล้ว รอการอนุมัติ
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-2xl bg-[#00B37E]/[0.08] border border-[#00B37E]/20 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        {submitted ? (
+          <div className="flex flex-col gap-4 rounded-2xl border border-[#00B37E]/20 bg-[#00B37E]/[0.08] p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-[13.5px] font-semibold text-[#00885F]">
-                บันทึกฉบับร่างแล้ว ตรวจสอบเรียบร้อยแล้วส่งให้แอดมินได้เลย
-              </p>
-              {submitError && <p className="mt-2 text-[13px] font-semibold text-[#EB4A2D]">{submitError}</p>}
+              <p className="text-[13.5px] font-semibold text-[#00885F]">ส่งให้แอดมินตรวจสอบเรียบร้อยแล้ว รอการอนุมัติ</p>
+              <p className="mt-1 text-[12px] text-[#00885F]/70">หากกลับมาแก้ไข ต้องบันทึกและส่งตรวจใหม่อีกครั้ง</p>
             </div>
             <button
               type="button"
-              onClick={handleSubmitForReview}
-              disabled={submitting}
-              className="text-[14px] font-bold text-white bg-[#FF5A3C] hover:bg-[#EB4A2D] px-6 py-3 rounded-full transition-colors shrink-0 disabled:opacity-60"
+              onClick={() => {
+                setSubmitted(false);
+                setSubmitError(null);
+              }}
+              className="shrink-0 rounded-full border border-[#00885F]/25 bg-white px-5 py-2.5 text-[12.5px] font-bold text-[#00885F] hover:bg-emerald-50"
             >
-              {submitting ? "กำลังส่ง..." : "ส่งให้แอดมินตรวจสอบ"}
+              Edit ข้อมูล
             </button>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-white border border-[#0F1B3D]/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-[13.5px] font-semibold text-[#0F1B3D]">
+                {savedDraftId ? "บันทึกฉบับร่างแล้ว คุณยังแก้ไขและบันทึกซ้ำได้" : "บันทึกฉบับร่างก่อนส่งให้แอดมินตรวจสอบ"}
+              </p>
+              <p className="mt-1 text-[12px] text-[#0F1B3D]/45">เมื่อกดส่งตรวจ ระบบจะบันทึกเนื้อหาและควิซในวิดีโอล่าสุดให้อัตโนมัติ</p>
+              {submitError && <p className="mt-2 text-[13px] font-semibold text-[#EB4A2D]">{submitError}</p>}
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <button
+                type="button"
+                onClick={handleSaveDraft}
+                disabled={saving || submitting || uploadingVideo}
+                className="inline-flex items-center justify-center rounded-full border border-[#0F1B3D]/15 px-5 py-3 text-[13.5px] font-bold text-[#0F1B3D] transition-colors hover:bg-[#0F1B3D]/[0.04] disabled:opacity-60"
+              >
+                {saving ? "กำลังบันทึก..." : savedDraftId ? "บันทึกการแก้ไข" : "บันทึกฉบับร่าง"}
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitForReview}
+                disabled={saving || submitting || uploadingVideo}
+                className="shrink-0 rounded-full bg-[#FF5A3C] px-6 py-3 text-[14px] font-bold text-white transition-colors hover:bg-[#EB4A2D] disabled:opacity-60"
+              >
+                {submitting ? "กำลังบันทึกและส่ง..." : "บันทึกและส่งตรวจ"}
+              </button>
+            </div>
           </div>
         )}
       </div>

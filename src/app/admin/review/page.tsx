@@ -148,7 +148,7 @@ export default async function AdminReviewListPage(): Promise<ReactElement> {
     supabase
       .from("lesson_drafts")
       .select("id, submitted_at, lessons(title, course_id, courses(title))")
-      .eq("status", "pending")
+      .in("status", ["pending_review", "submitted"])
       .order("submitted_at", { ascending: true }),
   ]);
 
@@ -175,7 +175,13 @@ export default async function AdminReviewListPage(): Promise<ReactElement> {
         </h1>
         <p className="text-[13.5px] text-[#0F1B3D]/40 font-medium mb-8">{drafts.length} รายการ</p>
 
-        {drafts.length > 0 ? (
+        {draftsRes.error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] font-medium text-red-700">
+            โหลดคิวตรวจสอบไม่สำเร็จ: {draftsRes.error.message}
+          </div>
+        )}
+
+        {!draftsRes.error && drafts.length > 0 ? (
           <div className="space-y-3">
             {drafts.map((draft) => (
               <Link
@@ -196,11 +202,11 @@ export default async function AdminReviewListPage(): Promise<ReactElement> {
               </Link>
             ))}
           </div>
-        ) : (
+        ) : !draftsRes.error ? (
           <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
             <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ไม่มีบทเรียนรอตรวจสอบตอนนี้</p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

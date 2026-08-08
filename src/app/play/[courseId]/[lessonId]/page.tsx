@@ -16,6 +16,7 @@ interface ScormMenuItem {
   children: ScormMenuItem[];
   completed?: boolean;
   type?: 'lesson' | 'quiz';
+  kind?: 'lesson' | 'quiz';
 }
 
 interface ScormManifest {
@@ -35,6 +36,22 @@ interface CourseLessonRef {
   moduleTitle: string;
   completed: boolean;
 }
+
+interface ScormApiLike {
+  on(event: string, callback: () => void): void;
+  cmi: {
+    completion_status?: string;
+    score?: { raw?: string | number };
+    suspend_data?: string;
+    core?: { lesson_status?: string; score?: { raw?: string | number } };
+  };
+  currentState: unknown;
+  STATE_INITIALIZED: unknown;
+  LMSFinish?: (value: string) => unknown;
+  Terminate?: (value: string) => unknown;
+}
+
+type ScormWindow = Window & { API?: ScormApiLike; API_1484_11?: ScormApiLike };
 
 // เดินทุกกิ่งของเมนู แปลงเป็น flat list ตามลำดับ ไว้ใช้ทำปุ่มก่อนหน้า/ถัดไป
 function flattenPlayableItems(items: ScormMenuItem[]): ScormMenuItem[] {
@@ -59,7 +76,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const [courseTitle, setCourseTitle] = useState<string | null>(null);
   const [lessonTitle, setLessonTitle] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // เอกสารประกอบ
   const [materials, setMaterials] = useState<CourseMaterial[]>([]);
@@ -71,6 +88,13 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   // ความคืบหน้าราย SCO ของเลสสันปัจจุบัน
   const [completedScos, setCompletedScos] = useState<string[]>([]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (window.matchMedia('(min-width: 1024px)').matches) setSidebarOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // --- Effect ที่ 1: ดึงข้อมูล scorm-info (รันใหม่ทุกครั้งที่ lessonId เปลี่ยน คือตอนสลับบทเรียน) ---
   useEffect(() => {
@@ -101,27 +125,28 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
     const settings = { autocommit: true, autocommitSeconds: 15, logLevel: 2 };
     const is2004 = scormVersion === '2004';
-    let apiInstance: any;
+    let apiInstance: ScormApiLike;
+    const scormWindow = window as ScormWindow;
 
     if (is2004) {
-      apiInstance = new Scorm2004API(settings);
+      apiInstance = new Scorm2004API(settings) as unknown as ScormApiLike;
       setupCommitHook(apiInstance, true);
-      (window as any).API_1484_11 = apiInstance;
+      scormWindow.API_1484_11 = apiInstance;
     } else {
-      apiInstance = new Scorm12API(settings);
+      apiInstance = new Scorm12API(settings) as unknown as ScormApiLike;
       setupCommitHook(apiInstance, false);
-      (window as any).API = apiInstance;
+      scormWindow.API = apiInstance;
     }
 
-    function setupCommitHook(scormInstance: any, isScorm2004: boolean) {
+    function setupCommitHook(scormInstance: ScormApiLike, isScorm2004: boolean) {
       scormInstance.on('LMSCommit', () => {
         const lessonStatus = isScorm2004
           ? scormInstance.cmi.completion_status
-          : scormInstance.cmi.core.lesson_status;
+          : scormInstance.cmi.core?.lesson_status;
 
         const scoreRaw = isScorm2004
           ? scormInstance.cmi.score?.raw
-          : scormInstance.cmi.core.score?.raw;
+          : scormInstance.cmi.core?.score?.raw;
 
         const suspendData = scormInstance.cmi.suspend_data;
 
@@ -157,17 +182,17 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
     return () => {
       try {
-        if ((window as any).API === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
-          apiInstance.LMSFinish('');
+        if (scormWindow.API === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
+          apiInstance.LMSFinish?.('');
         }
       } catch {}
       try {
-        if ((window as any).API_1484_11 === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
-          apiInstance.Terminate('');
+        if (scormWindow.API_1484_11 === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
+          apiInstance.Terminate?.('');
         }
       } catch {}
-      delete (window as any).API;
-      delete (window as any).API_1484_11;
+      delete scormWindow.API;
+      delete scormWindow.API_1484_11;
     };
   }, [currentPath, scormVersion, courseId, lessonId]);
 
@@ -218,9 +243,14 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   // แนบ completed จริงเข้ากับแต่ละ SCO ของเลสสันปัจจุบัน
   const flatItems = useMemo(() => {
-    const items = flattenPlayableItems(manifest?.items ?? []);
+    // แบบทดสอบหลังเรียนถูกย้ายไปรวมเป็นข้อสอบระดับคอร์สแล้ว จึงซ่อน SCO quiz รุ่นเดิม
+    const items = flattenPlayableItems(manifest?.items ?? []).filter(
+      (item) => (item.type ?? item.kind ?? (item.identifier.includes('QUIZ') ? 'quiz' : 'lesson')) !== 'quiz'
+    );
     return items.map((item) => ({
       ...item,
+      // รองรับทั้ง manifest รุ่นใหม่ (type) และรุ่นเดิม (kind)
+      type: item.type ?? item.kind ?? (item.identifier.includes('QUIZ') ? 'quiz' : 'lesson'),
       completed: item.href ? completedScos.includes(item.href) : false,
     }));
   }, [manifest, completedScos]);
@@ -255,6 +285,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   function handleSelectItem(href: string | null) {
     if (!href || href === currentPath) return;
     setCurrentPath(href);
+    if (window.innerWidth < 1024) setSidebarOpen(false);
   }
 
   // สลับไปเลสสันอื่นในคอร์ส — เปลี่ยน route ทำให้ effect ที่ผูกกับ lessonId รันใหม่ทั้งหมด
@@ -265,6 +296,23 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   function handleExit() {
     router.push(`/dashboard/student/courses/${courseId}`);
+  }
+
+  const previousCourseLesson = courseLessonIndex > 0 ? courseLessons[courseLessonIndex - 1] : null;
+  const nextCourseLesson =
+    courseLessonIndex >= 0 && courseLessonIndex < courseLessons.length - 1
+      ? courseLessons[courseLessonIndex + 1]
+      : null;
+
+  function handlePrevious(): void {
+    if (prevItem) handleSelectItem(prevItem.href);
+    else if (previousCourseLesson) handleSelectLesson(previousCourseLesson.id);
+  }
+
+  function handleNext(): void {
+    if (nextItem) handleSelectItem(nextItem.href);
+    else if (nextCourseLesson) handleSelectLesson(nextCourseLesson.id);
+    else router.push(`/dashboard/student/courses/${courseId}/final-exam`);
   }
 
   function renderMenuItems(items: ScormMenuItem[], depth = 0) {
@@ -307,21 +355,32 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   }
 
   return (
-    <div className="w-full h-screen bg-[#0B1220] flex select-none overflow-hidden">
+    <div className="relative flex h-[100dvh] w-full select-none overflow-hidden bg-[#07101F]">
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="ปิดเมนูบทเรียน"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/65 backdrop-blur-sm lg:hidden"
+        />
+      )}
       {/* Sidebar */}
       {sidebarOpen && (
-        <div className="w-80 bg-gradient-to-b from-[#0F1B3D] to-[#0B1430] border-r border-white/[0.06] flex flex-col shrink-0">
-          <div className="px-5 pt-5 pb-4 border-b border-white/[0.06]">
+        <aside className="fixed inset-y-0 left-0 z-50 flex w-[min(88vw,340px)] shrink-0 flex-col border-r border-white/[0.07] bg-gradient-to-b from-[#111D3D] via-[#0C1732] to-[#081126] shadow-2xl lg:relative lg:z-auto lg:w-[340px] lg:shadow-none">
+          <div className="border-b border-white/[0.07] px-5 pb-5 pt-5">
             <div className="flex items-center justify-between mb-4">
-              <div className="w-9 h-9 rounded-xl bg-blue-500/15 flex items-center justify-center">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#60A5FA" strokeWidth="1.7" strokeLinejoin="round" />
-                  <path d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5" stroke="#60A5FA" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF795F] to-[#FF5135] text-[12px] font-black text-white shadow-lg shadow-orange-950/20">
+                  IE
+                </div>
+                <div>
+                  <p className="text-[13px] font-extrabold text-white">Interact Edu</p>
+                  <p className="text-[10.5px] font-medium uppercase tracking-[0.13em] text-slate-500">Learning room</p>
+                </div>
               </div>
               <button
                 onClick={() => setSidebarOpen(false)}
-                className="text-slate-400 hover:text-white transition-colors"
+                className="rounded-xl border border-white/[0.07] bg-white/[0.04] p-2.5 text-slate-400 transition-colors hover:bg-white/[0.09] hover:text-white"
                 title="ซ่อนเมนู"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -330,7 +389,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               </button>
             </div>
 
-            <p className="text-[14.5px] font-bold text-white leading-snug mb-1">
+            <p className="mb-1 text-[16px] font-extrabold leading-snug text-white">
               {displayCourseTitle}
             </p>
             {displayLessonTitle && (
@@ -339,13 +398,13 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
             {flatItems.length > 0 && (
               <>
-                <div className="flex items-center justify-between text-[11.5px] text-slate-400 mb-1.5">
+                <div className="mb-2 flex items-center justify-between text-[11.5px] text-slate-400">
                   <span>ความคืบหน้าบทเรียนนี้</span>
                   <span className="font-bold text-blue-300">{progressPercent}%</span>
                 </div>
-                <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/[0.07]">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#2563EB] to-[#38BDF8] transition-all duration-500"
+                    className="h-full rounded-full bg-gradient-to-r from-[#FF6B50] via-[#FF8B5E] to-[#FBBF24] transition-all duration-500"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -513,92 +572,67 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             )}
           </div>
 
-          <div className="p-3 border-t border-white/[0.06]">
+          <div className="border-t border-white/[0.07] p-4">
             <button
               onClick={handleExit}
-              className="w-full inline-flex items-center justify-center gap-2 text-[13px] font-semibold text-slate-200 bg-white/[0.06] hover:bg-white/[0.12] px-4 py-2.5 rounded-xl transition-colors"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.05] px-4 py-3 text-[13px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.11]"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
               </svg>
-              ออกจากห้องเรียน
+              Back to course
             </button>
           </div>
-        </div>
+        </aside>
       )}
 
       {/* Main Player View Area */}
-      <div className="flex-1 h-full flex flex-col min-h-0">
-        <div className="h-11 bg-white border-b border-[#0F1B3D]/[0.06] flex items-center justify-between px-5 shrink-0">
-          <div className="flex items-center gap-3">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-white/[0.07] bg-[#0B1528]/95 px-3 backdrop-blur sm:px-5">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button type="button" onClick={handleExit} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3 py-2.5 text-[12px] font-bold text-slate-200 transition hover:bg-white/[0.11] hover:text-white sm:px-4" title="กลับหน้ารายละเอียดคอร์ส">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+              <span className="hidden sm:inline">Back</span>
+            </button>
             {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="text-[#0F1B3D]/50 hover:text-[#0F1B3D] transition-colors"
-                title="เปิดเมนู"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 6h18M3 12h18M3 18h18" />
-                </svg>
+              <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-white/[0.09] bg-white/[0.05] p-2.5 text-slate-300 transition-colors hover:bg-white/[0.11] hover:text-white" title="เปิดเมนูบทเรียน">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
               </button>
             )}
-            <span className="text-[13px] font-semibold text-[#0F1B3D]">
-              {currentItem?.title ?? 'กำลังโหลดเนื้อหา'}
-            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[10.5px] font-bold uppercase tracking-[0.13em] text-[#FF846D]">{displayCourseTitle}</p>
+              <h1 className="truncate text-[13px] font-bold text-white sm:text-[15px]">{currentItem?.title ?? displayLessonTitle ?? 'กำลังโหลดเนื้อหา'}</h1>
+            </div>
           </div>
-          {flatItems.length > 0 && (
-            <span className="text-[12px] text-[#0F1B3D]/40 font-medium">
-              {currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length}
-            </span>
-          )}
+          <div className="ml-3 flex shrink-0 items-center gap-3">
+            {flatItems.length > 0 && <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />{progressPercent}% complete</div>}
+            <span className="rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-bold text-slate-400">{currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length || '–'}</span>
+          </div>
+        </header>
+
+        <div className="min-h-0 flex-1 bg-[radial-gradient(circle_at_top,#17233A_0%,#07101F_58%)] p-2 sm:p-4 lg:p-5">
+          <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/[0.08] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] sm:rounded-2xl">
+            {loadError ? (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[#0D172A] px-6 text-center text-sm"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">!</span><p className="font-bold text-red-300">โหลดเนื้อหาไม่สำเร็จ</p><p className="text-xs text-slate-500">{loadError}</p></div>
+            ) : currentPath ? (
+              <iframe ref={iframeRef} key={currentPath} src={`/api/scorm/${courseId}/${lessonId}/${currentPath}`} className="absolute inset-0 h-full w-full border-0 bg-white" title={currentItem?.title ?? displayLessonTitle ?? 'บทเรียน'} allowFullScreen />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[#0D172A] text-sm text-slate-400"><span className="h-7 w-7 animate-spin rounded-full border-2 border-white/10 border-t-[#FF795F]" />กำลังโหลดเนื้อหาบทเรียน...</div>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 relative min-h-0 bg-[#0B1220]">
-          {loadError ? (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-sm">
-              <p className="text-red-400 font-medium">โหลดเนื้อหาไม่สำเร็จ</p>
-              <p className="text-slate-500 text-xs">{loadError}</p>
-            </div>
-          ) : currentPath ? (
-            <iframe
-              ref={iframeRef}
-              key={currentPath}
-              src={`/api/scorm/${courseId}/${lessonId}/${currentPath}`}
-              className="w-full h-full border-0 absolute top-0 left-0"
-              allowFullScreen
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
-              กำลังโหลดเนื้อหาบทเรียน...
-            </div>
-          )}
-        </div>
-
-        {/* แถบควบคุม ก่อนหน้า/ถัดไป */}
-        {flatItems.length > 0 && (
-          <div className="h-14 bg-white border-t border-[#0F1B3D]/[0.08] flex items-center justify-between px-5 shrink-0">
-            <button
-              onClick={() => prevItem && handleSelectItem(prevItem.href)}
-              disabled={!prevItem}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#0F1B3D] disabled:text-[#0F1B3D]/25 disabled:cursor-not-allowed hover:text-blue-600 transition-colors"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-              ก่อนหน้า
+        {(flatItems.length > 0 || courseLessons.length > 0) && (
+          <footer className="flex h-[76px] shrink-0 items-center justify-between border-t border-white/[0.07] bg-[#0B1528] px-3 sm:px-5">
+            <button onClick={handlePrevious} disabled={!prevItem && !previousCourseLesson} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12.5px] font-bold text-slate-300 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:px-4">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg><span className="hidden sm:inline">ก่อนหน้า</span>
             </button>
-
-            <button
-              onClick={() => nextItem && handleSelectItem(nextItem.href)}
-              disabled={!nextItem}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-white bg-[#0F1B3D] hover:bg-blue-700 disabled:bg-[#0F1B3D]/20 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition-colors"
-            >
-              ถัดไป
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 6l6 6-6 6" />
-              </svg>
+            <div className="min-w-0 px-3 text-center"><p className="truncate text-[11.5px] font-semibold text-slate-400">{displayLessonTitle ?? currentItem?.title}</p><p className="mt-0.5 text-[10.5px] text-slate-600">บันทึกความคืบหน้าอัตโนมัติ</p></div>
+            <button onClick={handleNext} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#FF684D] to-[#FF8066] px-4 py-2.5 text-[12.5px] font-extrabold text-white shadow-lg shadow-orange-950/20 transition hover:brightness-110 sm:px-5">
+              {nextItem ? 'ถัดไป' : nextCourseLesson ? 'บทเรียนถัดไป' : 'ไปทำข้อสอบหลังเรียน'}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
             </button>
-          </div>
+          </footer>
         )}
       </div>
     </div>
