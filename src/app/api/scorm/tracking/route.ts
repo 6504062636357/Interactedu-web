@@ -82,6 +82,19 @@ interface ManifestItem {
   type?: 'lesson' | 'quiz';
 }
 
+interface ExistingTracking {
+  video_completed: boolean | null;
+  quiz_passed: boolean | null;
+  completed_scos: string[] | null;
+  score_raw: number | string | null;
+  quiz_score_recorded?: boolean | null;
+}
+
+function isMissingSchemaField(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === 'PGRST204' || /column .* does not exist|schema cache/i.test(error.message ?? '');
+}
+
 // เดินทุกกิ่งของ manifest เก็บเฉพาะ href ของ SCO ประเภทวิดีโอ (ไม่ใช่ quiz)
 function collectVideoScoHrefs(items: ManifestItem[]): string[] {
   const result: string[] = [];
@@ -106,7 +119,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { lessonId, courseId, lessonStatus, scoreRaw, suspendData, scoType, scoIdentifier } = body;
+    const { lessonId, courseId, lessonStatus, suspendData, scoType, scoIdentifier } = body;
     // scoType: "lesson" | "quiz"
     // scoIdentifier: href/identifier เฉพาะของ SCO นี้ ใช้แยกว่า SCO ไหนจบ
 
@@ -121,12 +134,27 @@ export async function POST(request: NextRequest) {
     if (!enrollment) return NextResponse.json({ error: 'Enrollment not found' }, { status: 404 });
 
     // 2. ดึงแถวเดิม (ถ้ามี) เพื่อ merge สถานะ ไม่ให้ SCO นึงเขียนทับอีก SCO
-    const { data: existing } = await supabase
+    const modernTrackingRes = await supabase
       .from('scorm_tracking')
-      .select('video_completed, quiz_passed, completed_scos')
+      .select('video_completed, quiz_passed, completed_scos, score_raw, quiz_score_recorded')
       .eq('enrollment_id', enrollment.id)
       .eq('lesson_id', lessonId)
       .maybeSingle();
+
+    let existing = modernTrackingRes.data as ExistingTracking | null;
+    let supportsTrustedQuizFlag = true;
+    if (modernTrackingRes.error) {
+      if (!isMissingSchemaField(modernTrackingRes.error)) throw modernTrackingRes.error;
+      supportsTrustedQuizFlag = false;
+      const legacyTrackingRes = await supabase
+        .from('scorm_tracking')
+        .select('video_completed, quiz_passed, completed_scos, score_raw')
+        .eq('enrollment_id', enrollment.id)
+        .eq('lesson_id', lessonId)
+        .maybeSingle();
+      if (legacyTrackingRes.error) throw legacyTrackingRes.error;
+      existing = legacyTrackingRes.data as ExistingTracking | null;
+    }
 
     const existingScos: string[] = Array.isArray(existing?.completed_scos) ? existing.completed_scos : [];
 
@@ -158,10 +186,13 @@ export async function POST(request: NextRequest) {
     // video_completed / quiz_passed ยังคงไว้เป็น "จบทั้งเลสสัน" เผื่อโค้ดส่วนอื่นยังอ้างอิงอยู่
     const videoCompleted = allVideoScosDone || existing?.video_completed || false;
 
-    const quizPassed =
-      scoType === 'quiz'
-        ? lessonStatus === 'passed' || existing?.quiz_passed || false
-        : existing?.quiz_passed ?? false;
+    // Final scores are written by /final-quiz after grading against database
+    // choices. Never overwrite that trusted result with a browser-supplied score.
+    const quizPassed = supportsTrustedQuizFlag
+      ? existing?.quiz_score_recorded
+        ? existing.quiz_passed ?? false
+        : false
+      : existing?.quiz_passed ?? false;
 
     // 4. Upsert แถวเดียวต่อ 1 lesson แต่ merge completed_scos + derive lesson_status ให้ถูกต้อง
     const { error: upsertError } = await supabase
@@ -170,7 +201,7 @@ export async function POST(request: NextRequest) {
         enrollment_id: enrollment.id,
         lesson_id: lessonId,
         lesson_status: derivedLessonStatus,
-        score_raw: scoreRaw,
+        score_raw: existing?.score_raw ?? null,
         suspend_data: suspendData,
         video_completed: videoCompleted,
         quiz_passed: quizPassed,
@@ -183,8 +214,11 @@ export async function POST(request: NextRequest) {
     if (upsertError) throw upsertError;
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Tracking Sync Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Tracking sync failed' },
+      { status: 500 }
+    );
   }
 }

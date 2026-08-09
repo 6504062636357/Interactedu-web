@@ -217,17 +217,11 @@ export default function TeacherCoursesPage(): ReactElement {
                 <p className="text-[12px] text-red-500 mb-3">เหตุผล: {course.latestRejectionReason}</p>
               )}
               <Link
-                href={`/dashboard/teacher/courses/${course.id}/lessons/new`}
+                href={`/dashboard/teacher/courses/${course.id}`}
                 className="mt-auto inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
               >
-                จัดการบทเรียน
+                เปิดพื้นที่จัดการคอร์ส
               </Link>
-               <Link
-                  href={`/dashboard/teacher/courses/${course.id}/materials`}
-                  className="flex-1 inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-                >
-                  เอกสารประกอบ
-                </Link>
             </div>
           ))}
         </div>
