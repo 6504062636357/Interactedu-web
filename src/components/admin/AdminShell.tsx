@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import LogoutButton from "@/components/LogoutButton";
+import NotificationBell from "@/components/NotificationBell";
 
 type AdminShellProps = {
   children: ReactNode;
@@ -144,35 +145,42 @@ export default function AdminShell({ children, displayName, pendingCourses }: Ad
 
   return (
     <div className="min-h-screen bg-[#F6F7FA] text-[#0F1B3D]">
+      <div className="fixed right-[4.5rem] top-3 z-50 lg:right-8 lg:top-6">
+        <NotificationBell />
+      </div>
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur lg:hidden">
         <div className="flex h-16 items-center justify-between px-5">
           <Link href="/dashboard/admin" className="flex items-center gap-2.5 font-extrabold tracking-[-0.02em]">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0F1B3D] text-[#FF795F]">IE</span>
             Interact Edu
           </Link>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((open) => !open)}
-            className="rounded-xl border border-slate-200 p-2.5 text-slate-600"
-            aria-expanded={menuOpen}
-            aria-label="เปิดเมนูผู้ดูแลระบบ"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              className="rounded-xl border border-slate-200 p-2.5 text-slate-600"
+              aria-expanded={menuOpen}
+              aria-label="เปิดเมนูผู้ดูแลระบบ"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
         {menuOpen && <div className="border-t border-slate-100 px-4 py-4">{nav}</div>}
       </header>
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-slate-200/80 bg-white px-5 py-6 lg:flex">
-        <Link href="/dashboard/admin" className="mb-9 flex items-center gap-3 px-1">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0F1B3D] text-[13px] font-black text-[#FF795F] shadow-sm">IE</span>
-          <div>
-            <p className="text-[16px] font-extrabold tracking-[-0.02em]">Interact Edu</p>
-            <p className="text-[11.5px] font-medium text-slate-400">Admin workspace</p>
-          </div>
-        </Link>
+        <div className="mb-9 flex items-center gap-3 px-1">
+          <Link href="/dashboard/admin" className="flex min-w-0 items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#0F1B3D] text-[13px] font-black text-[#FF795F] shadow-sm">IE</span>
+            <div className="min-w-0">
+              <p className="truncate text-[16px] font-extrabold tracking-[-0.02em]">Interact Edu</p>
+              <p className="text-[11.5px] font-medium text-slate-400">Admin workspace</p>
+            </div>
+          </Link>
+        </div>
 
         <p className="mb-2 px-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-slate-400">การจัดการ</p>
         {nav}

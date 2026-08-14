@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureCertificateForCourse } from "@/lib/certificates/service";
 import { gradeFinalQuiz, type FinalQuizAnswer } from "@/lib/scorm/grade-final-quiz";
+import { createNotification } from "@/lib/notifications/service";
 import { createClient } from "@/utils/supabase/server";
 
 export async function POST(
@@ -26,6 +27,26 @@ export async function POST(
 
   try {
     const grade = await gradeFinalQuiz(supabase, user.id, lessonId, body.answers);
+    const { data: lesson } = await supabase
+      .from("lessons")
+      .select("title")
+      .eq("id", lessonId)
+      .maybeSingle();
+    const lessonName = lesson?.title ?? "นี้";
+
+    await createNotification({
+      userId: user.id,
+      type: grade.passed ? "exercise_passed" : "exercise_failed",
+      title: grade.passed ? "ผ่านแบบฝึกหัดแล้ว" : "แบบฝึกหัดยังไม่ผ่าน",
+      message: grade.passed
+        ? `คุณผ่านแบบฝึกหัดบท ${lessonName} แล้ว คะแนน ${grade.scorePercentage}%`
+        : `คะแนนแบบฝึกหัดบท ${lessonName} ยังไม่ผ่านเกณฑ์ กรุณาทบทวนและลองใหม่`,
+      relatedType: "lesson",
+      relatedId: lessonId,
+      actionUrl: `/play/${grade.courseId}/${lessonId}`,
+      dedupeKey: grade.passed ? `exercise_passed:${user.id}:${lessonId}` : null,
+    });
+
     let certificateIssued = false;
     let certificateId: string | null = null;
     let certificateDownloadUrl: string | null = null;

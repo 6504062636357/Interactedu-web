@@ -74,6 +74,7 @@
 // src/app/api/scorm/tracking/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { createNotification } from '@/lib/notifications/service';
 
 interface ManifestItem {
   identifier: string;
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest) {
     // 3. ดึง manifest ของเลสสันนี้ เพื่อรู้ว่าต้องจบกี่ SCO วิดีโอถึงจะนับว่าเลสสัน "completed" จริง
     const { data: lessonRow } = await supabase
       .from('lessons')
-      .select('scorm_manifest')
+      .select('title, scorm_manifest')
       .eq('id', lessonId)
       .maybeSingle();
 
@@ -212,6 +213,19 @@ export async function POST(request: NextRequest) {
       });
 
     if (upsertError) throw upsertError;
+
+    if (videoCompleted && !existing?.video_completed) {
+      await createNotification({
+        userId: user.id,
+        type: 'lesson_completed',
+        title: 'เรียนจบบทเรียนแล้ว',
+        message: `เรียนบท ${lessonRow?.title ?? 'นี้'} สำเร็จแล้ว`,
+        relatedType: 'lesson',
+        relatedId: lessonId,
+        actionUrl: `/play/${courseId}/${lessonId}`,
+        dedupeKey: `lesson_completed:${user.id}:${lessonId}`,
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

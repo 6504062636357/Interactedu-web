@@ -3,6 +3,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
+import { notifyAdmins } from "@/lib/notifications/service";
 
 export interface DraftChoiceInput {
   text: string;
@@ -331,9 +332,10 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
 
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
 
+  const submittedAt = new Date().toISOString();
   const { data: submittedDraft, error } = await supabase
     .from("lesson_drafts")
-    .update({ status: "pending_review", submitted_at: new Date().toISOString() })
+    .update({ status: "pending_review", submitted_at: submittedAt })
     .eq("id", draftId)
     .eq("teacher_id", user.id)
     .select("id")
@@ -349,13 +351,23 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
     .update({ status: "pending" })
     .eq("id", courseId)
     .eq("created_by", user.id)
-    .select("id")
+    .select("id, title")
     .maybeSingle();
 
   if (courseError || !pendingCourse) {
     console.error("Failed to update course status:", courseError?.message ?? "no rows updated");
     return { error: courseError?.message ?? "ไม่พบคอร์ส หรือไม่มีสิทธิ์อัปเดตสถานะ" };
   }
+
+  await notifyAdmins({
+    type: "course_review_pending",
+    title: "มีคอร์สใหม่รอตรวจสอบ",
+    message: `มีคอร์ส ${pendingCourse.title} จากผู้สอนรอการตรวจสอบ`,
+    relatedType: "course",
+    relatedId: courseId,
+    actionUrl: `/dashboard/admin/courses/${courseId}/review`,
+    dedupeKey: `course_review_pending:${courseId}:${submittedAt}`,
+  });
 
   revalidatePath("/dashboard/teacher");
   revalidatePath("/dashboard/teacher/courses");
