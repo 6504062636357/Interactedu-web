@@ -177,14 +177,19 @@ export default async function AdminDashboardPage(): Promise<ReactElement> {
             <Link href="/dashboard/admin/users" className="text-[12px] font-bold text-[#3157D5] hover:underline">ดูทั้งหมด</Link>
           </div>
           {recentUsers.length ? recentUsers.map((user) => (
-            <div key={user.id} className="flex items-center gap-3 border-b border-slate-100 py-3.5 last:border-0">
+            <Link
+              key={user.id}
+              href={`/dashboard/admin/users/${user.id}`}
+              className="group flex items-center gap-3 border-b border-slate-100 py-3.5 outline-none transition-colors last:border-0 hover:bg-slate-50 focus-visible:rounded-xl focus-visible:ring-2 focus-visible:ring-[#3157D5]/40"
+            >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[12px] font-bold text-slate-600">{initials(user.full_name)}</span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-bold text-slate-800">{user.full_name ?? "ไม่ระบุชื่อ"}</p>
+                <p className="truncate text-[13px] font-bold text-slate-800 transition-colors group-hover:text-[#3157D5] group-hover:underline">{user.full_name ?? "ไม่ระบุชื่อ"}</p>
                 <p className="mt-0.5 text-[11px] text-slate-400">{relativeTimeThai(user.created_at)}</p>
               </div>
               <RoleBadge role={user.role} />
-            </div>
+              <span className="text-xs font-bold text-slate-300 transition-colors group-hover:text-[#3157D5]" aria-hidden="true">→</span>
+            </Link>
           )) : <EmptyState title="ยังไม่มีผู้ใช้" description="บัญชีใหม่จะแสดงในส่วนนี้" />}
         </section>
       </div>

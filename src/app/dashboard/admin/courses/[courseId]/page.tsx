@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import AdminCourseDetailsForm from "@/components/admin/AdminCourseDetailsForm";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
 import { createClient } from "@/utils/supabase/server";
 
@@ -15,7 +16,11 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
   const { courseId } = await params;
   const supabase = await createClient();
   const [courseRes, certificateRes, lessonsRes] = await Promise.all([
-    supabase.from("courses").select("id, title, course_code, status, created_by").eq("id", courseId).maybeSingle(),
+    supabase
+      .from("courses")
+      .select("id, title, course_code, category, description, price, cover_image_url, status, created_by")
+      .eq("id", courseId)
+      .maybeSingle(),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description").eq("id", courseId).maybeSingle(),
     supabase.from("lessons").select("id, title, order_index, lesson_drafts(id, status, created_at)").eq("course_id", courseId).order("order_index", { ascending: true }),
   ]);
@@ -41,6 +46,16 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
           <Link href={`/dashboard/admin/courses/${course.id}/lessons/new`} className="rounded-full bg-[#FF5A3C] px-4 py-2.5 text-[12.5px] font-bold text-white">+ เพิ่มบทเรียน</Link>
         </div>
       </div>
+
+      <AdminCourseDetailsForm
+        courseId={course.id}
+        initialTitle={course.title}
+        initialCourseCode={course.course_code}
+        initialCategory={course.category}
+        initialDescription={course.description}
+        initialPrice={Number(course.price)}
+        initialCoverImageUrl={course.cover_image_url}
+      />
 
       {certificate ? <div className="mb-7"><CertificateSettingsForm courseId={course.id} initialEnabled={certificate.certificate_enabled} initialPassPercentage={Number(certificate.certificate_pass_percentage)} initialTitle={certificate.certificate_title} initialDescription={certificate.certificate_description} /></div> : <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>}
 

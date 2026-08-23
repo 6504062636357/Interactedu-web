@@ -1,112 +1,274 @@
-// components/NotificationBell.tsx
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { NotificationRecord } from "@/lib/notifications/types";
 import { createClient } from "@/utils/supabase/client";
 
-const supabase = createClient();
-
-interface NotificationRow {
-  id: string;
-  title: string;
-  message: string | null;
-  link: string | null;
-  is_read: boolean;
-  created_at: string;
+interface NotificationsResponse {
+  notifications: NotificationRecord[];
+  unread_count: number;
+}
+function relativeTime(value: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return "เมื่อสักครู่";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} นาทีที่แล้ว`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} ชั่วโมงที่แล้ว`;
+  if (seconds < 604_800) return `${Math.floor(seconds / 86_400)} วันที่แล้ว`;
+  return new Date(value).toLocaleDateString("th-TH", { dateStyle: "medium" });
 }
 
 export default function NotificationBell(): ReactElement {
-  const [items, setItems] = useState<NotificationRow[]>([]);
+  const [items, setItems] = useState<NotificationRecord[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const readStateRef = useRef(new Map<string, boolean>());
+  const router = useRouter();
 
   useEffect(() => {
+    const supabase = createClient();
+    let active = true;
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
     async function init() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || !active) return;
 
-      const { data } = await supabase
-        .from("notifications")
-        .select("id, title, message, link, is_read, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
+        const notificationsResponse = await fetch("/api/me/notifications?limit=20", {
+          cache: "no-store",
+        });
 
-      setItems(data ?? []);
+        if (!active) return;
+        if (notificationsResponse.ok) {
+          const result = (await notificationsResponse.json()) as NotificationsResponse;
+          setItems(result.notifications);
+          readStateRef.current = new Map(
+            result.notifications.map((notification) => [notification.id, notification.is_read])
+          );
+          setUnreadCount(result.unread_count);
+        } else {
+          setLoadError(true);
+        }
 
-      channel = supabase
-        .channel("notifications-" + user.id)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-          (payload) => {
-            setItems((prev) => [payload.new as NotificationRow, ...prev]);
-          }
-        )
-        .subscribe();
+        channel = supabase
+          .channel(`notifications-${user.id}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "notifications",
+              filter: `user_id=eq.${user.id}`,
+            },
+            (payload) => {
+              const notification = payload.new as NotificationRecord;
+              const knownState = readStateRef.current.get(notification.id);
+              readStateRef.current.set(notification.id, notification.is_read);
+              setItems((previous) => {
+                if (previous.some((item) => item.id === notification.id)) return previous;
+                return [notification, ...previous].slice(0, 20);
+              });
+              if (knownState === undefined && !notification.is_read) {
+                setUnreadCount((count) => count + 1);
+              }
+            }
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "notifications",
+              filter: `user_id=eq.${user.id}`,
+            },
+            (payload) => {
+              const updated = payload.new as NotificationRecord;
+              const previousIsRead = readStateRef.current.get(updated.id);
+              readStateRef.current.set(updated.id, updated.is_read);
+
+              setItems((previous) =>
+                previous.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+              );
+
+              if (previousIsRead !== updated.is_read) {
+                setUnreadCount((count) =>
+                  Math.max(0, count + (updated.is_read ? -1 : 1))
+                );
+              }
+            }
+          )
+          .subscribe((status, error) => {
+            if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+              console.warn("[notifications] Realtime unavailable", error);
+            }
+          });
+      } catch (error) {
+        console.warn("[notifications] init failed", error);
+        setLoadError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
     }
 
     void init();
-    return () => { if (channel) supabase.removeChannel(channel); };
+
+    return () => {
+      active = false;
+      if (channel) void supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, []);
 
-  const unreadCount = items.filter((n) => !n.is_read).length;
+  async function markRead(notification: NotificationRecord): Promise<void> {
+    let readRequest: Promise<Response> | null = null;
+    if (!notification.is_read) {
+      readStateRef.current.set(notification.id, true);
+      setItems((previous) =>
+        previous.map((item) =>
+          item.id === notification.id
+            ? { ...item, is_read: true, read_at: new Date().toISOString() }
+            : item
+        )
+      );
+      setUnreadCount((count) => Math.max(0, count - 1));
+      readRequest = fetch(`/api/me/notifications/${notification.id}/read`, {
+        method: "PATCH",
+      });
+    }
 
-  async function markAllRead() {
-    const unreadIds = items.filter((n) => !n.is_read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
-    setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    await supabase.from("notifications").update({ is_read: true }).in("id", unreadIds);
+    setOpen(false);
+    router.push(`/dashboard/notifications/${notification.id}`);
+
+    if (readRequest) {
+      const response = await readRequest;
+      if (!response.ok) {
+        readStateRef.current.set(notification.id, false);
+        setItems((previous) =>
+          previous.map((item) => (item.id === notification.id ? { ...item, is_read: false } : item))
+        );
+        setUnreadCount((count) => count + 1);
+      }
+    }
+  }
+
+  async function markAllRead(): Promise<void> {
+    if (unreadCount === 0) return;
+    const previousItems = items;
+    const previousCount = unreadCount;
+    const previousReadState = new Map(readStateRef.current);
+    items.forEach((item) => readStateRef.current.set(item.id, true));
+    setItems((current) => current.map((item) => ({ ...item, is_read: true })));
+    setUnreadCount(0);
+
+    const response = await fetch("/api/me/notifications/read-all", { method: "PATCH" });
+    if (!response.ok) {
+      readStateRef.current = previousReadState;
+      setItems(previousItems);
+      setUnreadCount(previousCount);
+    }
   }
 
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => { setOpen((o) => !o); if (!open) void markAllRead(); }}
-        className="relative w-10 h-10 rounded-full bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors"
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="relative flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
+        aria-label={unreadCount > 0 ? `การแจ้งเตือนที่ยังไม่อ่าน ${unreadCount} รายการ` : "การแจ้งเตือน"}
+        aria-expanded={open}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M18 8C18 6.4 17.4 4.9 16.2 3.8C15.1 2.6 13.6 2 12 2C10.4 2 8.9 2.6 7.8 3.8C6.6 4.9 6 6.4 6 8C6 15 3 17 3 17H21C21 17 18 15 18 8Z" stroke="#334155" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M13.7 21C13.5 21.3 13.3 21.6 13 21.7C12.7 21.9 12.3 22 12 22C11.7 22 11.3 21.9 11 21.7C10.7 21.6 10.5 21.3 10.3 21" stroke="#334155" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M18 8C18 4.7 15.3 2 12 2S6 4.7 6 8c0 7-3 9-3 9h18s-3-2-3-9Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M14 21h-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 w-4.5 h-4.5 min-w-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-            {unreadCount > 9 ? "9+" : unreadCount}
+          <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#EB4A2D] px-1 text-[10px] font-bold text-white">
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-100 shadow-lg py-2 z-50 max-h-96 overflow-y-auto">
-          {items.length === 0 ? (
-            <p className="text-[13px] text-slate-400 text-center py-8">ยังไม่มีการแจ้งเตือน</p>
-          ) : (
-            items.map((n) => (
-              <Link
-                key={n.id}
-                href={n.link ?? "#"}
-                onClick={() => setOpen(false)}
-                className="block px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"
+        <div className="absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-extrabold text-[#0F1B3D]">การแจ้งเตือน</p>
+              <p className="text-[11px] text-slate-400">ยังไม่อ่าน {unreadCount} รายการ</p>
+            </div>
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={() => void markAllRead()}
+                className="text-[11.5px] font-bold text-[#3157D5] hover:underline"
               >
-                <p className="text-[13px] font-semibold text-slate-800">{n.title}</p>
-                {n.message && <p className="text-[12px] text-slate-500 mt-0.5">{n.message}</p>}
-                <p className="text-[11px] text-slate-400 mt-1">
-                  {new Date(n.created_at).toLocaleString("th-TH")}
-                </p>
-              </Link>
-            ))
-          )}
+                อ่านทั้งหมด
+              </button>
+            )}
+          </div>
+
+          <div className="max-h-[24rem] overflow-y-auto" aria-live="polite">
+            {loading ? (
+              <p className="py-10 text-center text-[13px] text-slate-400">กำลังโหลด...</p>
+            ) : loadError ? (
+              <div className="px-5 py-10 text-center">
+                <p className="text-[13px] font-semibold text-slate-500">โหลดรายการแจ้งเตือนไม่สำเร็จ</p>
+                <p className="mt-1 text-[11.5px] text-slate-400">กรุณารีเฟรชหน้าแล้วลองอีกครั้ง</p>
+              </div>
+            ) : items.length === 0 ? (
+              <p className="py-10 text-center text-[13px] text-slate-400">ยังไม่มีการแจ้งเตือน</p>
+            ) : (
+              items.map((notification) => (
+                <button
+                  type="button"
+                  key={notification.id}
+                  onClick={() => void markRead(notification)}
+                  className={`block w-full border-b border-slate-100 px-4 py-3 text-left transition-colors last:border-0 hover:bg-slate-50 ${
+                    notification.is_read ? "bg-white" : "bg-blue-50/60"
+                  }`}
+                >
+                  <span className="flex items-start gap-3">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${notification.is_read ? "bg-slate-200" : "bg-[#3157D5]"}`} />
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-bold text-slate-800">{notification.title}</span>
+                      <span className="mt-0.5 block overflow-hidden text-ellipsis text-[12px] leading-5 text-slate-500">
+                        {notification.message}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-slate-400">{relativeTime(notification.created_at)}</span>
+                    </span>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <Link
+            href="/dashboard/notifications"
+            onClick={() => setOpen(false)}
+            className="block border-t border-slate-100 px-4 py-3 text-center text-[12.5px] font-bold text-[#3157D5] hover:bg-slate-50"
+          >
+            ดูการแจ้งเตือนทั้งหมด
+          </Link>
         </div>
       )}
     </div>

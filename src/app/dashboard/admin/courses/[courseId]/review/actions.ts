@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { generateScormPackage } from "@/lib/scorm/generate";
+import { createNotification } from "@/lib/notifications/service";
 import { revalidatePath } from "next/cache";
 
 async function requireAdmin() {
@@ -20,6 +21,12 @@ async function requireAdmin() {
 export async function approveCourse(courseId: string): Promise<{ error?: string }> {
   const { supabase, user, error: authError } = await requireAdmin();
   if (authError) return { error: authError };
+
+  const { data: courseInfo } = await supabase
+    .from("courses")
+    .select("title, created_by")
+    .eq("id", courseId)
+    .maybeSingle();
 
   // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้
   const { data: lessons, error: lessonsError } = await supabase
@@ -82,6 +89,19 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     return { error: `อัปเดตสถานะคอร์สไม่สำเร็จ: ${courseUpdateError.message}` };
   }
 
+  if (courseInfo?.created_by) {
+    await createNotification({
+      userId: courseInfo.created_by,
+      type: "course_approved",
+      title: "คอร์สได้รับการอนุมัติ",
+      message: `คอร์ส ${courseInfo.title} ได้รับการอนุมัติและเผยแพร่แล้ว`,
+      relatedType: "course",
+      relatedId: courseId,
+      actionUrl: `/dashboard/teacher/courses/${courseId}`,
+      dedupeKey: `course_approved:${courseId}`,
+    });
+  }
+
   revalidatePath("/dashboard/admin/courses");
   revalidatePath("/dashboard/admin");
   revalidatePath("/admin/review");
@@ -94,6 +114,12 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
   if (authError) return { error: authError };
 
   if (!reason.trim()) return { error: "กรุณาระบุเหตุผลที่ปฏิเสธ" };
+
+  const { data: courseInfo } = await supabase
+    .from("courses")
+    .select("title, created_by")
+    .eq("id", courseId)
+    .maybeSingle();
 
   const { data: lessons, error: lessonsError } = await supabase
     .from("lessons")
@@ -138,6 +164,18 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
   if (courseUpdateError) {
     console.error("[rejectCourse] course status update failed:", courseUpdateError);
     return { error: `อัปเดตสถานะคอร์สไม่สำเร็จ: ${courseUpdateError.message}` };
+  }
+
+  if (courseInfo?.created_by) {
+    await createNotification({
+      userId: courseInfo.created_by,
+      type: "course_rejected",
+      title: "คอร์สถูกส่งกลับให้แก้ไข",
+      message: `คอร์ส ${courseInfo.title} ถูกส่งกลับเพื่อแก้ไข`,
+      relatedType: "course",
+      relatedId: courseId,
+      actionUrl: `/dashboard/teacher/courses/${courseId}`,
+    });
   }
 
   revalidatePath("/dashboard/admin/courses");
@@ -237,6 +275,24 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
         if (courseUpdateError) {
           console.error("[approveLesson] course status update failed:", courseUpdateError);
           // ไม่ return error ตรงนี้ เพราะ lesson อนุมัติสำเร็จแล้ว แค่ course status อัปเดตไม่ทัน
+        } else {
+          const { data: courseInfo } = await supabase
+            .from("courses")
+            .select("title, created_by")
+            .eq("id", courseId)
+            .maybeSingle();
+          if (courseInfo?.created_by) {
+            await createNotification({
+              userId: courseInfo.created_by,
+              type: "course_approved",
+              title: "คอร์สได้รับการอนุมัติ",
+              message: `คอร์ส ${courseInfo.title} ได้รับการอนุมัติและเผยแพร่แล้ว`,
+              relatedType: "course",
+              relatedId: courseId,
+              actionUrl: `/dashboard/teacher/courses/${courseId}`,
+              dedupeKey: `course_approved:${courseId}`,
+            });
+          }
         }
       }
     }

@@ -3,6 +3,7 @@ import { createClient } from "@/utils/supabase/server";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import Link from "next/link";
+import NotificationBell from "@/components/NotificationBell";
 export default async function StudentLayout({ children }: { children: ReactNode }): Promise<ReactElement> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -23,7 +24,10 @@ export default async function StudentLayout({ children }: { children: ReactNode 
                 </div>
                 <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
               </Link>
-            <ProfileDropdown displayName={displayName} role="student" />
+            <div className="flex items-center gap-3">
+              <NotificationBell />
+              <ProfileDropdown displayName={displayName} role="student" />
+            </div>
           </div>
         </div>
       </header>

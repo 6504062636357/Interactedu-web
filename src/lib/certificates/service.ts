@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateCertificatePdf } from "./pdf";
 import type { CertificateRecord, EnsureCertificateResult } from "./types";
+import { createNotification, notifyAdmins } from "@/lib/notifications/service";
 
 const CERTIFICATE_BUCKET = "certificates";
 
@@ -21,6 +22,7 @@ interface CourseRow {
   certificate_enabled: boolean;
   certificate_pass_percentage: number;
   certificate_title: string | null;
+  created_by: string | null;
 }
 
 interface TrackingRow {
@@ -91,7 +93,7 @@ export async function ensureCertificateForCourse({
     await Promise.all([
       supabase
         .from("courses")
-        .select("id, title, slug, certificate_enabled, certificate_pass_percentage, certificate_title")
+        .select("id, title, slug, certificate_enabled, certificate_pass_percentage, certificate_title, created_by")
         .eq("id", courseId)
         .maybeSingle(),
       supabase
@@ -186,20 +188,43 @@ export async function ensureCertificateForCourse({
   const number = certificateNumber(userId, course, issuedAt);
   const pdfPath = `${courseId}/${userId}/${number}.pdf`;
   const learnerName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Learner";
-  const pdf = await generateCertificatePdf({
-    certificateNo: number,
-    certificateTitle: course.certificate_title,
-    courseTitle: course.title,
-    learnerName,
-    scorePercentage,
-    passPercentage,
-    issuedAt,
-  });
+  let pdf: Uint8Array;
+  try {
+    pdf = await generateCertificatePdf({
+      certificateNo: number,
+      certificateTitle: course.certificate_title,
+      courseTitle: course.title,
+      learnerName,
+      scorePercentage,
+      passPercentage,
+      issuedAt,
+    });
+  } catch (error) {
+    await notifyAdmins({
+      type: "certificate_generation_failed",
+      title: "สร้าง Certificate ไม่สำเร็จ",
+      message: `ไม่สามารถสร้าง Certificate สำหรับ ${learnerName} ในคอร์ส ${course.title} ได้`,
+      relatedType: "course",
+      relatedId: courseId,
+      actionUrl: "/dashboard/admin/certificates",
+    });
+    throw error;
+  }
 
   const { error: uploadError } = await supabase.storage
     .from(CERTIFICATE_BUCKET)
     .upload(pdfPath, pdf, { contentType: "application/pdf", upsert: true });
-  if (uploadError) throw new Error(`Certificate PDF upload failed: ${uploadError.message}`);
+  if (uploadError) {
+    await notifyAdmins({
+      type: "certificate_generation_failed",
+      title: "อัปโหลด Certificate ไม่สำเร็จ",
+      message: `ไม่สามารถสร้าง Certificate สำหรับ ${learnerName} ในคอร์ส ${course.title} ได้`,
+      relatedType: "course",
+      relatedId: courseId,
+      actionUrl: "/dashboard/admin/certificates",
+    });
+    throw new Error(`Certificate PDF upload failed: ${uploadError.message}`);
+  }
 
   const { data: issuedData, error: issueError } = await supabase.rpc("issue_course_certificate", {
     p_course_id: courseId,
@@ -211,6 +236,31 @@ export async function ensureCertificateForCourse({
   if (!issuedData) throw new Error("Certificate issuance did not return a record");
 
   const certificate = asCertificateRecord(issuedData);
+
+  await createNotification({
+    userId,
+    type: "certificate_issued",
+    title: "ได้รับ Certificate แล้ว",
+    message: `ยินดีด้วย คุณผ่านคอร์ส ${course.title} และได้รับ Certificate แล้ว`,
+    relatedType: "certificate",
+    relatedId: certificate.id,
+    actionUrl: "/dashboard/student/certificates",
+    dedupeKey: `certificate_issued:${certificate.id}`,
+  });
+
+  if (course.created_by) {
+    await createNotification({
+      userId: course.created_by,
+      type: "student_completed_course",
+      title: "มีผู้เรียนเรียนจบคอร์ส",
+      message: `ผู้เรียน ${learnerName} เรียนจบคอร์ส ${course.title} แล้ว`,
+      relatedType: "course",
+      relatedId: courseId,
+      actionUrl: `/dashboard/teacher/courses/${courseId}`,
+      dedupeKey: `student_completed_course:${courseId}:${userId}`,
+    });
+  }
+
   return {
     passed: true,
     scorePercentage: certificate.score_percentage,
