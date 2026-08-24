@@ -1,4 +1,4 @@
-// app/teacher/courses/[courseId]/lessons/new/page.tsx
+// app/dashboard/teacher/courses/[courseId]/lessons/new/page.tsx
 import type { ReactElement } from "react";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
@@ -90,7 +90,12 @@ export async function CourseLessonEditorPage({
           </p>
         </div>
 
-        <LessonDraftForm courseId={course.id} moduleId={courseModule.id} initialData={initialData} />
+        <LessonDraftForm
+          courseId={course.id}
+          moduleId={courseModule.id}
+          initialData={initialData}
+          workspace={workspace}
+        />
       </main>
     </div>
   );

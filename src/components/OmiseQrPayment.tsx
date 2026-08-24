@@ -103,7 +103,7 @@ export default function OmiseQrPayment({ courseId, slug }: OmiseQrPaymentProps):
   if (state.step === "success") {
     return (
       <div className="text-center py-6">
-        <p className="text-[15px] font-bold text-[#00B37E]">ชำระเงินสำเร็จ 🎉</p>
+        <p className="text-[15px] font-bold text-[#00B37E]">ชำระเงินสำเร็จ </p>
         <p className="mt-1 text-[13px] text-[#0F1B3D]/50 font-medium">กำลังพาไปหน้าคอร์ส...</p>
       </div>
     );

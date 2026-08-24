@@ -9,15 +9,23 @@ interface StoredQuestion { question_text: string; explanation: string | null; or
 interface StoredDraft { id: string; created_at: string; quiz_questions: StoredQuestion[] }
 interface StoredLesson { id: string; order_index: number; lesson_drafts: StoredDraft[] }
 
+interface StoredExamConfig {
+  build_mode: "custom" | "preset";
+  total_questions: number;
+  preset_type: "quick_check" | "standard_final" | "challenging_final" | null;
+  custom_constraints: { lessonId: string; difficulty: "easy" | "medium" | "hard"; count: number }[] | null;
+}
+
 export default async function CourseExamManagementPage({ courseId, workspace }: { courseId: string; workspace: "teacher" | "admin" }): Promise<ReactElement> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirect=/dashboard/${workspace}/courses/${courseId}/exam`);
 
-  const [{ data: profile }, { data: course }, { data: lessonsData, error: lessonsError }] = await Promise.all([
+  const [{ data: profile }, { data: course }, { data: lessonsData, error: lessonsError }, { data: examConfigData }] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
     supabase.from("courses").select("id, title, created_by, certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
     supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
+    supabase.from("course_exam_configs").select("build_mode, total_questions, preset_type, custom_constraints").eq("course_id", courseId).maybeSingle(),
   ]);
 
   if (!course) notFound();
@@ -35,6 +43,8 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
     explanation: question.explanation,
     choices: [...question.quiz_choices].sort((a, b) => a.order_index - b.order_index).map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
   }));
+  
+  const examConfig = examConfigData as StoredExamConfig | null;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -46,7 +56,21 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
         ผู้เรียนจะทำบททดสอบนี้หลังเรียนครบทุกบท และต้องได้อย่างน้อย <strong>{Number(course.certificate_pass_percentage)}%</strong> เพื่อรับใบรับรอง {course.certificate_enabled ? "(เปิดใช้งานใบรับรองแล้ว)" : "(ขณะนี้ปิดการออกใบรับรอง)"}
       </div>
       {lessonsError && <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">โหลดคำถามเดิมไม่สำเร็จ: {lessonsError.message}</p>}
-      <CourseExamEditor courseId={courseId} initialQuestions={questions} />
+      <CourseExamEditor
+        courseId={courseId}
+        initialQuestions={questions}
+        lessons={lessons.map((lesson) => ({ id: lesson.id, title: `บทที่ ${lesson.order_index + 1}` }))}
+        initialExamConfig={
+          examConfig
+            ? {
+                buildMode: examConfig.build_mode,
+                totalQuestions: examConfig.total_questions,
+                presetType: examConfig.preset_type,
+                customConstraints: examConfig.custom_constraints,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

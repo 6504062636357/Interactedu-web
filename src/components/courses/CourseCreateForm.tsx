@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createCourse } from "@/app/dashboard/teacher/courses/actions";
 import { createClient } from "@/utils/supabase/client";
-
-const CATEGORIES = ["เทคโนโลยี", "ธุรกิจ", "ภาษา", "การออกแบบ", "การตลาด", "พัฒนาตนเอง", "อื่นๆ"];
+import { CATEGORIES, type Category } from "@/lib/constants/categories";
+//const CATEGORIES = ["เทคโนโลยี", "ธุรกิจ", "ภาษา", "การออกแบบ", "การตลาด", "พัฒนาตนเอง", "อื่นๆ"];
 
 type Workspace = "teacher" | "admin";
 
@@ -31,7 +31,8 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
 
   const [courseCode, setCourseCode] = useState("");
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  //const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState<Category>(CATEGORIES[0]);
   const [customCategory, setCustomCategory] = useState("");
   const [description, setDescription] = useState("");
   const [isFree, setIsFree] = useState(false);
@@ -106,7 +107,8 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
         <SectionCard title="ข้อมูลพื้นฐาน">
           <div className="grid gap-4 sm:grid-cols-2">
             <label><span className={labelClass}>รหัสวิชา</span><input required value={courseCode} onChange={(event) => setCourseCode(event.target.value)} placeholder="เช่น WEB101" className={inputClass} /></label>
-            <label><span className={labelClass}>หมวดวิชา</span><select value={category} onChange={(event) => setCategory(event.target.value)} className={inputClass}>{CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
+
+            <label><span className={labelClass}>หมวดวิชา</span><select value={category} onChange={(event) => setCategory(event.target.value as Category)} className={inputClass}>{CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
           </div>
           {category === "อื่นๆ" && <label className="mt-4 block"><span className={labelClass}>ระบุหมวดวิชา</span><input required value={customCategory} onChange={(event) => setCustomCategory(event.target.value)} className={inputClass} /></label>}
           <label className="mt-4 block"><span className={labelClass}>ชื่อคอร์ส</span><input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="เช่น พื้นฐาน React สำหรับผู้เริ่มต้น" className={inputClass} /></label>

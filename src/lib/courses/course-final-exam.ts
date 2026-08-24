@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FinalQuizAnswer, FinalQuizGrade } from "@/lib/scorm/grade-final-quiz";
-
+import { loadSampledFinalExamQuestions, InsufficientQuestionBankError } from "@/lib/courses/question-bank-sampling";
 const DEFAULT_PASS_PERCENTAGE = 70;
 
 interface ChoiceRow {
@@ -13,7 +13,8 @@ interface ChoiceRow {
 
 interface QuestionRow {
   id: string;
-  lesson_draft_id: string;
+  lesson_draft_id?: string;//เปลี่ยนเป็น optional โดยเพิ่ม ? จากเดิมเป็น แบบ required
+  lessonId?: string | null;
   question_text: string;
   explanation: string | null;
   order_index: number;
@@ -122,6 +123,51 @@ async function loadCourseExamData(
   }
   const activeDrafts = [...latestDraftByLesson.values()];
   const draftIds = activeDrafts.map((draft) => draft.id);
+  // const questionSelect = includeCorrectAnswers
+  //   ? "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, is_correct, order_index)"
+  //   : "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, order_index)";
+  // const { data: questionsData, error: questionsError } = draftIds.length
+  //   ? await supabase
+  //       .from("quiz_questions")
+  //       .select(questionSelect)
+  //       .in("lesson_draft_id", draftIds)
+  //       .is("video_timestamp_seconds", null)
+  //       .order("order_index", { ascending: true })
+  //   : { data: [], error: null };
+  // if (questionsError) throw new Error(questionsError.message);
+  const { data: examConfig, error: examConfigError } = await supabase
+  .from("course_exam_configs")
+  .select("build_mode, total_questions, preset_type, custom_constraints")
+  .eq("course_id", courseId)
+  .maybeSingle();
+if (examConfigError) throw new Error(examConfigError.message);
+
+let questions: QuestionRow[];
+if (examConfig) {
+  // ทางใหม่: สุ่มจาก question_bank ตาม config, seed จาก enrollment_id (deterministic)
+  try {
+    questions = await loadSampledFinalExamQuestions(supabase, {
+      courseId,
+      seed: enrollment.id,
+      buildMode: examConfig.build_mode,
+      totalQuestions: examConfig.total_questions,
+      presetType: examConfig.preset_type,
+      customConstraints: examConfig.custom_constraints,
+    });
+  } catch (sampleError) {
+    if (sampleError instanceof InsufficientQuestionBankError) {
+      // log รายละเอียดเต็มไว้ฝั่ง server เท่านั้น ให้ครู/แอดมินไล่ดูใน server log ได้
+      console.error(
+        `[final-exam] insufficient question bank — course: ${courseId}, enrollment: ${enrollment.id}`,
+        JSON.stringify(sampleError.detail, null, 2)
+      );
+      // นักเรียนเห็นแค่ข้อความสุภาพ ไม่เห็น logic/จำนวนข้อภายใน
+      throw new Error("แบบทดสอบยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้งในภายหลัง หรือติดต่อผู้สอน");
+    }
+    throw sampleError;
+  }
+} else {
+  // ทางเดิม: ไม่มี config = fallback พฤติกรรมเดิมเป๊ะ (คอร์สเก่าที่ยังไม่ตั้งค่า)
   const questionSelect = includeCorrectAnswers
     ? "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, is_correct, order_index)"
     : "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, order_index)";
@@ -134,6 +180,8 @@ async function loadCourseExamData(
         .order("order_index", { ascending: true })
     : { data: [], error: null };
   if (questionsError) throw new Error(questionsError.message);
+  questions = (questionsData ?? []) as unknown as QuestionRow[];
+}
 
   const completedLessonIds = new Set(
     (trackingData ?? [])
@@ -150,8 +198,12 @@ async function loadCourseExamData(
     completedLessonIds,
     lessonById,
     lessonIdByDraft,
-    questions: (questionsData ?? []) as unknown as QuestionRow[],
+    questions,
   };
+}
+
+function resolveLessonId(question: QuestionRow, lessonIdByDraft: Map<string, string>): string {
+  return question.lessonId ?? lessonIdByDraft.get(question.lesson_draft_id ?? "") ?? "";
 }
 
 export async function getCourseFinalExam(
@@ -173,12 +225,12 @@ export async function getCourseFinalExam(
     questions: eligible
       ? [...data.questions]
         .sort((a, b) => {
-          const lessonA = data.lessonById.get(data.lessonIdByDraft.get(a.lesson_draft_id) ?? "")?.order_index ?? 0;
-          const lessonB = data.lessonById.get(data.lessonIdByDraft.get(b.lesson_draft_id) ?? "")?.order_index ?? 0;
-          return lessonA - lessonB || a.order_index - b.order_index;
-        })
-        .map((question) => {
-          const lessonId = data.lessonIdByDraft.get(question.lesson_draft_id) ?? "";
+  const lessonA = data.lessonById.get(resolveLessonId(a, data.lessonIdByDraft))?.order_index ?? 0;
+  const lessonB = data.lessonById.get(resolveLessonId(b, data.lessonIdByDraft))?.order_index ?? 0;
+  return lessonA - lessonB || a.order_index - b.order_index;
+})
+.map((question) => {
+  const lessonId = resolveLessonId(question, data.lessonIdByDraft);
           return {
             id: question.id,
             lessonId,
@@ -228,8 +280,8 @@ export async function gradeCourseFinalExam(
 
   const attemptedAt = new Date().toISOString();
   const attemptRows = data.questions.map((question) => ({
-    student_id: userId,
-    lesson_id: data.lessonIdByDraft.get(question.lesson_draft_id),
+  student_id: userId,
+  lesson_id: resolveLessonId(question, data.lessonIdByDraft),
     question_id: question.id,
     selected_choice_index: answersByQuestion.get(question.id),
     is_correct: details.find((detail) => detail.questionId === question.id)?.isCorrect ?? false,
@@ -273,3 +325,4 @@ export async function gradeCourseFinalExam(
     details,
   };
 }
+
