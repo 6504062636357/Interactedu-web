@@ -63,10 +63,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const charge = await chargeResponse.json();
 
-  if (!chargeResponse.ok) {
-    console.error("Omise charge creation failed:", charge);
-    return NextResponse.json({ error: "Failed to create charge" }, { status: 500 });
-  }
+if (!chargeResponse.ok) {
+  console.error("Omise charge creation failed:", charge);
+  return NextResponse.json({ error: "Failed to create charge" }, { status: 500 });
+}
+
+console.log("Omise charge response:", JSON.stringify(charge, null, 2)); // เพิ่มบรรทัดนี้ชั่วคราว
 
   // สร้าง/อัปเดต enrollment เป็น pending พร้อมผูก charge id ไว้เช็คสถานะทีหลัง
   if (existing) {

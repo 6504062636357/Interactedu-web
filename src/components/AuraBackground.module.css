@@ -1,0 +1,50 @@
+/* components/AuraBackground.module.css */
+
+.wrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  /* ไม่มี background-color ตรงนี้ — ให้ layer ไป blend กับ body แทน */
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+  will-change: transform;
+  mix-blend-mode: multiply;
+}
+
+.layer1 {
+  background: conic-gradient(from 90deg at 45% 30%, #FF5A3C, #EB4A2D, #FFCB47, #FF5A3C, #FF7A5C);
+  filter: blur(200px); /* mobile */
+}
+
+.layer2 {
+  background: radial-gradient(circle at 70% 75%, rgba(15, 27, 61, 0.55) 0%, transparent 50%);
+  filter: blur(125px); /* mobile */
+}
+
+.layer3 {
+  background: radial-gradient(circle at 25% 20%, rgba(255, 90, 60, 0.35) 0%, transparent 45%);
+  filter: blur(110px); /* mobile */
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+}
+
+/* Desktop: blur มากขึ้นให้เนียนขึ้นตามขนาดจอ */
+@media (min-width: 1024px) {
+  .layer1 {
+    filter: blur(260px);
+  }
+  .layer2 {
+    filter: blur(180px);
+  }
+  .layer3 {
+    filter: blur(150px);
+  }
+}

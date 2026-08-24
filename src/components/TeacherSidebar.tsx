@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 const NAV_ITEMS = [
   { href: "/dashboard/teacher", label: "ภาพรวม", icon: "home" },
   { href: "/dashboard/teacher/courses", label: "คอร์สทั้งหมด", icon: "book" },
+  { href: "/dashboard/teacher/question-bank", label: "คลังข้อสอบ", icon: "questionBank" },
   { href: "/dashboard/teacher/analytics", label: "วิเคราะห์ข้อมูล", icon: "chart" },
   { href: "/dashboard/teacher/students", label: "นักเรียน", icon: "users" },
 ] as const;
@@ -19,6 +20,9 @@ function Icon({ name }: { name: string }): ReactElement {
     ),
     book: (
       <path d="M4 5H10C11.1 5 12 5.9 12 7V20C12 19 11 18.5 10 18.5H4V5Z M20 5H14C12.9 5 12 5.9 12 7V20C12 19 13 18.5 14 18.5H20V5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    ),
+    questionBank: (
+      <path d="M5 4H19C19.6 4 20 4.4 20 5V19C20 19.6 19.6 20 19 20H5C4.4 20 4 19.6 4 19V5C4 4.4 4.4 4 5 4Z M9 9C9 7.9 9.9 7 11 7C12.1 7 13 7.9 13 9C13 10.5 11 10.5 11 12.5 M11 15.5H11.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     ),
     chart: (
       <path d="M5 20V10 M12 20V4 M19 20V14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -38,7 +42,7 @@ export default function TeacherSidebar(): ReactElement {
   const pathname = usePathname();
 
   return (
-    <nav className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-3 flex flex-col gap-1 sticky top-28">
+    <nav className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-3 flex flex-col gap-1 lg:sticky lg:top-28">
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.href;
         return (

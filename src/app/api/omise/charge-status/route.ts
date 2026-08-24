@@ -39,6 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ถ้าจ่ายสำเร็จแล้ว อัปเดต enrollment เป็น approved ทันที (กันเคส webhook มาช้า)
   if (charge.status === "successful") {
+
     if (enrollment.status !== "approved") {
       const { error: updateError } = await supabase
         .from("enrollments")
@@ -63,6 +64,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       actionUrl: `/dashboard/student/courses/${enrollment.course_id}`,
       dedupeKey: `payment_approved:${enrollment.id}`,
     });
+// =======
+//     const supabase = await createClient();
+//     const { data: updated, error: updateError } = await supabase
+//       .from("enrollments")
+//       .update({ status: "approved", approved_at: new Date().toISOString() })
+//       .eq("payment_slip_url", chargeId)
+//       .select("id, status");
+
+//     // ชั่วคราว: log ผลลัพธ์การ update เพื่อเช็คว่า RLS บล็อกหรือ chargeId ไม่ match
+//     console.log("[charge-status] update result:", {
+//       chargeId,
+//       updateError,
+//       updatedRows: updated,
+//     });
+
+//     if (updateError) {
+//       console.error("[charge-status] Failed to update enrollment:", updateError);
+//     } else if (!updated || updated.length === 0) {
+//       console.warn(
+//         "[charge-status] No enrollment row matched payment_slip_url =",
+//         chargeId,
+//         "- charge succeeded but nothing was updated."
+//       );
+//     }
+// >>>>>>> Stashed changes
   }
 
   return NextResponse.json({ status: charge.status });

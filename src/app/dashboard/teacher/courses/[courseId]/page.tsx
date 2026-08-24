@@ -1,4 +1,4 @@
-// app/teacher/courses/[courseId]/page.tsx
+// app/dashboard/teacher/courses/[courseId]/page.tsx
 import type { ReactElement } from "react";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
@@ -81,9 +81,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
       .maybeSingle(),
   ]);
 
-  if (courseRes.error) {
-    console.error("[teacher/course] Failed to load course:", courseRes.error);
-  }
+  console.log("[teacher/course] courseId:", courseId, "course:", courseRes.data, "error:", courseRes.error);
 
   const course = courseRes.data;
   const certificateSettings = certificateRes.data as CertificateSettings | null;

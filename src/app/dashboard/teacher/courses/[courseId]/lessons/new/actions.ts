@@ -15,6 +15,14 @@ export interface DraftQuestionInput {
   choices: DraftChoiceInput[];
   timestampSeconds: number | null; // หน้านี้บันทึกเฉพาะควิซแทรกกลางวิดีโอ
   explanation: string | null;
+  sourceType?: "custom" | "bank_manual"; // ไม่ระบุ = custom (ของเดิม)
+  sourceQuestionId?: string | null; // ใช้เมื่อ sourceType = bank_manual
+}
+
+export interface DraftRandomMarkerInput {
+  markerId: string | null; // null = ปักหมุดใหม่, มีค่า = อัปเดตของเดิม
+  timestampSeconds: number;
+  difficulty: "easy" | "medium" | "hard";
 }
 
 interface StoredDraftChoice {
@@ -28,6 +36,8 @@ interface StoredDraftQuestion {
   order_index: number;
   video_timestamp_seconds: number | null;
   explanation: string | null;
+  source_type: "custom" | "bank_manual" | null;
+  source_question_id: string | null;
   quiz_choices: StoredDraftChoice[];
 }
 
@@ -38,6 +48,7 @@ interface SaveLessonDraftInput {
   videoUrl: string | null;
   contentHtml: string;
   questions: DraftQuestionInput[];
+  randomMarkers: DraftRandomMarkerInput[];
 }
 
 interface SaveLessonDraftResult {
@@ -122,6 +133,8 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
         order_index: i,
         video_timestamp_seconds: q.timestampSeconds,
         explanation: q.explanation,
+        source_type: q.sourceType ?? "custom",
+        source_question_id: q.sourceQuestionId ?? null,
       })
       .select("id")
       .single();
@@ -149,6 +162,22 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     }
   }
 
+    // 5. สร้าง marker แบบสุ่มจากคลัง (bank_random) — ไม่มีเนื้อหาคำถาม ผูกแค่เงื่อนไข
+  if (input.randomMarkers.length > 0) {
+    const markerRows = input.randomMarkers.map((m, idx) => ({
+      lesson_draft_id: draft.id,
+      lesson_id: lesson.id,
+      timestamp_seconds: m.timestampSeconds,
+      random_difficulty: m.difficulty,
+      order_index: idx,
+    }));
+    const { error: markersError } = await supabase.from("video_quiz_markers").insert(markerRows);
+    if (markersError) {
+      console.error("Failed to save random markers:", markersError.message);
+      return { error: "บันทึกหมุดควิซแบบสุ่มไม่สำเร็จ" };
+    }
+  }
+
   return { draftId: draft.id, lessonId: lesson.id };
 }
 
@@ -164,6 +193,13 @@ export interface ExistingDraftData {
     timestampSeconds: number | null;
     explanation: string | null;
     choices: { text: string; isCorrect: boolean }[];
+    sourceType?: "custom" | "bank_manual";
+    sourceQuestionId?: string | null;
+  }[];
+  randomMarkers: {
+    markerId: string;
+    timestampSeconds: number;
+    difficulty: "easy" | "medium" | "hard";
   }[];
 }
 
@@ -189,11 +225,11 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
   //   .order("created_at", { ascending: false })
   //   .limit(1)
   //   .maybeSingle();
-  const { data: draft, error: draftError } = await supabase
+    const { data: draft, error: draftError } = await supabase
     .from("lesson_drafts")
     .select(
       `id, video_url, content_html, status,
-       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation,
+       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation, source_type, source_question_id,
          quiz_choices ( choice_text, is_correct, order_index ) )`
     )
     .eq("lesson_id", lessonId)
@@ -204,9 +240,15 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
   if (draftError) return { error: "โหลดฉบับร่างไม่สำเร็จ" };
   if (!draft) return { error: "ยังไม่มีฉบับร่างของบทเรียนนี้" };
 
+  const { data: markersData } = await supabase
+    .from("video_quiz_markers")
+    .select("id, timestamp_seconds, random_difficulty")
+    .eq("lesson_draft_id", draft.id)
+    .order("order_index", { ascending: true });
+
   const storedQuestions =
     (draft as unknown as { quiz_questions: StoredDraftQuestion[] }).quiz_questions ?? [];
-  const questions = storedQuestions
+    const questions = storedQuestions
     .sort((a, b) => a.order_index - b.order_index)
     .map((q) => ({
       questionText: q.question_text,
@@ -215,7 +257,15 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
       choices: (q.quiz_choices ?? [])
         .sort((a, b) => a.order_index - b.order_index)
         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
+      sourceType: q.source_type ?? "custom",
+      sourceQuestionId: q.source_question_id,
     }));
+
+  const randomMarkers = (markersData ?? []).map((m) => ({
+    markerId: m.id,
+    timestampSeconds: m.timestamp_seconds,
+    difficulty: m.random_difficulty as "easy" | "medium" | "hard",
+  }));
 
   return {
     data: {
@@ -226,6 +276,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
       contentHtml: draft.content_html ?? "",
       status: draft.status,
       questions,
+      randomMarkers,
     },
   };
 }
@@ -239,6 +290,7 @@ export async function updateLessonDraft(input: {
   videoUrl: string | null;
   contentHtml: string;
   questions: DraftQuestionInput[];
+  randomMarkers: DraftRandomMarkerInput[];
 }): Promise<SaveLessonDraftResult> {
   const supabase = await createClient();
 
@@ -291,7 +343,7 @@ export async function updateLessonDraft(input: {
     const q = input.questions[i];
     if (!q.questionText.trim()) continue;
 
-   const { data: question, error: questionError } = await supabase
+      const { data: question, error: questionError } = await supabase
       .from("quiz_questions")
       .insert({
         lesson_draft_id: input.draftId,
@@ -299,6 +351,8 @@ export async function updateLessonDraft(input: {
         order_index: i,
         video_timestamp_seconds: q.timestampSeconds,
         explanation: q.explanation,
+        source_type: q.sourceType ?? "custom",
+        source_question_id: q.sourceQuestionId ?? null,
       })
       .select("id")
       .single();
@@ -320,7 +374,26 @@ export async function updateLessonDraft(input: {
     }
   }
 
+    const { error: deleteMarkersError } = await supabase
+    .from("video_quiz_markers")
+    .delete()
+    .eq("lesson_draft_id", input.draftId);
+  if (deleteMarkersError) return { error: "ลบหมุดควิซแบบสุ่มเก่าไม่สำเร็จ" };
+
+  if (input.randomMarkers.length > 0) {
+    const markerRows = input.randomMarkers.map((m, idx) => ({
+      lesson_draft_id: input.draftId,
+      lesson_id: input.lessonId,
+      timestamp_seconds: m.timestampSeconds,
+      random_difficulty: m.difficulty,
+      order_index: idx,
+    }));
+    const { error: markersError } = await supabase.from("video_quiz_markers").insert(markerRows);
+    if (markersError) return { error: "บันทึกหมุดควิซแบบสุ่มไม่สำเร็จ" };
+  }
+
   return { draftId: input.draftId, lessonId: input.lessonId };
+
 }
 
 export async function submitDraftForReview(draftId: string, courseId: string): Promise<{ error?: string }> {
@@ -375,5 +448,45 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
   revalidatePath("/dashboard/admin/courses");
   revalidatePath("/admin/review");
   return {};
+}
+
+export interface BankQuestionForLesson {
+  id: string;
+  questionText: string;
+  choices: { text: string; isCorrect: boolean }[];
+}
+
+export async function getBankQuestionsForLesson(
+  lessonId: string
+): Promise<{ questions: BankQuestionForLesson[]; error?: string }> {
+  if (!lessonId) return { questions: [] };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { questions: [], error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  // RLS ของ question_bank คุมสิทธิ์ owner/department/public อยู่แล้ว — ที่นี่แค่ filter usage_type + lesson tag
+  const { data, error } = await supabase
+    .from("question_bank")
+    .select(
+      "id, question_text, usage_type, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(lesson_id)"
+    )
+    .eq("usage_type", "popup");
+
+  if (error) return { questions: [], error: error.message };
+
+  const filtered = (data ?? []).filter((q) =>
+    (q.question_bank_topic_tags ?? []).some((tag: { lesson_id: string | null }) => tag.lesson_id === lessonId)
+  );
+
+  return {
+    questions: filtered.map((q) => ({
+      id: q.id,
+      questionText: q.question_text,
+      choices: [...(q.question_bank_choices ?? [])]
+        .sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index)
+        .map((c: { choice_text: string; is_correct: boolean }) => ({ text: c.choice_text, isCorrect: c.is_correct })),
+    })),
+  };
 }
 

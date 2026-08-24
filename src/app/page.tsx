@@ -5,6 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
+import AuraBackground from "@/components/AuraBackground";
 interface Course {
   id: string;
   title: string;
@@ -32,7 +33,11 @@ function formatPrice(price: number): string {
   return `฿${price.toLocaleString("th-TH")}`;
 }
 
-const navLinks: string[] = ["คอร์สทั้งหมด", "เกี่ยวกับเรา", "บทความ"];
+const navLinks: { label: string; href: string }[] = [
+  { label: "คอร์สทั้งหมด", href: "/courses" },
+  { label: "เกี่ยวกับเรา", href: "#" },
+  { label: "บทความ", href: "#" },
+];
 
 const marqueeTags: string[] = [
   "WEB DEVELOPMENT",
@@ -61,11 +66,11 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
           <nav className="hidden md:flex items-center gap-2">
             {navLinks.map((link) => (
               <Link
-                key={link}
-                href="#"
-                className="text-[14.5px] font-semibold text-[#0F1B3D]/70 hover:text-[#0F1B3D] hover:bg-[#0F1B3D]/[0.04] px-4 py-2 rounded-full transition-colors"
+                key={link.label}
+                href={link.href}
+                className="..."
               >
-                {link}
+                {link.label}
               </Link>
             ))}
           </nav>
@@ -143,15 +148,15 @@ function Hero(): ReactElement {
               เรียนกับผู้สอนตัวจริงในสายงาน ลงมือทำโปรเจกต์จริง พร้อมใบรับรองที่บริษัทชั้นนำให้การยอมรับ
             </p>
             <div className="mt-9 flex items-center gap-3">
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-colors shadow-[0_12px_28px_-10px_rgba(15,27,61,0.55)]"
-              >
-                สำรวจคอร์สเรียน
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+            <Link
+              href="/courses"
+              className="inline-flex items-center gap-2 text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-colors shadow-[0_12px_28px_-10px_rgba(15,27,61,0.55)]"
+            >
+              สำรวจคอร์สเรียน
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Link>
               <button
                 type="button"
                 className="text-[15px] font-bold text-[#0F1B3D] px-4 py-4 hover:underline underline-offset-4 decoration-2 decoration-[#FF5A3C]"
