@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #FAF8F5;
-  --foreground: #171717;
+  --background: #f4f7fb;
+  --foreground: #0f1b3d;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --brand-navy: #0f1b3d;
+  --brand-blue: #3157d5;
+  --brand-coral: #ff5a3c;
+  --brand-gold: #ffcb47;
+  --border-soft: rgba(15, 27, 61, 0.08);
+  --shadow-soft: 0 10px 35px rgba(15, 27, 61, 0.06);
+  --shadow-lifted: 0 24px 60px rgba(15, 27, 61, 0.12);
 }
 
 @theme inline {
@@ -12,10 +21,67 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at 6% -8%, rgba(49, 87, 213, 0.09), transparent 25rem),
+    radial-gradient(circle at 96% 8%, rgba(255, 90, 60, 0.07), transparent 24rem),
+    var(--background);
   color: var(--foreground);
   font-family: var(--font-sans-th), var(--font-sans-en), system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+a {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(49, 87, 213, 0.25);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(49, 87, 213, 0.18);
+  color: var(--brand-navy);
+}
+
+* {
+  scrollbar-color: rgba(15, 27, 61, 0.22) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(15, 27, 61, 0.2);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @tailwind base;
@@ -26,11 +92,121 @@ body {
   .animate-marquee {
     animation: marquee 25s linear infinite;
   }
+
+  .animate-fade-up {
+    animation: fade-up 0.45s ease both;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
 }
 
 @keyframes marquee {
   0% { transform: translateX(0%); }
   100% { transform: translateX(-50%); }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.app-canvas {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 5%, rgba(49, 87, 213, 0.08), transparent 23rem),
+    radial-gradient(circle at 92% 2%, rgba(255, 90, 60, 0.07), transparent 22rem),
+    #f4f7fb;
+}
+
+.app-topbar {
+  border-bottom: 1px solid rgba(15, 27, 61, 0.07);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+.app-surface {
+  border: 1px solid rgba(15, 27, 61, 0.07);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(14px);
+}
+
+.app-nav-surface {
+  border: 1px solid rgba(15, 27, 61, 0.07);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 34px rgba(15, 27, 61, 0.05);
+  backdrop-filter: blur(14px);
+}
+
+.modern-field {
+  width: 100%;
+  border: 1px solid rgba(15, 27, 61, 0.1);
+  border-radius: 14px;
+  background: #f8fafc;
+  color: var(--brand-navy);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.modern-field:focus {
+  border-color: rgba(49, 87, 213, 0.55);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(49, 87, 213, 0.09);
+  outline: none;
+}
+
+.app-surface input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.app-surface textarea,
+.app-surface select,
+.admin-workspace input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.admin-workspace textarea,
+.admin-workspace select {
+  border-radius: 14px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.app-surface input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+.app-surface textarea:focus,
+.app-surface select:focus,
+.admin-workspace input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+.admin-workspace textarea:focus,
+.admin-workspace select:focus {
+  border-color: rgba(49, 87, 213, 0.5);
+  box-shadow: 0 0 0 4px rgba(49, 87, 213, 0.08);
+  outline: none;
+}
+
+.app-surface > .animate-fade-up > [class*="min-h-screen"] {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .quiz-overlay {

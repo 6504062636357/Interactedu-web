@@ -5,6 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import PaymentSuccessIllustration from "@/components/PaymentSuccessIllustration";
 import ProfileDropdown from "@/components/ProfileDropdown";
+import AppBrand from "@/components/AppBrand";
 
 interface Course {
   id: string;
@@ -97,25 +98,11 @@ export default async function EnrollSuccessPage({
     : `/dashboard/student/courses/${typedCourse.id}`;
 
   return (
-    <div className="min-h-screen w-full bg-[#F7F8FA] flex flex-col">
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#0F1B3D]/8">
+    <div className="app-canvas flex min-h-screen w-full flex-col">
+      <header className="app-topbar sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
-                  <path
-                    d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5"
-                    stroke="white"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
-            </div>
+          <div className="flex h-[74px] items-center justify-between">
+            <AppBrand compact />
             <ProfileDropdown displayName={displayName} role={role} />
           </div>
         </div>

@@ -361,6 +361,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { PassThrough } from "stream";
+import type { Archiver, ArchiverOptions } from "archiver";
 
 interface QuizChoiceRow {
   choice_text: string;
@@ -382,6 +383,28 @@ interface LessonDraftRow {
   video_url: string | null;
   content_html: string | null;
   status: string;
+}
+
+type ArchiverFactory = (format: string, options?: ArchiverOptions) => Archiver;
+
+function resolveArchiverFactory(moduleValue: unknown): ArchiverFactory {
+  if (typeof moduleValue === "function") return moduleValue as ArchiverFactory;
+
+  if (typeof moduleValue === "object" && moduleValue !== null && "default" in moduleValue) {
+    const defaultExport = (moduleValue as { default: unknown }).default;
+    if (typeof defaultExport === "function") return defaultExport as ArchiverFactory;
+
+    if (typeof defaultExport === "object" && defaultExport !== null && "default" in defaultExport) {
+      const nestedDefault = (defaultExport as { default: unknown }).default;
+      if (typeof nestedDefault === "function") return nestedDefault as ArchiverFactory;
+    }
+  }
+
+  throw new Error("Cannot resolve archiver module into a callable function");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function buildPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
@@ -668,18 +691,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ⚡ 6. Dynamic Import 'archiver' แบบปลอดภัยรองรับทั้ง Webpack และ Turbopack
   console.log("📦 [SCORM Generate API] Bundling ZIP package with Archiver...");
   
-  let archiverFn: any;
+  let archiverFn: ArchiverFactory;
   try {
     const archiverModule = await import("archiver");
-    const rawArchiver = (archiverModule as any).default || archiverModule;
-    archiverFn = typeof rawArchiver === "function" ? rawArchiver : rawArchiver.default;
-
-    if (typeof archiverFn !== "function") {
-      throw new Error("Cannot resolve archiver module into a callable function");
-    }
-  } catch (importErr: any) {
-    console.error("❌ [SCORM Generate API] Module Import Error:", importErr?.message);
-    return NextResponse.json({ error: `Archiver Module Import Failed: ${importErr?.message}` }, { status: 500 });
+    archiverFn = resolveArchiverFactory(archiverModule);
+  } catch (importError: unknown) {
+    const message = errorMessage(importError);
+    console.error("❌ [SCORM Generate API] Module Import Error:", message);
+    return NextResponse.json({ error: `Archiver Module Import Failed: ${message}` }, { status: 500 });
   }
 
   const manifestXml = buildManifestXml(typedDraft);
@@ -704,9 +723,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       archive.append(STYLE_CSS, { name: "style.css" });
       archive.finalize();
     });
-  } catch (zipErr: any) {
-    console.error("❌ [SCORM Generate API] ZIP Archiver Error:", zipErr?.message);
-    return NextResponse.json({ error: `ZIP Generation Failed: ${zipErr?.message}` }, { status: 500 });
+  } catch (zipError: unknown) {
+    const message = errorMessage(zipError);
+    console.error("❌ [SCORM Generate API] ZIP Archiver Error:", message);
+    return NextResponse.json({ error: `ZIP Generation Failed: ${message}` }, { status: 500 });
   }
 
   // 7. Upload to Supabase Storage

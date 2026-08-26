@@ -13,7 +13,7 @@ async function authorizeCourseSettings(courseId: string) {
     supabase
       .from("courses")
       .select(
-        "id, created_by, certificate_enabled, certificate_pass_percentage, certificate_template_id, certificate_title, certificate_description"
+        "id, created_by, certificate_enabled, certificate_pass_percentage, certificate_template_id, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title"
       )
       .eq("id", courseId)
       .maybeSingle(),
@@ -44,7 +44,15 @@ export async function PATCH(
   const authorization = await authorizeCourseSettings(courseId);
   if (authorization.response) return authorization.response;
 
-  let body: { enabled?: unknown; passPercentage?: unknown; title?: unknown; description?: unknown };
+  let body: {
+    enabled?: unknown;
+    passPercentage?: unknown;
+    title?: unknown;
+    description?: unknown;
+    issuerName?: unknown;
+    signatoryName?: unknown;
+    signatoryTitle?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -64,22 +72,47 @@ export async function PATCH(
   if (body.description !== undefined && body.description !== null && typeof body.description !== "string") {
     return NextResponse.json({ error: "description must be a string" }, { status: 400 });
   }
+  if (body.issuerName !== undefined && body.issuerName !== null && typeof body.issuerName !== "string") {
+    return NextResponse.json({ error: "issuerName must be a string" }, { status: 400 });
+  }
+  if (body.signatoryName !== undefined && body.signatoryName !== null && typeof body.signatoryName !== "string") {
+    return NextResponse.json({ error: "signatoryName must be a string" }, { status: 400 });
+  }
+  if (body.signatoryTitle !== undefined && body.signatoryTitle !== null && typeof body.signatoryTitle !== "string") {
+    return NextResponse.json({ error: "signatoryTitle must be a string" }, { status: 400 });
+  }
+
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  const issuerName = typeof body.issuerName === "string" ? body.issuerName.trim() : "";
+  const signatoryName = typeof body.signatoryName === "string" ? body.signatoryName.trim() : "";
+  const signatoryTitle = typeof body.signatoryTitle === "string" ? body.signatoryTitle.trim() : "";
+  if (title.length > 120) {
+    return NextResponse.json({ error: "ชื่อใบประกาศต้องไม่เกิน 120 ตัวอักษร" }, { status: 400 });
+  }
+  if (description.length > 240) {
+    return NextResponse.json({ error: "ข้อความเสริมต้องไม่เกิน 240 ตัวอักษร" }, { status: 400 });
+  }
+  if (issuerName.length > 100 || signatoryName.length > 100 || signatoryTitle.length > 100) {
+    return NextResponse.json({ error: "ข้อมูลผู้ออกใบประกาศต้องไม่เกินช่องละ 100 ตัวอักษร" }, { status: 400 });
+  }
 
   const { data: settings, error } = await authorization.supabase
     .from("courses")
     .update({
       certificate_enabled: body.enabled,
       certificate_pass_percentage: passPercentage,
-      certificate_title: typeof body.title === "string" ? body.title.trim() || null : null,
-      certificate_description:
-        typeof body.description === "string" ? body.description.trim() || null : null,
+      certificate_title: title || null,
+      certificate_description: description || null,
+      certificate_issuer_name: issuerName || null,
+      certificate_signatory_name: signatoryName || null,
+      certificate_signatory_title: signatoryTitle || null,
     })
     .eq("id", courseId)
     .select(
-      "id, certificate_enabled, certificate_pass_percentage, certificate_template_id, certificate_title, certificate_description"
+      "id, certificate_enabled, certificate_pass_percentage, certificate_template_id, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title"
     )
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ settings });
 }
-

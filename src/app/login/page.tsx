@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ChangeEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
+import AppBrand from "@/components/AppBrand";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -70,32 +71,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-full relative overflow-hidden bg-white flex items-center justify-center px-4 py-12">
+    <div className="app-canvas relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-12">
       {/* Ambient background blobs, same language as landing hero */}
       <div className="pointer-events-none absolute -top-24 -left-24 w-72 h-72 rounded-full bg-[#FF5A3C]/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-[#7C5CFF]/10 blur-3xl" />
 
       <div className="relative w-full max-w-[440px]">
         {/* Logo */}
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-              <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
-              <path
-                d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5"
-                stroke="white"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
-            Interact Edu
-          </span>
+        <div className="mb-8 flex justify-center">
+          <AppBrand />
         </div>
 
-        <div className="bg-white rounded-[28px] border border-[#0F1B3D]/[0.06] shadow-[0_35px_70px_-25px_rgba(15,27,61,0.25)] px-8 py-10 sm:px-10 sm:py-12">
+        <div className="rounded-[30px] border border-white/80 bg-white/90 px-8 py-10 shadow-[0_32px_80px_-24px_rgba(15,27,61,0.24)] backdrop-blur-xl sm:px-10 sm:py-12">
           <div className="flex flex-col items-center text-center mb-8">
             <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[#0F1B3D] bg-[#FFCB47] px-3.5 py-1.5 rounded-full mb-5 rotate-[-1.5deg]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#0F1B3D]" />
@@ -129,7 +116,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={handleEmailChange}
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 text-[14px] text-[#0F1B3D] placeholder:text-[#0F1B3D]/30 bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none transition-all duration-150 focus:border-[#0F1B3D]/30 focus:bg-white focus:ring-4 focus:ring-[#0F1B3D]/[0.06]"
+                className="modern-field px-4 py-3 text-[14px] placeholder:text-slate-300"
               />
             </div>
 
@@ -150,14 +137,14 @@ export default function LoginPage() {
                 value={password}
                 onChange={handlePasswordChange}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 text-[14px] text-[#0F1B3D] placeholder:text-[#0F1B3D]/30 bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none transition-all duration-150 focus:border-[#0F1B3D]/30 focus:bg-white focus:ring-4 focus:ring-[#0F1B3D]/[0.06]"
+                className="modern-field px-4 py-3 text-[14px] placeholder:text-slate-300"
               />
             </div>
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full mt-1 inline-flex items-center justify-center gap-2 rounded-full bg-[#FF5A3C] hover:bg-[#EB4A2D] px-4 py-4 text-[15px] font-bold text-white transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed shadow-[0_12px_28px_-10px_rgba(255,90,60,0.55)]"
+              className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#FF5A3C,#F04B2D)] px-4 py-3.5 text-[14px] font-bold text-white shadow-[0_14px_28px_-12px_rgba(255,90,60,0.65)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? (
                 "กำลังเข้าสู่ระบบ..."

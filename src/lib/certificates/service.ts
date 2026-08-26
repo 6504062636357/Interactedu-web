@@ -22,6 +22,11 @@ interface CourseRow {
   certificate_enabled: boolean;
   certificate_pass_percentage: number;
   certificate_title: string | null;
+  certificate_description: string | null;
+  certificate_logo_path: string | null;
+  certificate_issuer_name: string | null;
+  certificate_signatory_name: string | null;
+  certificate_signatory_title: string | null;
   created_by: string | null;
 }
 
@@ -89,11 +94,10 @@ export async function ensureCertificateForCourse({
     };
   }
 
-  const [{ data: courseData, error: courseError }, { data: enrollment, error: enrollmentError }] =
-    await Promise.all([
+  const [courseWithBranding, enrollmentResult] = await Promise.all([
       supabase
         .from("courses")
-        .select("id, title, slug, certificate_enabled, certificate_pass_percentage, certificate_title, created_by")
+        .select("id, title, slug, certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title, created_by")
         .eq("id", courseId)
         .maybeSingle(),
       supabase
@@ -104,6 +108,34 @@ export async function ensureCertificateForCourse({
         .eq("status", "approved")
         .maybeSingle(),
     ]);
+
+  let courseData = courseWithBranding.data as CourseRow | null;
+  let courseError = courseWithBranding.error;
+  if (courseError) {
+    const legacyCourseResult = await supabase
+      .from("courses")
+      .select("id, title, slug, certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, created_by")
+      .eq("id", courseId)
+      .maybeSingle();
+
+    if (legacyCourseResult.error) {
+      courseError = legacyCourseResult.error;
+      courseData = null;
+    } else {
+      courseError = null;
+      courseData = legacyCourseResult.data
+        ? ({
+            ...legacyCourseResult.data,
+            certificate_logo_path: null,
+            certificate_issuer_name: null,
+            certificate_signatory_name: null,
+            certificate_signatory_title: null,
+          } as CourseRow)
+        : null;
+    }
+  }
+
+  const { data: enrollment, error: enrollmentError } = enrollmentResult;
 
   if (courseError) throw new Error(courseError.message);
   if (!courseData) throw new Error("Course not found");
@@ -188,16 +220,35 @@ export async function ensureCertificateForCourse({
   const number = certificateNumber(userId, course, issuedAt);
   const pdfPath = `${courseId}/${userId}/${number}.pdf`;
   const learnerName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Learner";
+  let logoBytes: Uint8Array | null = null;
+  let logoFormat: "png" | "jpg" | null = null;
+
+  if (course.certificate_logo_path) {
+    const { data: logoFile } = await supabase.storage
+      .from("certificate-assets")
+      .download(course.certificate_logo_path);
+    if (logoFile && logoFile.size <= 2 * 1024 * 1024) {
+      logoBytes = new Uint8Array(await logoFile.arrayBuffer());
+      logoFormat = course.certificate_logo_path.endsWith(".png") ? "png" : "jpg";
+    }
+  }
+
   let pdf: Uint8Array;
   try {
     pdf = await generateCertificatePdf({
       certificateNo: number,
       certificateTitle: course.certificate_title,
+      certificateDescription: course.certificate_description,
       courseTitle: course.title,
       learnerName,
       scorePercentage,
       passPercentage,
       issuedAt,
+      issuerName: course.certificate_issuer_name,
+      signatoryName: course.certificate_signatory_name,
+      signatoryTitle: course.certificate_signatory_title,
+      logoBytes,
+      logoFormat,
     });
   } catch (error) {
     await notifyAdmins({

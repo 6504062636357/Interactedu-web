@@ -74,7 +74,11 @@ console.log("Omise charge response:", JSON.stringify(charge, null, 2)); // เ�
   if (existing) {
     await supabase
       .from("enrollments")
-      .update({ status: "pending", payment_slip_url: charge.id })
+      .update({
+        status: "pending",
+        payment_slip_url: charge.id,
+        paid_amount: Number(course.price),
+      })
       .eq("id", existing.id);
   } else {
     await supabase.from("enrollments").insert({
@@ -82,6 +86,7 @@ console.log("Omise charge response:", JSON.stringify(charge, null, 2)); // เ�
       course_id: courseId,
       status: "pending",
       payment_slip_url: charge.id, // เก็บ omise charge id ไว้ในคอลัมน์นี้ชั่วคราว
+      paid_amount: Number(course.price),
     });
   }
 

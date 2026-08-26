@@ -194,7 +194,7 @@ export default function NotificationBell(): ReactElement {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="relative flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
+        className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 text-slate-500 shadow-[0_5px_18px_rgba(15,27,61,0.05)] transition-all hover:border-[#3157D5]/20 hover:text-[#3157D5] hover:shadow-[0_8px_22px_rgba(15,27,61,0.09)]"
         aria-label={unreadCount > 0 ? `การแจ้งเตือนที่ยังไม่อ่าน ${unreadCount} รายการ` : "การแจ้งเตือน"}
         aria-expanded={open}
       >
@@ -203,15 +203,15 @@ export default function NotificationBell(): ReactElement {
           <path d="M14 21h-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#EB4A2D] px-1 text-[10px] font-bold text-white">
+          <span className="absolute -right-1.5 -top-1.5 flex min-h-[19px] min-w-[19px] items-center justify-center rounded-full border-2 border-white bg-[#EB4A2D] px-1 text-[9px] font-extrabold text-white shadow-sm">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        <div className="absolute right-0 z-50 mt-2.5 w-[min(23rem,calc(100vw-2rem))] overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.3)] backdrop-blur-xl">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-3.5">
             <div>
               <p className="text-sm font-extrabold text-[#0F1B3D]">การแจ้งเตือน</p>
               <p className="text-[11px] text-slate-400">ยังไม่อ่าน {unreadCount} รายการ</p>
@@ -243,7 +243,7 @@ export default function NotificationBell(): ReactElement {
                   type="button"
                   key={notification.id}
                   onClick={() => void markRead(notification)}
-                  className={`block w-full border-b border-slate-100 px-4 py-3 text-left transition-colors last:border-0 hover:bg-slate-50 ${
+                  className={`block w-full border-b border-slate-100 px-4 py-3.5 text-left transition-colors last:border-0 hover:bg-slate-50 ${
                     notification.is_read ? "bg-white" : "bg-blue-50/60"
                   }`}
                 >

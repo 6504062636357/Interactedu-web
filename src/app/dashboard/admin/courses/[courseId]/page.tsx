@@ -10,6 +10,10 @@ interface CertificateSettings {
   certificate_pass_percentage: number;
   certificate_title: string | null;
   certificate_description: string | null;
+  certificate_logo_path: string | null;
+  certificate_issuer_name: string | null;
+  certificate_signatory_name: string | null;
+  certificate_signatory_title: string | null;
 }
 
 export default async function AdminCourseWorkspacePage({ params }: { params: Promise<{ courseId: string }> }): Promise<ReactElement> {
@@ -21,7 +25,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
       .select("id, title, course_code, category, description, price, cover_image_url, status, created_by")
       .eq("id", courseId)
       .maybeSingle(),
-    supabase.from("courses").select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description").eq("id", courseId).maybeSingle(),
+    supabase.from("courses").select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title").eq("id", courseId).maybeSingle(),
     supabase.from("lessons").select("id, title, order_index, lesson_drafts(id, status, created_at)").eq("course_id", courseId).order("order_index", { ascending: true }),
   ]);
   if (!courseRes.data) notFound();
@@ -57,7 +61,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         initialCoverImageUrl={course.cover_image_url}
       />
 
-      {certificate ? <div className="mb-7"><CertificateSettingsForm courseId={course.id} initialEnabled={certificate.certificate_enabled} initialPassPercentage={Number(certificate.certificate_pass_percentage)} initialTitle={certificate.certificate_title} initialDescription={certificate.certificate_description} /></div> : <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>}
+      {certificate ? <div className="mb-7"><CertificateSettingsForm courseId={course.id} courseTitle={course.title} initialEnabled={certificate.certificate_enabled} initialPassPercentage={Number(certificate.certificate_pass_percentage)} initialTitle={certificate.certificate_title} initialDescription={certificate.certificate_description} initialLogoPath={certificate.certificate_logo_path} initialIssuerName={certificate.certificate_issuer_name} initialSignatoryName={certificate.certificate_signatory_name} initialSignatoryTitle={certificate.certificate_signatory_title} /></div> : <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>}
 
       <section className="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
         <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-extrabold text-[#0F1B3D]">บทเรียน</h2><p className="text-xs text-slate-400">{lessons.length} บทเรียน</p></div></div>

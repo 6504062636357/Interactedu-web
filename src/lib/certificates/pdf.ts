@@ -15,11 +15,17 @@ import {
 interface CertificatePdfInput {
   certificateNo: string;
   certificateTitle: string | null;
+  certificateDescription?: string | null;
   courseTitle: string;
   learnerName: string;
   scorePercentage: number;
   passPercentage: number;
   issuedAt: Date;
+  issuerName?: string | null;
+  signatoryName?: string | null;
+  signatoryTitle?: string | null;
+  logoBytes?: Uint8Array | null;
+  logoFormat?: "png" | "jpg" | null;
 }
 
 interface FontRun {
@@ -76,6 +82,74 @@ function fitSize(
   return size;
 }
 
+function wrapText(
+  text: string,
+  latinFont: PDFFont,
+  thaiFont: PDFFont,
+  size: number,
+  maxWidth: number,
+  maxLines: number
+): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  const clampLine = (value: string, withEllipsis = false): string => {
+    const suffix = withEllipsis ? "…" : "";
+    const characters = [...value];
+    while (
+      characters.length > 1 &&
+      mixedTextWidth(`${characters.join("").trimEnd()}${suffix}`, size, latinFont, thaiFont) > maxWidth
+    ) {
+      characters.pop();
+    }
+    return `${characters.join("").trimEnd()}${suffix}`;
+  };
+
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    const candidate = current ? `${current} ${word}` : word;
+    if (mixedTextWidth(candidate, size, latinFont, thaiFont) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+
+    if (!current) {
+      current = clampLine(word);
+      continue;
+    }
+
+    if (lines.length === maxLines - 1) {
+      const remaining = [current, ...words.slice(index)].join(" ");
+      lines.push(clampLine(remaining, true));
+      return lines;
+    }
+
+    lines.push(current);
+    current = clampLine(word);
+  }
+
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines;
+}
+
+function drawCenteredWrappedText(
+  page: PDFPage,
+  text: string,
+  y: number,
+  size: number,
+  latinFont: PDFFont,
+  thaiFont: PDFFont,
+  color: ReturnType<typeof rgb>,
+  maxWidth: number,
+  maxLines = 2
+): void {
+  const lines = wrapText(text, latinFont, thaiFont, size, maxWidth, maxLines);
+  lines.forEach((line, index) => {
+    drawCenteredText(page, line, y - index * (size + 5), size, latinFont, thaiFont, color);
+  });
+}
+
 export async function generateCertificatePdf(input: CertificatePdfInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
@@ -108,7 +182,31 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   page.drawCircle({ x: 72, y: height - 72, size: 24, color: navy });
   page.drawCircle({ x: width - 72, y: 72, size: 24, color: orange });
 
+  if (input.logoBytes && input.logoFormat) {
+    try {
+      const logo =
+        input.logoFormat === "png"
+          ? await pdf.embedPng(input.logoBytes)
+          : await pdf.embedJpg(input.logoBytes);
+      const original = logo.scale(1);
+      const scale = Math.min(105 / original.width, 42 / original.height, 1);
+      const logoWidth = original.width * scale;
+      const logoHeight = original.height * scale;
+      page.drawImage(logo, {
+        x: 78,
+        y: height - 92 - logoHeight / 2,
+        width: logoWidth,
+        height: logoHeight,
+      });
+    } catch {
+      // A damaged optional logo must not prevent certificate issuance.
+    }
+  }
+
   drawCenteredText(page, "INTERACT EDU", height - 82, 14, bold, thai, orange);
+  if (input.issuerName?.trim()) {
+    drawCenteredText(page, input.issuerName.trim(), height - 103, 9, bold, thai, navy);
+  }
   drawCenteredText(
     page,
     input.certificateTitle?.trim() || "Certificate of Completion",
@@ -124,7 +222,18 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   drawCenteredText(page, input.learnerName, height - 238, learnerSize, bold, thai, navy);
   page.drawLine({ start: { x: 160, y: height - 250 }, end: { x: width - 160, y: height - 250 }, thickness: 1, color: orange });
 
-  drawCenteredText(page, "for successfully completing the course and its post-assessments", height - 286, 12, regular, thai, muted);
+  drawCenteredWrappedText(
+    page,
+    input.certificateDescription?.trim() ||
+      "for successfully completing the course and its post-assessments",
+    height - 286,
+    11,
+    regular,
+    thai,
+    muted,
+    width - 220,
+    2
+  );
   const courseSize = fitSize(input.courseTitle, bold, thai, width - 160, 21, 14);
   drawCenteredText(page, input.courseTitle, height - 326, courseSize, bold, thai, navy);
 
@@ -150,8 +259,24 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   page.drawText("CERTIFICATE NO.", { x: width - 285, y: 116, size: 8, font: bold, color: muted });
   page.drawText(input.certificateNo, { x: width - 285, y: 97, size: 10, font: regular, color: navy });
 
-  drawCenteredText(page, "Interact Edu", 88, 13, bold, thai, navy);
-  drawCenteredText(page, "Authorized learning platform", 70, 8, regular, thai, muted);
+  drawCenteredText(
+    page,
+    input.signatoryName?.trim() || input.issuerName?.trim() || "Interact Edu",
+    88,
+    13,
+    bold,
+    thai,
+    navy
+  );
+  drawCenteredText(
+    page,
+    input.signatoryTitle?.trim() || "Authorized learning platform",
+    70,
+    8,
+    regular,
+    thai,
+    muted
+  );
   drawCenteredText(
     page,
     "This document certifies course completion only and is not a government driving licence.",
@@ -163,7 +288,7 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   );
 
   pdf.setTitle(`${input.certificateNo} - ${input.courseTitle}`);
-  pdf.setAuthor("Interact Edu");
+  pdf.setAuthor(input.issuerName?.trim() || "Interact Edu");
   pdf.setSubject("Certificate of Completion");
   pdf.setCreationDate(input.issuedAt);
 

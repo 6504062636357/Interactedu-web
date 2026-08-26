@@ -48,6 +48,10 @@ interface CourseCertificateSettings {
   certificate_pass_percentage: number;
   certificate_title: string | null;
   certificate_description: string | null;
+  certificate_logo_path: string | null;
+  certificate_issuer_name: string | null;
+  certificate_signatory_name: string | null;
+  certificate_signatory_title: string | null;
 }
 
 // export default async function AdminCourseReviewPage({
@@ -174,7 +178,7 @@ export default async function AdminCourseReviewPage({
       .maybeSingle(),
     supabase
       .from("courses")
-      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description")
+      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title")
       .eq("id", courseId)
       .maybeSingle(),
   ]);
@@ -239,10 +243,15 @@ export default async function AdminCourseReviewPage({
           <div className="mb-8">
             <CertificateSettingsForm
               courseId={course.id}
+              courseTitle={course.title}
               initialEnabled={certificateSettings.certificate_enabled}
               initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
               initialTitle={certificateSettings.certificate_title}
               initialDescription={certificateSettings.certificate_description}
+              initialLogoPath={certificateSettings.certificate_logo_path}
+              initialIssuerName={certificateSettings.certificate_issuer_name}
+              initialSignatoryName={certificateSettings.certificate_signatory_name}
+              initialSignatoryTitle={certificateSettings.certificate_signatory_title}
             />
           </div>
         ) : (

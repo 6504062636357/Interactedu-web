@@ -2,6 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 
+interface LessonRow {
+  id: string;
+  title: string;
+  order_index: number;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ courseId: string }> }
@@ -19,11 +25,12 @@ export async function GET(
     .order('order_index', { ascending: true });
 
   const lessons = (modules ?? [])
-    .flatMap((m) =>
-      (m.lessons ?? [])
-        .sort((a: any, b: any) => a.order_index - b.order_index)
-        .map((l: any) => ({ ...l, moduleTitle: m.title }))
-    );
+    .flatMap((moduleRow) => {
+      const moduleLessons = (moduleRow.lessons ?? []) as LessonRow[];
+      return [...moduleLessons]
+        .sort((a, b) => a.order_index - b.order_index)
+        .map((lesson) => ({ ...lesson, moduleTitle: moduleRow.title }));
+    });
 
   // แอดมินไม่มี enrollment → คืนรายชื่อเลสสันเฉยๆ ไม่ต้องมี progress
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();

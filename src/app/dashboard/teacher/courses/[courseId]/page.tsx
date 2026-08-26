@@ -45,6 +45,10 @@ interface CertificateSettings {
   certificate_pass_percentage: number;
   certificate_title: string | null;
   certificate_description: string | null;
+  certificate_logo_path: string | null;
+  certificate_issuer_name: string | null;
+  certificate_signatory_name: string | null;
+  certificate_signatory_title: string | null;
 }
 
 const statusLabel: Record<string, { text: string; color: string }> = {
@@ -76,12 +80,10 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
       .maybeSingle(),
     supabase
       .from("courses")
-      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description")
+      .select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title")
       .eq("id", courseId)
       .maybeSingle(),
   ]);
-
-  console.log("[teacher/course] courseId:", courseId, "course:", courseRes.data, "error:", courseRes.error);
 
   const course = courseRes.data;
   const certificateSettings = certificateRes.data as CertificateSettings | null;
@@ -105,10 +107,6 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
 
-  if (lessonsError) {
-    console.error("[teacher/course] Failed to load lessons:", lessonsError);
-  }
-
   const lessons = (lessonsData ?? []) as unknown as LessonRow[];
 
   // หา draft ล่าสุดของแต่ละ lesson (เผื่อมีหลาย draft เก่าสะสมอยู่)
@@ -127,7 +125,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
 
   return (
     <div className="min-h-screen w-full bg-[#F7F8FA] py-12 px-6 lg:px-8">
-      <main className="max-w-3xl mx-auto">
+      <main className="mx-auto max-w-6xl">
         <div className="mb-6">
           <Link
             href="/dashboard/teacher"
@@ -151,10 +149,15 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
           <div className="mb-8">
             <CertificateSettingsForm
               courseId={course.id}
+              courseTitle={course.title}
               initialEnabled={certificateSettings.certificate_enabled}
               initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
               initialTitle={certificateSettings.certificate_title}
               initialDescription={certificateSettings.certificate_description}
+              initialLogoPath={certificateSettings.certificate_logo_path}
+              initialIssuerName={certificateSettings.certificate_issuer_name}
+              initialSignatoryName={certificateSettings.certificate_signatory_name}
+              initialSignatoryTitle={certificateSettings.certificate_signatory_title}
             />
           </div>
         ) : (

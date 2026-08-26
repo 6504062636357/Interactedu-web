@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
-import AuraBackground from "@/components/AuraBackground";
+import AppBrand from "@/components/AppBrand";
 interface Course {
   id: string;
   title: string;
@@ -50,25 +50,17 @@ const marqueeTags: string[] = [
 
 function Navbar({ displayName }: { displayName: string | null }): ReactElement {
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#0F1B3D]/8">
+    <header className="app-topbar sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
-                <path d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
-          </div>
+        <div className="flex h-[74px] items-center justify-between">
+          <AppBrand compact />
 
           <nav className="hidden md:flex items-center gap-2">
             {navLinks.map((link) => (
               <Link
                 key={link.label}
                 href={link.href}
-                className="..."
+                className="rounded-xl px-4 py-2 text-[13px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
               >
                 {link.label}
               </Link>
@@ -83,13 +75,13 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
               <>
                 <Link
                   href="/signup"
-                  className="hidden sm:inline-flex text-[14px] font-bold text-[#0F1B3D] px-4 py-2.5 rounded-full hover:bg-[#0F1B3D]/[0.04] transition-colors"
+                  className="hidden rounded-xl px-4 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-100 sm:inline-flex"
                 >
                   สมัครสมาชิก
                 </Link>
                 <Link
                   href="/login"
-                  className="inline-flex text-[14px] font-bold text-white bg-[#FF5A3C] hover:bg-[#EB4A2D] px-6 py-2.5 rounded-full transition-colors shadow-[0_6px_16px_-6px_rgba(255,90,60,0.6)]"
+                  className="inline-flex rounded-xl bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white shadow-[0_8px_20px_-8px_rgba(255,90,60,0.7)] transition-all hover:-translate-y-0.5 hover:bg-[#EB4A2D]"
                 >
                   เข้าสู่ระบบ
                 </Link>
@@ -232,7 +224,6 @@ function Hero(): ReactElement {
 
 function CourseCard({ course }: { course: Course }): ReactElement {
   const tagColor = tagColors[course.category ?? ""] ?? "bg-[#0F1B3D] text-white";
-  const lessonCount = course.lessons[0]?.count ?? 0;
   return (
     <div className="group bg-white rounded-3xl border border-[#0F1B3D]/[0.06] shadow-[0_1px_2px_rgba(15,27,61,0.04)] hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)] hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col">
       <div className="relative h-40 bg-gradient-to-br from-[#0F1B3D]/[0.04] to-[#0F1B3D]/[0.09] overflow-hidden">

@@ -34,6 +34,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 
+interface CourseRelation {
+  title: string | null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ lessonId: string }> }
@@ -61,7 +65,7 @@ export async function GET(
 
   // courses(title) จาก supabase join จะได้เป็น object เดี่ยวหรือ array แล้วแต่ความสัมพันธ์ที่ตั้งไว้ใน DB
   // เผื่อไว้ทั้งสองแบบกันพัง
-  const coursesRel = (lesson as any).courses;
+  const coursesRel = lesson.courses as unknown as CourseRelation | CourseRelation[] | null;
   const courseTitle = Array.isArray(coursesRel) ? coursesRel[0]?.title ?? null : coursesRel?.title ?? null;
 
   return NextResponse.json({
