@@ -4,23 +4,16 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import CoursesExplorer, { type ExplorerCourse } from "@/components/CoursesExplorer";
+import AppBrand from "@/components/AppBrand";
 
 const navLinks: string[] = ["คอร์สทั้งหมด", "เกี่ยวกับเรา", "บทความ"];
 
 function Navbar({ displayName }: { displayName: string | null }): ReactElement {
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#0F1B3D]/8">
+    <header className="app-topbar sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20">
-          <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
-                <path d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <span className="text-[19px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">Interact Edu</span>
-          </Link>
+        <div className="flex h-[74px] items-center justify-between">
+          <AppBrand compact />
 
           <nav className="hidden md:flex items-center gap-2">
             {navLinks.map((link) =>
@@ -28,7 +21,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
                 <Link
                   key={link}
                   href="/courses"
-                  className="text-[14.5px] font-semibold text-[#0F1B3D] bg-[#0F1B3D]/[0.06] px-4 py-2 rounded-full transition-colors"
+                  className="rounded-xl bg-[#0F1B3D] px-4 py-2 text-[13px] font-bold text-white shadow-sm"
                 >
                   {link}
                 </Link>
@@ -36,7 +29,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
                 <Link
                   key={link}
                   href="#"
-                  className="text-[14.5px] font-semibold text-[#0F1B3D]/70 hover:text-[#0F1B3D] hover:bg-[#0F1B3D]/[0.04] px-4 py-2 rounded-full transition-colors"
+                  className="rounded-xl px-4 py-2 text-[13px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
                 >
                   {link}
                 </Link>
@@ -51,13 +44,13 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
               <>
                 <Link
                   href="/signup"
-                  className="hidden sm:inline-flex text-[14px] font-bold text-[#0F1B3D] px-4 py-2.5 rounded-full hover:bg-[#0F1B3D]/[0.04] transition-colors"
+                  className="hidden rounded-xl px-4 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-100 sm:inline-flex"
                 >
                   สมัครสมาชิก
                 </Link>
                 <Link
                   href="/login"
-                  className="inline-flex text-[14px] font-bold text-white bg-[#FF5A3C] hover:bg-[#EB4A2D] px-6 py-2.5 rounded-full transition-colors shadow-[0_6px_16px_-6px_rgba(255,90,60,0.6)]"
+                  className="inline-flex rounded-xl bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white shadow-[0_8px_20px_-8px_rgba(255,90,60,0.7)] transition-all hover:-translate-y-0.5 hover:bg-[#EB4A2D]"
                 >
                   เข้าสู่ระบบ
                 </Link>

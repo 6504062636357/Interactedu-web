@@ -110,14 +110,14 @@ export default function NotificationList(): ReactElement {
           <button
             type="button"
             onClick={() => void markAllRead()}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-[#3157D5] hover:bg-slate-50"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-[#3157D5] shadow-sm hover:bg-slate-50"
           >
             อ่านทั้งหมด
           </button>
         )}
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-[22px] border border-slate-200/70 bg-white shadow-[0_8px_28px_rgba(15,27,61,0.045)]">
         {!loading && items.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <p className="text-sm font-semibold text-slate-500">ยังไม่มีการแจ้งเตือน</p>
@@ -150,7 +150,7 @@ export default function NotificationList(): ReactElement {
         <button
           type="button"
           onClick={() => void loadMore(nextCursor)}
-          className="mx-auto mt-5 block rounded-full border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          className="mx-auto mt-5 block rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-600 shadow-sm hover:bg-slate-50"
         >
           โหลดเพิ่มเติม
         </button>

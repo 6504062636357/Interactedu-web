@@ -15,7 +15,6 @@ var LESSON_DATA = {
   ],
 };
 
-var quizAnswered = false;
 var quizScore = 0;
 
 function renderLesson() {
@@ -69,8 +68,6 @@ function submitQuiz() {
   });
 
   quizScore = Math.round((correct / total) * 100);
-  quizAnswered = true;
-
   document.getElementById("quiz-result").textContent =
     "คุณได้คะแนน " + correct + "/" + total + " (" + quizScore + "%)";
 

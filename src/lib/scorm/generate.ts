@@ -36,6 +36,10 @@ interface VideoQuizMarkerRow {
   random_difficulty: "easy" | "medium" | "hard";
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ============================================================
 // LESSON SCO (วิดีโอ + เนื้อหา) — ไม่มีควิซแล้ว
 // ============================================================
@@ -1231,8 +1235,7 @@ function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
 // ============================================================
 
 export async function generateScormPackage(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+  supabase: SupabaseClient,
   draftId: string,
   lessonId: string
 ): Promise<{ packageUrl: string } | { error: string }> {
@@ -1348,9 +1351,9 @@ export async function generateScormPackage(
       compression: "DEFLATE",
       compressionOptions: { level: 9 },
     });
-  } catch (err: any) {
-    console.error("[generateScormPackage] JSZip creation failed:", err);
-    return { error: `Failed to generate ZIP package: ${err?.message || err}` };
+  } catch (error: unknown) {
+    console.error("[generateScormPackage] JSZip creation failed:", error);
+    return { error: `Failed to generate ZIP package: ${errorMessage(error)}` };
   }
 
   // 4. อัปโหลดเข้า Cloudflare R2 แยกไฟล์ ให้ตรงกับที่ /api/scorm/[...] proxy
@@ -1384,8 +1387,8 @@ export async function generateScormPackage(
         )
       )
     );
-  } catch (err: any) {
-    console.error("[generateScormPackage] Failed to upload SCORM files to R2:", err);
+  } catch (error: unknown) {
+    console.error("[generateScormPackage] Failed to upload SCORM files to R2:", error);
     return { error: "Failed to upload package to storage" };
   }
 
@@ -1399,8 +1402,8 @@ export async function generateScormPackage(
         ContentType: "application/zip",
       })
     );
-  } catch (err: any) {
-    console.error("[generateScormPackage] Failed to upload zip archive:", err);
+  } catch (error: unknown) {
+    console.error("[generateScormPackage] Failed to upload zip archive:", error);
     // ไม่ return error ตรงนี้ เพราะไฟล์ที่ต้องใช้เล่นจริงอัปโหลดสำเร็จแล้ว
   }
 

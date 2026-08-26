@@ -1,7 +1,7 @@
 // SCORM 1.2 API wrapper — หา window.API จาก parent/opener chain แล้ว proxy คำสั่งให้
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by player.js in the same SCORM package
 var ScormAPI = (function () {
   var apiHandle = null;
-  var findAttempts = 0;
   var findAttemptLimit = 500;
 
   function scanForAPI(win) {

@@ -50,9 +50,6 @@ export default function TeacherCoursesPage(): ReactElement {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const loadCourses = useCallback(async (): Promise<void> => {
-    setIsLoading(true);
-    setLoadError(null);
-
     const {
       data: { user },
       error: userError,
@@ -127,7 +124,11 @@ export default function TeacherCoursesPage(): ReactElement {
   }, []);
 
   useEffect(() => {
-    void loadCourses();
+    const timeoutId = window.setTimeout(() => {
+      void loadCourses();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadCourses]);
 
   const filteredCourses = useMemo(() => {

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { NotificationRecord, NotificationType } from "@/lib/notifications/types";
 import { createClient } from "@/utils/supabase/server";
+import AppBrand from "@/components/AppBrand";
 
 interface LegacyNotificationRow {
   id: string;
@@ -122,7 +123,9 @@ export default async function NotificationDetailPage({
   const actionUrl = internalActionUrl(notification.action_url);
 
   return (
-    <main className="min-h-screen bg-[#F6F7FA] px-5 py-8 sm:px-7 lg:px-10 lg:py-12">
+    <div className="app-canvas min-h-screen">
+      <header className="app-topbar sticky top-0 z-40"><div className="mx-auto flex h-[74px] max-w-5xl items-center px-5 sm:px-7"><AppBrand compact /></div></header>
+      <main className="px-5 py-7 sm:px-7 lg:py-10">
       <div className="mx-auto max-w-3xl">
         <Link
           href="/dashboard/notifications"
@@ -132,7 +135,7 @@ export default async function NotificationDetailPage({
           การแจ้งเตือนทั้งหมด
         </Link>
 
-        <article className="mt-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <article className="mt-5 overflow-hidden rounded-[28px] border border-slate-200/70 bg-white shadow-[0_16px_48px_rgba(15,27,61,0.08)]">
           <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-[#3157D5]">
@@ -155,7 +158,7 @@ export default async function NotificationDetailPage({
             {actionUrl && (
               <Link
                 href={actionUrl}
-                className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-[#3157D5] px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#2748B8]"
+                className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#3157D5]/15 transition-all hover:-translate-y-0.5 hover:bg-[#2748B8]"
               >
                 ไปยังรายการที่เกี่ยวข้อง
                 <span aria-hidden="true">→</span>
@@ -164,6 +167,7 @@ export default async function NotificationDetailPage({
           </div>
         </article>
       </div>
-    </main>
+      </main>
+    </div>
   );
 }

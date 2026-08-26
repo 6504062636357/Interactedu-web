@@ -2,6 +2,7 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
+import { Award, BookOpen, CheckCircle, GraduationCap, Play, type LucideIcon } from "lucide-react";
 
 interface EnrolledCourse {
   id: string;
@@ -143,63 +144,70 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-[26px] font-bold text-blue-950 tracking-[-0.01em]">
-          สวัสดี, {displayFirstName} 👋
-        </h1>
-        <p className="mt-1.5 text-[14.5px] text-slate-500">นี่คือภาพรวมการเรียนของคุณวันนี้</p>
+      <section className="relative mb-6 overflow-hidden rounded-[26px] bg-[linear-gradient(135deg,#0F1B3D,#1A326B)] px-6 py-7 text-white shadow-[0_18px_42px_rgba(15,27,61,0.17)] sm:px-8">
+        <div className="absolute -right-12 -top-20 h-56 w-56 rounded-full border-[38px] border-white/[0.04]" />
+        <div className="relative flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-blue-200">My learning space</p>
+            <h1 className="mt-2 text-[27px] font-black tracking-[-0.035em] sm:text-[31px]">สวัสดี, {displayFirstName} 👋</h1>
+            <p className="mt-2 text-[12.5px] text-white/60">เรียนต่อจากจุดเดิม และติดตามเป้าหมายของคุณได้ที่นี่</p>
+          </div>
+          <Link href="/courses" className="inline-flex w-fit items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-[12px] font-extrabold text-[#0F1B3D] shadow-lg transition hover:-translate-y-0.5">
+            <BookOpen size={15} /> ค้นหาคอร์สใหม่
+          </Link>
+        </div>
+      </section>
+
+      <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <StatCard label="คอร์สที่ลงทะเบียน" value={enrollments.length} icon={GraduationCap} tone="bg-blue-50 text-[#3157D5]" />
+        <StatCard label="คอร์สที่เรียนจบ" value={completedCourseCount} icon={CheckCircle} tone="bg-emerald-50 text-emerald-600" />
+        <StatCard label="ใบรับรองที่ได้รับ" value={certificateCount ?? 0} icon={Award} tone="bg-orange-50 text-[#FF5A3C]" />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="คอร์สที่ลงทะเบียน" value={enrollments.length} />
-        <StatCard label="คอร์สที่เรียนจบ" value={completedCourseCount} />
-        <StatCard label="ใบรับรองที่ได้รับ" value={certificateCount ?? 0} />
-      </div>
-
-      <div className="bg-slate-50 rounded-2xl border border-slate-100 px-6 py-5">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-[16px] font-bold text-slate-900">คอร์สที่กำลังเรียน</h2>
-          <Link href="/dashboard/student/courses" className="text-[13px] font-semibold text-blue-950 hover:underline">
+      <section className="overflow-hidden rounded-[24px] border border-slate-200/70 bg-white shadow-[0_8px_30px_rgba(15,27,61,0.045)]">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div>
+            <h2 className="text-[15px] font-extrabold text-[#0F1B3D]">คอร์สที่กำลังเรียน</h2>
+            <p className="mt-1 text-[10.5px] text-slate-400">กลับมาเรียนต่อจากบทล่าสุด</p>
+          </div>
+          <Link href="/dashboard/student/courses" className="rounded-xl bg-slate-100 px-3 py-2 text-[11px] font-bold text-[#0F1B3D] transition hover:bg-blue-50 hover:text-[#3157D5]">
             ดูทั้งหมด
           </Link>
         </div>
 
         {cards.length === 0 ? (
-          <p className="text-[13.5px] text-slate-400 py-8 text-center">ยังไม่มีคอร์สที่ลงทะเบียน</p>
+          <div className="px-5 py-14 text-center"><BookOpen className="mx-auto text-slate-300" size={25} /><p className="mt-3 text-[13px] text-slate-400">ยังไม่มีคอร์สที่ลงทะเบียน</p></div>
         ) : (
-          <div>
+          <div className="divide-y divide-slate-100 px-5 sm:px-6">
             {cards.map((course) => (
               <CourseProgressRow key={course.courseId} course={course} />
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string | number }): ReactElement {
+function StatCard({ label, value, icon: Icon, tone }: { label: string; value: string | number; icon: LucideIcon; tone: string }): ReactElement {
   return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-5 py-4">
-      <p className="text-[13px] text-slate-500 mb-1">{label}</p>
-      <p className="text-[24px] font-bold text-blue-950">{value}</p>
-    </div>
+    <article className="rounded-[20px] border border-slate-200/70 bg-white p-4 shadow-[0_8px_24px_rgba(15,27,61,0.045)] sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div><p className="text-[10.5px] font-semibold text-slate-400">{label}</p><p className="mt-2 text-[25px] font-black tracking-[-0.04em] text-[#0F1B3D]">{value}</p></div>
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tone}`}><Icon size={17} /></span>
+      </div>
+    </article>
   );
 }
 
 function CourseProgressRow({ course }: { course: CourseCardData }): ReactElement {
   const isDone = course.progress === 100;
   return (
-    <div className="flex items-center gap-4 py-4 border-b border-slate-100 last:border-0">
-      <div className="w-11 h-11 rounded-lg bg-white flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="#1e293b" strokeWidth="1.5" />
-          <path d="M8 9H16M8 13H13" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      </div>
+    <div className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-[#3157D5]"><Play size={17} fill="currentColor" /></div>
       <div className="flex-1 min-w-0">
-        <p className="text-[14px] font-semibold text-slate-900 truncate">{course.title}</p>
-        <div className="h-1.5 w-full bg-white rounded-full overflow-hidden mt-2">
+        <p className="truncate text-[13px] font-extrabold text-[#0F1B3D]">{course.title}</p>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
           <div
             className={`h-full rounded-full ${isDone ? "bg-emerald-500" : "bg-blue-600"}`}
             style={{ width: `${course.progress}%` }}
@@ -207,7 +215,7 @@ function CourseProgressRow({ course }: { course: CourseCardData }): ReactElement
         </div>
       </div>
 
-      <div className="text-right shrink-0 flex items-center gap-4">
+      <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end sm:text-right">
         <div>
           <p className={`text-[13px] font-semibold ${isDone ? "text-emerald-600" : "text-blue-600"}`}>
             {course.progress}%
@@ -217,7 +225,7 @@ function CourseProgressRow({ course }: { course: CourseCardData }): ReactElement
 
         <Link
           href={course.href}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-[12.5px] font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+          className="whitespace-nowrap rounded-xl bg-[#0F1B3D] px-4 py-2.5 text-[11.5px] font-bold text-white shadow-sm transition hover:bg-[#3157D5]"
         >
           {isDone ? "ทบทวน" : "เข้าเรียน"}
         </Link>

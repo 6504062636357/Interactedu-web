@@ -30,6 +30,20 @@ interface ScormManifestResult {
   items: ScormMenuItem[];
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -37,25 +51,29 @@ const xmlParser = new XMLParser({
 });
 
 function parseManifest(xml: string): ScormManifestResult {
-  const parsed = xmlParser.parse(xml);
-  const manifest = parsed?.manifest;
+  const parsed: unknown = xmlParser.parse(xml);
+  const parsedRecord = isRecord(parsed) ? parsed : null;
+  const manifest = parsedRecord && isRecord(parsedRecord.manifest) ? parsedRecord.manifest : null;
   if (!manifest) throw new Error('imsmanifest.xml ไม่ถูกต้อง: ไม่พบ <manifest>');
 
   // --- เวอร์ชัน SCORM ---
-  const schemaVersion = manifest?.metadata?.schemaversion ?? '';
+  const metadata = isRecord(manifest.metadata) ? manifest.metadata : null;
+  const schemaVersion = metadata?.schemaversion ?? '';
   const isScorm2004 = /2004/.test(String(schemaVersion));
   const version: '1.2' | '2004' = isScorm2004 ? '2004' : '1.2';
 
 // ฟังก์ชันช่วย: หา href ที่แท้จริงของ resource ---
   // บางแพ็กเกจ (เช่น golf-explained) ใช้ HTML template ร่วมกันใน shared/
   // แต่ questions.js ของแต่ละหัวข้อแยกอยู่คนละโฟลเดอร์ -> ต้อง launch จากโฟลเดอร์หัวข้อ ไม่ใช่ shared/
-  function resolveResourceHref(res: any): string | undefined {
-    const href = res?.['@_href'];
+  function resolveResourceHref(res: UnknownRecord): string | undefined {
+    const href = optionalString(res['@_href']);
     if (!href) return href;
 
-    const filesRaw = res?.file ?? [];
-    const filesArr = Array.isArray(filesRaw) ? filesRaw : [filesRaw];
-    const fileHrefs: string[] = filesArr.map((f: any) => f?.['@_href']).filter(Boolean);
+    const filesRaw = res.file ?? [];
+    const filesArr: unknown[] = Array.isArray(filesRaw) ? filesRaw : [filesRaw];
+    const fileHrefs = filesArr
+      .map((file) => (isRecord(file) ? optionalString(file['@_href']) : undefined))
+      .filter((fileHref): fileHref is string => Boolean(fileHref));
 
     const folderOf = (p: string) => (p.includes('/') ? p.substring(0, p.lastIndexOf('/') + 1) : '');
     const hrefFolder = folderOf(href);
@@ -74,15 +92,17 @@ function parseManifest(xml: string): ScormManifestResult {
 
   // --- สร้าง map: resource identifier -> href (พร้อมรวม xml:base เข้าไปด้วย) ---
   const resourceMap = new Map<string, string>();
-  const resourcesRaw = manifest?.resources?.resource ?? [];
-  const resourcesArr = Array.isArray(resourcesRaw) ? resourcesRaw : [resourcesRaw];
+  const resources = isRecord(manifest.resources) ? manifest.resources : null;
+  const resourcesRaw = resources?.resource ?? [];
+  const resourcesArr: unknown[] = Array.isArray(resourcesRaw) ? resourcesRaw : [resourcesRaw];
 
-  const resourcesBase = manifest?.resources?.['@_xml:base'] ?? '';
+  const resourcesBase = optionalString(resources?.['@_xml:base']) ?? '';
 
-  for (const res of resourcesArr) {
-    const id = res?.['@_identifier'];
-    const resolvedHref = resolveResourceHref(res); //ใช้ตัวนี้แทน res?.['@_href'] 
-    const resourceBase = res?.['@_xml:base'] ?? '';
+  for (const resource of resourcesArr) {
+    if (!isRecord(resource)) continue;
+    const id = optionalString(resource['@_identifier']);
+    const resolvedHref = resolveResourceHref(resource); //ใช้ตัวนี้แทน res?.['@_href']
+    const resourceBase = optionalString(resource['@_xml:base']) ?? '';
 
     if (id && resolvedHref) {
       const fullBase = [resourcesBase, resourceBase].filter(Boolean).join('');
@@ -98,30 +118,33 @@ function parseManifest(xml: string): ScormManifestResult {
   // --- เดิน item tree แบบ recursive ---
   function walkItems(rawItem: unknown): ScormMenuItem[] {
     if (!rawItem) return [];
-    const arr = Array.isArray(rawItem) ? rawItem : [rawItem];
+    const arr: unknown[] = Array.isArray(rawItem) ? rawItem : [rawItem];
 
-    return arr.map((it: any): ScormMenuItem => {
-      const identifier = it?.['@_identifier'] ?? '';
-      const identifierRef = it?.['@_identifierref'] ?? null;
-      const title = it?.title ?? identifier ?? 'ไม่มีชื่อ';
+    return arr.map((rawItemValue): ScormMenuItem => {
+      const item = isRecord(rawItemValue) ? rawItemValue : {};
+      const identifier = optionalString(item['@_identifier']) ?? '';
+      const identifierRef = optionalString(item['@_identifierref']) ?? null;
+      const title = item.title ?? identifier ?? 'ไม่มีชื่อ';
 
       // 
-      const parameters = it?.['@_parameters'] ?? '';
+      const parameters = optionalString(item['@_parameters']) ?? '';
       let href = identifierRef ? resourceMap.get(identifierRef) ?? null : null;
       if (href && parameters) {
         href = `${href}${parameters}`;
       }
       // 
 
-      const children = it?.item ? walkItems(it.item) : [];
+      const children = item.item ? walkItems(item.item) : [];
 
       return { identifier, title: String(title), href, children };
     });
   }
 
-  const org = manifest?.organizations?.organization;
+  const organizations = isRecord(manifest.organizations) ? manifest.organizations : null;
+  const org = organizations?.organization;
   // organization อาจเป็น array ถ้ามีหลาย org แต่ปกติ SCORM ใช้แค่ default org อันเดียว
-  const orgObj = Array.isArray(org) ? org[0] : org;
+  const orgValue = Array.isArray(org) ? org[0] : org;
+  const orgObj = isRecord(orgValue) ? orgValue : null;
   if (!orgObj) throw new Error('imsmanifest.xml ไม่ถูกต้อง: ไม่พบ <organization>');
 
   const organizationTitle = String(orgObj?.title ?? 'บทเรียน');
@@ -191,9 +214,9 @@ export async function POST(request: NextRequest) {
     let manifestResult: ScormManifestResult;
     try {
       manifestResult = parseManifest(manifestXml);
-    } catch (parseErr: any) {
+    } catch (parseError: unknown) {
       return NextResponse.json(
-        { error: `อ่านโครงสร้าง imsmanifest.xml ไม่สำเร็จ: ${parseErr.message}` },
+        { error: `อ่านโครงสร้าง imsmanifest.xml ไม่สำเร็จ: ${errorMessage(parseError)}` },
         { status: 400 }
       );
     }
@@ -240,8 +263,8 @@ export async function POST(request: NextRequest) {
       itemCount: items.length,
       filesUploaded: uploadTasks.length,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('SCORM Upload Error:', error);
-    return NextResponse.json({ error: error.message || 'อัปโหลดไม่สำเร็จ' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) || 'อัปโหลดไม่สำเร็จ' }, { status: 500 });
   }
 }

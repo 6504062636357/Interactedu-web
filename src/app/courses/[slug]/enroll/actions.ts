@@ -24,6 +24,7 @@ export async function enrollFreeCourse(courseId: string, slug: string): Promise<
         course_id: courseId,
         status: "approved",
         approved_at: new Date().toISOString(),
+        paid_amount: 0,
       })
       .select("id")
       .single(),
@@ -67,20 +68,23 @@ export async function enrollPaidCourseAuto(
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
 
-  const [{ data: enrollment, error }, { data: course }] = await Promise.all([
-    supabase
-      .from("enrollments")
-      .insert({
-        student_id: user.id,
-        course_id: courseId,
-        status: "approved",
-        approved_at: new Date().toISOString(),
-        payment_slip_url: chargeId,
-      })
-      .select("id")
-      .single(),
-    supabase.from("courses").select("title").eq("id", courseId).maybeSingle(),
-  ]);
+  const { data: course } = await supabase
+    .from("courses")
+    .select("title, price")
+    .eq("id", courseId)
+    .maybeSingle();
+  const { data: enrollment, error } = await supabase
+    .from("enrollments")
+    .insert({
+      student_id: user.id,
+      course_id: courseId,
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      payment_slip_url: chargeId,
+      paid_amount: Number(course?.price ?? 0),
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error("Failed to create auto paid enrollment:", error.message);
@@ -119,19 +123,22 @@ export async function enrollPaidCourseManualSlip(
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
 
-  const [{ data: enrollment, error }, { data: course }] = await Promise.all([
-    supabase
-      .from("enrollments")
-      .insert({
-        student_id: user.id,
-        course_id: courseId,
-        status: "pending",
-        payment_slip_url: paymentSlipUrl,
-      })
-      .select("id")
-      .single(),
-    supabase.from("courses").select("title").eq("id", courseId).maybeSingle(),
-  ]);
+  const { data: course } = await supabase
+    .from("courses")
+    .select("title, price")
+    .eq("id", courseId)
+    .maybeSingle();
+  const { data: enrollment, error } = await supabase
+    .from("enrollments")
+    .insert({
+      student_id: user.id,
+      course_id: courseId,
+      status: "pending",
+      payment_slip_url: paymentSlipUrl,
+      paid_amount: Number(course?.price ?? 0),
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error("Failed to create manual slip enrollment:", error.message);

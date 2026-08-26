@@ -12,6 +12,22 @@ const r2 = new S3Client({
   },
 });
 
+function errorName(error: unknown): string {
+  if (error instanceof Error) return error.name;
+  if (typeof error === 'object' && error !== null && 'name' in error && typeof error.name === 'string') {
+    return error.name;
+  }
+  return 'UnknownError';
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+}
+
 
 async function fetchFromR2(key: string): Promise<Buffer> {
   const command = new GetObjectCommand({
@@ -46,12 +62,12 @@ export async function GET(
     
     try {
       buffer = await fetchFromR2(primaryPath);
-    } catch (err: any) {
-      if (err?.name === 'NoSuchKey') {
+    } catch (error: unknown) {
+      if (errorName(error) === 'NoSuchKey') {
         const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
         buffer = await fetchFromR2(`${basePath}/shared/${filename}`);
       } else {
-        throw err;
+        throw error;
       }
     }
    
@@ -65,14 +81,16 @@ export async function GET(
         'Cache-Control': 'no-store, max-age=0',
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const name = errorName(error);
+    const message = errorMessage(error);
     console.error('R2 Proxy Error:', {
       primaryPath,
-      name: error?.name,
-      message: error?.message,
+      name,
+      message,
     });
     return new NextResponse(
-      JSON.stringify({ error: error?.name, message: error?.message, storagePath: primaryPath }),
+      JSON.stringify({ error: name, message, storagePath: primaryPath }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

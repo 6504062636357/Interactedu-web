@@ -122,6 +122,7 @@ export default function ProfileDropdown({ displayName, role }: ProfileDropdownPr
   const router = useRouter();
   const supabase = createClient();
   const menuItems = getMenuItems(role);
+  const roleLabel = role === "teacher" ? "ผู้สอน" : role === "admin" ? "ผู้ดูแลระบบ" : "ผู้เรียน";
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent): void => {
@@ -143,45 +144,55 @@ export default function ProfileDropdown({ displayName, role }: ProfileDropdownPr
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 text-[14px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] pl-2 pr-3.5 py-2 rounded-full transition-colors"
+        className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 py-1.5 pl-1.5 pr-2 text-[13px] font-bold text-[#0F1B3D] shadow-[0_5px_18px_rgba(15,27,61,0.06)] transition-all hover:border-[#3157D5]/20 hover:shadow-[0_8px_24px_rgba(15,27,61,0.1)] sm:pr-3.5"
+        aria-expanded={open}
+        aria-haspopup="menu"
       >
-        <span className="w-7 h-7 rounded-full bg-[#FF5A3C] flex items-center justify-center text-[13px] font-extrabold">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#FF5A3C,#FF826B)] text-[13px] font-extrabold text-white shadow-sm">
           {displayName.charAt(0).toUpperCase()}
         </span>
-        {displayName}
+        <span className="hidden max-w-36 truncate sm:inline">{displayName}</span>
         <svg
           width="13"
           height="13"
           viewBox="0 0 24 24"
           fill="none"
-          className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+          className={`hidden text-slate-400 transition-transform duration-150 sm:block ${open ? "rotate-180" : ""}`}
         >
           <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl border border-[#0F1B3D]/[0.06] shadow-[0_20px_45px_-15px_rgba(15,27,61,0.3)] py-2 z-50">
+        <div role="menu" className="absolute right-0 z-50 mt-2.5 w-64 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.28)] backdrop-blur-xl">
+          <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3.5">
+            <p className="truncate text-[13px] font-extrabold text-[#0F1B3D]">{displayName}</p>
+            <p className="mt-0.5 text-[10.5px] font-medium text-slate-400">บัญชี{roleLabel}</p>
+          </div>
+          <div className="p-2">
           {menuItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               onClick={() => setOpen(false)}
-              className="flex items-center gap-3 px-4 py-2.5 text-[14px] font-semibold text-[#0F1B3D]/80 hover:bg-[#0F1B3D]/[0.04] hover:text-[#0F1B3D] transition-colors"
+              role="menuitem"
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[12.5px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
             >
               {item.icon}
               {item.label}
             </Link>
           ))}
-          <div className="my-1.5 border-t border-[#0F1B3D]/[0.06]" />
+          <div className="my-1.5 border-t border-slate-100" />
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] font-semibold text-[#FF5A3C] hover:bg-[#FF5A3C]/[0.06] transition-colors"
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[12.5px] font-semibold text-[#FF5A3C] transition-colors hover:bg-[#FF5A3C]/[0.07]"
           >
             <IconLogout />
             ออกจากระบบ
           </button>
+          </div>
         </div>
       )}
     </div>
