@@ -17,6 +17,7 @@
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.0",
     "archiver": "^8.0.0",
+    "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.10.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.24.0",
@@ -27,7 +28,8 @@
     "react-dom": "19.2.4",
     "scorm-again": "^3.1.1",
     "server-only": "^0.0.1",
-    "simple-scorm-packager": "^0.2.7"
+    "simple-scorm-packager": "^0.2.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
