@@ -156,12 +156,20 @@ export default function TeacherCoursesPage(): ReactElement {
             {isLoading ? "กำลังโหลด..." : `${filteredCourses.length} จาก ${courses.length} คอร์ส`}
           </p>
         </div>
-        <Link
-          href="/dashboard/teacher/courses/new"
-          className="inline-flex items-center justify-center gap-1.5 text-[13.5px] font-semibold text-white bg-blue-950 hover:bg-blue-900 px-4 py-2.5 rounded-lg transition-colors"
-        >
-          + สร้างคอร์สใหม่
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard/teacher/courses/import"
+            className="inline-flex items-center justify-center gap-1.5 text-[13.5px] font-semibold text-blue-950 bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2.5 rounded-lg transition-colors"
+          >
+            นำเข้าจาก Excel
+          </Link>
+          <Link
+            href="/dashboard/teacher/courses/new"
+            className="inline-flex items-center justify-center gap-1.5 text-[13.5px] font-semibold text-white bg-blue-950 hover:bg-blue-900 px-4 py-2.5 rounded-lg transition-colors"
+          >
+            + สร้างคอร์สใหม่
+          </Link>
+        </div>
       </div>
 
       <div className="mb-6 flex flex-col sm:flex-row gap-3">
