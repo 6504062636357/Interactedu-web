@@ -25,6 +25,15 @@ export interface DraftRandomMarkerInput {
   difficulty: "easy" | "medium" | "hard";
 }
 
+export interface DraftVideoSegmentInput {
+  title: string;
+  summary: string | null;
+  start: number;
+  end: number;
+  source: "ai" | "manual" | "timed";
+  confidence: number | null;
+}
+
 interface StoredDraftChoice {
   choice_text: string;
   is_correct: boolean;
@@ -41,12 +50,24 @@ interface StoredDraftQuestion {
   quiz_choices: StoredDraftChoice[];
 }
 
+interface StoredVideoSegment {
+  id: string;
+  title: string;
+  summary: string | null;
+  start_seconds: number;
+  end_seconds: number;
+  source: "ai" | "manual" | "timed";
+  confidence: number | null;
+  order_index: number;
+}
+
 interface SaveLessonDraftInput {
   courseId: string;
   moduleId: string | null;
   title: string;
   videoUrl: string | null;
   contentHtml: string;
+  videoSegments: DraftVideoSegmentInput[];
   questions: DraftQuestionInput[];
   randomMarkers: DraftRandomMarkerInput[];
 }
@@ -55,6 +76,69 @@ interface SaveLessonDraftResult {
   draftId?: string;
   lessonId?: string;
   error?: string;
+}
+
+function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
+  segments?: DraftVideoSegmentInput[];
+  error?: string;
+} {
+  if (input.length > 200) return { error: "แบ่งวิดีโอได้สูงสุด 200 บท" };
+
+  const segments = [...input].sort((first, second) => first.start - second.start);
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (!segment.title.trim()) return { error: `กรุณาใส่ชื่อบทที่ ${index + 1}` };
+    if (segment.title.trim().length > 200) return { error: `ชื่อบทที่ ${index + 1} ยาวเกิน 200 ตัวอักษร` };
+    if ((segment.summary?.trim().length ?? 0) > 500) return { error: `คำอธิบายบทที่ ${index + 1} ยาวเกิน 500 ตัวอักษร` };
+    if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.start < 0 || segment.end <= segment.start) {
+      return { error: `เวลาเริ่ม–จบของบทที่ ${index + 1} ไม่ถูกต้อง` };
+    }
+    if (!(["ai", "manual", "timed"] as const).includes(segment.source)) {
+      return { error: `แหล่งที่มาของบทที่ ${index + 1} ไม่ถูกต้อง` };
+    }
+    if (index > 0 && segment.start < segments[index - 1].end) {
+      return { error: `ช่วงเวลาของบทที่ ${index} และบทที่ ${index + 1} ซ้อนกัน` };
+    }
+    if (segment.confidence != null && (!Number.isFinite(segment.confidence) || segment.confidence < 0 || segment.confidence > 1)) {
+      return { error: `ค่าความมั่นใจของบทที่ ${index + 1} ไม่ถูกต้อง` };
+    }
+  }
+
+  return {
+    segments: segments.map((segment) => ({
+      ...segment,
+      title: segment.title.trim(),
+      summary: segment.summary?.trim() || null,
+    })),
+  };
+}
+
+async function replaceVideoSegments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  draftId: string,
+  lessonId: string,
+  segments: DraftVideoSegmentInput[]
+): Promise<string | null> {
+  const { error: deleteError } = await supabase
+    .from("lesson_video_segments")
+    .delete()
+    .eq("lesson_draft_id", draftId);
+  if (deleteError) return "ลบช่วงวิดีโอเดิมไม่สำเร็จ";
+  if (segments.length === 0) return null;
+
+  const rows = segments.map((segment, index) => ({
+    lesson_draft_id: draftId,
+    lesson_id: lessonId,
+    title: segment.title,
+    summary: segment.summary,
+    start_seconds: segment.start,
+    end_seconds: segment.end,
+    source: segment.source,
+    confidence: segment.confidence,
+    order_index: index,
+  }));
+  const { error } = await supabase.from("lesson_video_segments").insert(rows);
+  return error ? "บันทึกช่วงวิดีโอไม่สำเร็จ กรุณาตรวจว่าได้อัปเดตฐานข้อมูลแล้ว" : null;
 }
 
 export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<SaveLessonDraftResult> {
@@ -67,6 +151,8 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
   if (!input.moduleId) return { error: "ไม่พบหมวดบทเรียนของคอร์สนี้" };
   if (!input.title.trim()) return { error: "กรุณาใส่ชื่อบทเรียน" };
+  const preparedSegments = prepareVideoSegments(input.videoSegments);
+  if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
   // 1. หา order_index ถัดไปใน module
   const { data: lastLesson } = await supabase
@@ -114,6 +200,9 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     console.error("Failed to save lesson draft:", draftError?.message);
     return { error: "บันทึกฉบับร่างไม่สำเร็จ กรุณาลองใหม่" };
   }
+
+  const segmentError = await replaceVideoSegments(supabase, draft.id, lesson.id, preparedSegments.segments);
+  if (segmentError) return { error: segmentError };
 
   // 4. สร้างคำถาม + ตัวเลือก
   for (let i = 0; i < input.questions.length; i++) {
@@ -188,6 +277,15 @@ export interface ExistingDraftData {
   videoUrl: string | null;
   contentHtml: string;
   status: string;
+  videoSegments: Array<{
+    id: string;
+    title: string;
+    summary: string | null;
+    start: number;
+    end: number;
+    source: "ai" | "manual" | "timed";
+    confidence: number | null;
+  }>;
   questions: {
     questionText: string;
     timestampSeconds: number | null;
@@ -246,6 +344,13 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
     .eq("lesson_draft_id", draft.id)
     .order("order_index", { ascending: true });
 
+  const { data: segmentData, error: segmentError } = await supabase
+    .from("lesson_video_segments")
+    .select("id, title, summary, start_seconds, end_seconds, source, confidence, order_index")
+    .eq("lesson_draft_id", draft.id)
+    .order("order_index", { ascending: true });
+  if (segmentError) return { error: "โหลดข้อมูลช่วงวิดีโอไม่สำเร็จ กรุณาตรวจว่าได้อัปเดตฐานข้อมูลแล้ว" };
+
   const storedQuestions =
     (draft as unknown as { quiz_questions: StoredDraftQuestion[] }).quiz_questions ?? [];
     const questions = storedQuestions
@@ -267,6 +372,16 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
     difficulty: m.random_difficulty as "easy" | "medium" | "hard",
   }));
 
+  const videoSegments = ((segmentData ?? []) as StoredVideoSegment[]).map((segment) => ({
+    id: segment.id,
+    title: segment.title,
+    summary: segment.summary,
+    start: segment.start_seconds,
+    end: segment.end_seconds,
+    source: segment.source,
+    confidence: segment.confidence,
+  }));
+
   return {
     data: {
       lessonId: lesson.id,
@@ -275,6 +390,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
       videoUrl: draft.video_url,
       contentHtml: draft.content_html ?? "",
       status: draft.status,
+      videoSegments,
       questions,
       randomMarkers,
     },
@@ -289,6 +405,7 @@ export async function updateLessonDraft(input: {
   title: string;
   videoUrl: string | null;
   contentHtml: string;
+  videoSegments: DraftVideoSegmentInput[];
   questions: DraftQuestionInput[];
   randomMarkers: DraftRandomMarkerInput[];
 }): Promise<SaveLessonDraftResult> {
@@ -300,6 +417,8 @@ export async function updateLessonDraft(input: {
 
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
   if (!input.title.trim()) return { error: "กรุณาใส่ชื่อบทเรียน" };
+  const preparedSegments = prepareVideoSegments(input.videoSegments);
+  if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
   // 1. อัปเดตชื่อ lesson
   const { error: lessonError } = await supabase
@@ -329,6 +448,14 @@ export async function updateLessonDraft(input: {
     .eq("id", input.courseId);
 
   if (courseStatusError) return { error: "อัปเดตสถานะคอร์สเป็นฉบับร่างไม่สำเร็จ" };
+
+  const segmentError = await replaceVideoSegments(
+    supabase,
+    input.draftId,
+    input.lessonId,
+    preparedSegments.segments
+  );
+  if (segmentError) return { error: segmentError };
 
   // 3. ลบเฉพาะควิซในวิดีโอ ส่วนคำถามท้ายคอร์สจัดการจากหน้าบททดสอบโดยเฉพาะ
   const { error: deleteError } = await supabase

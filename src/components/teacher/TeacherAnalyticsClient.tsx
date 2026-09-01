@@ -114,6 +114,7 @@ function MetricCard({
       </div>
       <p className="relative mt-2 text-[11px] leading-5 text-slate-400">{description}</p>
     </article>
+    
   );
 }
 

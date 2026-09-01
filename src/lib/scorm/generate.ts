@@ -36,6 +36,15 @@ interface VideoQuizMarkerRow {
   random_difficulty: "easy" | "medium" | "hard";
 }
 
+interface VideoSegmentRow {
+  id: string;
+  title: string;
+  summary: string | null;
+  start_seconds: number;
+  end_seconds: number;
+  order_index: number;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -104,7 +113,8 @@ function buildLessonPlayerJs(
   draft: LessonDraftRow,
   lessonId: string,
   videoQuizQuestions: QuizQuestionRow[],
-  videoQuizMarkers: VideoQuizMarkerRow[]
+  videoQuizMarkers: VideoQuizMarkerRow[],
+  videoSegments: VideoSegmentRow[]
 ): string {
   const staticQuizzes = videoQuizQuestions.map((q) => ({
     id: q.id,
@@ -129,6 +139,16 @@ function buildLessonPlayerJs(
     quizzes: [...staticQuizzes, ...randomQuizzes].sort(
       (a, b) => (a.timestampSeconds ?? 0) - (b.timestampSeconds ?? 0)
     ),
+    chapters: videoSegments
+      .slice()
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((segment) => ({
+        id: segment.id,
+        title: segment.title,
+        summary: segment.summary,
+        startSeconds: segment.start_seconds,
+        endSeconds: segment.end_seconds,
+      })),
   };
   return `var LESSON_DATA = ${JSON.stringify(lessonData)};
 
@@ -356,6 +376,60 @@ function formatTime(sec) {
   return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
 }
 
+function findChapterAtTime(seconds) {
+  for (var i = 0; i < LESSON_DATA.chapters.length; i++) {
+    var chapter = LESSON_DATA.chapters[i];
+    var isLast = i === LESSON_DATA.chapters.length - 1;
+    if (seconds >= chapter.startSeconds && (seconds < chapter.endSeconds || (isLast && seconds <= chapter.endSeconds))) {
+      return chapter;
+    }
+  }
+  return null;
+}
+
+function updateActiveChapter(video) {
+  var chapter = findChapterAtTime(video.currentTime);
+  var label = document.getElementById("current-chapter-label");
+  if (label) label.textContent = chapter ? chapter.title : "";
+
+  var buttons = document.querySelectorAll(".chapter-button");
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].classList.toggle("active", !!chapter && buttons[i].dataset.chapterId === chapter.id);
+  }
+}
+
+function renderChapters(video) {
+  var nav = document.getElementById("chapter-nav");
+  var list = document.getElementById("chapter-list");
+  if (!nav || !list || !LESSON_DATA.chapters.length) return;
+
+  nav.hidden = false;
+  list.innerHTML = "";
+  LESSON_DATA.chapters.forEach(function (chapter) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "chapter-button";
+    button.dataset.chapterId = chapter.id;
+
+    var title = document.createElement("span");
+    title.className = "chapter-button-title";
+    title.textContent = chapter.title;
+    button.appendChild(title);
+
+    var time = document.createElement("span");
+    time.className = "chapter-button-time";
+    time.textContent = formatTime(chapter.startSeconds) + "–" + formatTime(chapter.endSeconds);
+    button.appendChild(time);
+
+    button.addEventListener("click", function () {
+      video.currentTime = Math.min(chapter.startSeconds, getMaxAllowedSeekTime());
+      video.play();
+    });
+    list.appendChild(button);
+  });
+  updateActiveChapter(video);
+}
+
 function renderProgressMarkers(video) {
   var container = document.getElementById("progress-markers");
   container.innerHTML = "";
@@ -429,10 +503,17 @@ function setupCustomControls(video) {
   progressTrack.addEventListener("click", seekFromEvent);
 
   video.addEventListener("timeupdate", updateProgressUI.bind(null, video));
+  video.addEventListener("timeupdate", updateActiveChapter.bind(null, video));
   video.addEventListener("loadedmetadata", function () {
     updateProgressUI(video);
     renderProgressMarkers(video);
+    renderChapters(video);
   });
+  if (video.readyState >= 1) {
+    updateProgressUI(video);
+    renderProgressMarkers(video);
+    renderChapters(video);
+  }
 }
 
 /* ---------------- Resume confirm popup ---------------- */
@@ -620,6 +701,17 @@ const LESSON_HTML = `<!DOCTYPE html>
         </button>
       </div>
     </div>
+
+    <section id="chapter-nav" class="chapter-nav" hidden>
+      <div class="chapter-nav-header">
+        <div>
+          <p class="chapter-nav-kicker">บทของวิดีโอ</p>
+          <p id="current-chapter-label" class="current-chapter-label"></p>
+        </div>
+        <span class="chapter-nav-hint">เลือกเพื่อข้ามไปยังบท</span>
+      </div>
+      <div id="chapter-list" class="chapter-list"></div>
+    </section>
 
     <div id="lesson-content" class="lesson-content"></div>
   </div>
@@ -988,6 +1080,39 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 }
 .progress-marker-dot.answered { background: #34D399; }
 
+/* ---------- Video chapters ---------- */
+.chapter-nav {
+  margin-top: 16px;
+  border: 1px solid rgba(124, 92, 255, 0.16);
+  border-radius: 16px;
+  background: #F7F5FF;
+  padding: 16px;
+}
+.chapter-nav[hidden] { display: none; }
+.chapter-nav-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.chapter-nav-kicker { margin: 0; color: #0F1B3D; font-size: 12px; font-weight: 700; }
+.current-chapter-label { margin: 2px 0 0; color: #5D45C7; font-size: 13px; font-weight: 700; }
+.chapter-nav-hint { color: rgba(15, 27, 61, 0.42); font-size: 10.5px; }
+.chapter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.chapter-button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 10px 12px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.chapter-button:hover { border-color: rgba(124, 92, 255, 0.25); background: #fff; transform: translateY(-1px); }
+.chapter-button.active { border-color: rgba(124, 92, 255, 0.48); background: #fff; box-shadow: 0 4px 14px rgba(93, 69, 199, 0.08); }
+.chapter-button-title { overflow: hidden; color: #0F1B3D; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-button-time { color: #7C5CFF; font-size: 10.5px; font-weight: 600; }
+
 .speed-select {
   background: rgba(255,255,255,0.1);
   color: #fff;
@@ -999,6 +1124,11 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   cursor: pointer;
 }
 .speed-select option { color: #0F1B3D; }
+
+@media (max-width: 560px) {
+  .chapter-list { grid-template-columns: 1fr; }
+  .chapter-nav-header { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
 
 .lesson-content {
   margin: 28px 0;
@@ -1325,10 +1455,29 @@ export async function generateScormPackage(
 
   const typedMarkers = (markers ?? []) as unknown as VideoQuizMarkerRow[];
 
+  const { data: segments, error: segmentsError } = await supabase
+    .from("lesson_video_segments")
+    .select("id, title, summary, start_seconds, end_seconds, order_index")
+    .eq("lesson_draft_id", draftId)
+    .order("order_index", { ascending: true });
+
+  if (segmentsError) {
+    console.error("[generateScormPackage] video segments fetch failed:", segmentsError);
+    return { error: "Failed to fetch video segments" };
+  }
+
+  const typedSegments = (segments ?? []) as unknown as VideoSegmentRow[];
+
   const courseId = typedDraft.lessons.course_id;
 
   const manifestXml = buildManifestXml(typedDraft, hasQuiz);
-  const lessonPlayerJs = buildLessonPlayerJs(typedDraft, lessonId, videoQuizQuestions, typedMarkers);
+  const lessonPlayerJs = buildLessonPlayerJs(
+    typedDraft,
+    lessonId,
+    videoQuizQuestions,
+    typedMarkers,
+    typedSegments
+  );
   const quizPlayerJs = hasQuiz ? buildQuizPlayerJs(typedDraft, postExamQuestions) : null;
 
   // 3. สร้างไฟล์ ZIP ด้วย JSZip (เสถียร 100% บน Next.js / Turbopack)
