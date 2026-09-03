@@ -1,12 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createQuestionBankItem, updateQuestionBankItem, type QuestionBankInput, type QuestionBankTopicTagInput, type Difficulty, type QuestionFormat, type UsageType, type PrivacyScope } from "@/app/dashboard/teacher/question-bank/actions";
 import { CATEGORIES, type Category } from "@/lib/constants/categories";
 interface ChoiceState { text: string; isCorrect: boolean }
 
 const WHOLE_COURSE_VALUE = "__whole_course__";
+
+type InteractionType = "multiple_choice" | "true_false" | "sequencing" | "matching" | "fill_in_blank" | "note_callout";
+
+// type ที่เปิดให้ครูเลือกได้จริงตอนนี้ (sync กับ lib/quiz/config/enabled-types.ts ฝั่ง backend)
+const ENABLED_INTERACTION_TYPES: { value: InteractionType; label: string; disabled?: boolean }[] = [
+  { value: "multiple_choice", label: "Multiple Choice" },
+  { value: "true_false", label: "True / False" },
+  { value: "fill_in_blank", label: "Fill in the blank (เร็วๆ นี้)", disabled: true },
+  { value: "sequencing", label: "Sequencing (เร็วๆ นี้)", disabled: true },
+  { value: "matching", label: "Matching (เร็วๆ นี้)", disabled: true },
+];
+
+interface ChoiceState { text: string; isCorrect: boolean }
 
 export default function QuestionBankForm({
   questionId,
@@ -41,6 +54,35 @@ const [customCategory, setCustomCategory] = useState(
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ questionText?: string; customCategory?: string }>({});
+  const [emptyChoiceIndices, setEmptyChoiceIndices] = useState<Set<number>>(new Set());
+  // error ของตัวเลือกแยกออกจาก `error` กลาง เพื่อโชว์ใต้ list ตัวเลือกโดยตรง (ใกล้จุดที่ผิดจริง)
+  // แทนที่จะไปกองรวมกับกล่องสรุปด้านล่างสุดของฟอร์มซึ่งอยู่ไกลจากตัวเลือกที่อยู่ด้านบน
+  const [choicesError, setChoicesError] = useState<string | null>(null);
+
+  const questionTextRef = useRef<HTMLTextAreaElement>(null);
+  const customCategoryRef = useRef<HTMLInputElement>(null);
+  const choiceRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  const [interactionType, setInteractionType] = useState<InteractionType>(
+    (initialData as unknown as { interactionType?: InteractionType })?.interactionType ?? "multiple_choice"
+  );
+
+   // ===== เพิ่มใหม่: พอเปลี่ยนเป็น true_false ให้ล็อก choices เป็น "จริง"/"เท็จ" อัตโนมัติ =====
+  useEffect(() => {
+    if (interactionType === "true_false") {
+      setChoices((current) => {
+        // ถ้าเคยเป็น true_false อยู่แล้ว (กรณีแก้ไขคำถามเดิม) ไม่ต้อง reset ทับ isCorrect ที่ตั้งไว้
+        const alreadyTrueFalse =
+          current.length === 2 && current[0].text === "จริง" && current[1].text === "เท็จ";
+        if (alreadyTrueFalse) return current;
+        return [
+          { text: "จริง", isCorrect: true },
+          { text: "เท็จ", isCorrect: false },
+        ];
+      });
+    }
+  }, [interactionType]);
 
   const lessonsByCourse = lessons.reduce<Record<string, { courseId: string; courseTitle: string; items: typeof lessons }>>((groups, lesson) => {
   if (!groups[lesson.courseId]) groups[lesson.courseId] = { courseId: lesson.courseId, courseTitle: lesson.courseTitle, items: [] };
@@ -91,6 +133,13 @@ const courseGroups = Object.values(lessonsByCourse)
 
   function updateChoiceText(index: number, text: string) {
     setChoices((current) => current.map((choice, i) => (i === index ? { ...choice, text } : choice)));
+    setEmptyChoiceIndices((prev) => {
+      if (!prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
+    setChoicesError(null);
   }
 
   function setCorrectChoice(index: number) {
@@ -98,14 +147,68 @@ const courseGroups = Object.values(lessonsByCourse)
   }
 
     async function handleSave() {
+    setError(null);
+    setChoicesError(null);
+
+    // เช็ค field-level ก่อน (คำถาม + ระบุหมวดเนื้อหา) แล้ว auto-focus ไปช่องแรกที่ผิด
+    const nextFieldErrors: { questionText?: string; customCategory?: string } = {};
+    if (!questionText.trim()) nextFieldErrors.questionText = "กรุณากรอกคำถาม";
+    if (category === "อื่นๆ" && !customCategory.trim()) nextFieldErrors.customCategory = "กรุณาระบุหมวดเนื้อหา";
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      if (nextFieldErrors.questionText) questionTextRef.current?.focus();
+      else if (nextFieldErrors.customCategory) customCategoryRef.current?.focus();
+      return;
+    }
+    setFieldErrors({});
+
     if (topicTags.length === 0) {
       setError("กรุณาเลือกอย่างน้อย 1 คอร์ส ก่อนบันทึก");
       return;
     }
+    // ===== เพิ่มใหม่: validate choices ตาม interaction_type =====
+    // เช็คทั้ง multiple_choice และ true_false (choice-based ทั้งคู่) ว่าทุกตัวเลือกที่มีอยู่ต้องกรอกครบ
+    // ไม่ใช่แค่เช็คว่า "มี" ตัวเลือกเฉยๆ — ไม่งั้นกดสร้างคอร์สหลุดผ่านไปได้ทั้งที่ตัวเลือกว่างอยู่
+    if (interactionType === "multiple_choice" || interactionType === "true_false") {
+      const missingIndices = new Set(
+        choices.reduce<number[]>((acc, c, i) => (c.text.trim() ? acc : [...acc, i]), [])
+      );
+      if (missingIndices.size > 0) {
+        setEmptyChoiceIndices(missingIndices);
+        setChoicesError(
+          missingIndices.size === choices.length
+            ? `กรุณากรอกข้อความให้ครบทุกตัวเลือก (มีทั้งหมด ${choices.length} ตัวเลือก)`
+            : `กรุณากรอกข้อความให้ครบทุกตัวเลือก (ยังขาดอีก ${missingIndices.size} จาก ${choices.length} ตัวเลือก)`
+        );
+        const firstMissingIndex = Math.min(...missingIndices);
+        choiceRefs.current[firstMissingIndex]?.focus();
+        return;
+      }
+      setEmptyChoiceIndices(new Set());
+      if (!choices.some((c) => c.isCorrect)) {
+        setChoicesError("กรุณาเลือกตัวเลือกที่ถูกต้องอย่างน้อย 1 ข้อ");
+        return;
+      }
+    }
+    // ===== จบส่วนเพิ่มใหม่ =====
     setSaving(true);
     setError(null);
     const finalCategory = category === "อื่นๆ" ? customCategory.trim() : category;
-    const input: QuestionBankInput = { questionText, explanation: explanation || null, category: finalCategory || null, difficulty, format, usageType, privacyScope, topicTags, choices };
+    const input: QuestionBankInput = {
+      questionText,
+      explanation: explanation || null,
+      category: finalCategory || null,
+      difficulty,
+      format,
+      usageType,
+      privacyScope,
+      topicTags,
+      choices,
+      // ===== เพิ่มใหม่ =====
+      interactionType,
+      answerData: null, // multiple_choice/true_false ไม่ใช้ answer_data (ตาม design ที่ตกลงกันไว้)
+      
+    } as QuestionBankInput;
     const result = questionId ? await updateQuestionBankItem(questionId, input) : await createQuestionBankItem(input);
     setSaving(false);
     if (result.error) {
@@ -115,13 +218,46 @@ const courseGroups = Object.values(lessonsByCourse)
     router.push("/dashboard/teacher/question-bank");
   }
 
+
   const inputClass = "w-full rounded-lg border border-[#0F1B3D]/[0.08] bg-[#F7F8FA] px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#FF5A3C] focus:bg-white";
   const labelClass = "mb-1.5 block text-[13px] font-semibold text-[#0F1B3D]/70";
 
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5 sm:p-6">
-        <label className="block"><span className={labelClass}>คำถาม</span><textarea value={questionText} onChange={(e) => setQuestionText(e.target.value)} rows={2} className={inputClass} /></label>
+      {/* ===== เพิ่มใหม่: interaction type selector ===== */}
+        <label className="mb-4 block">
+          <span className={labelClass}>ประเภทคำถาม</span>
+          <select
+            value={interactionType}
+            onChange={(e) => setInteractionType(e.target.value as InteractionType)}
+            className={inputClass}
+          >
+            {ENABLED_INTERACTION_TYPES.map((opt) => (
+              <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={labelClass}>คำถาม <span className="text-red-500">*</span></span>
+          <textarea
+            ref={questionTextRef}
+            value={questionText}
+            onChange={(e) => {
+              setQuestionText(e.target.value);
+              setFieldErrors((prev) => (prev.questionText ? { ...prev, questionText: undefined } : prev));
+            }}
+            rows={2}
+            aria-invalid={!!fieldErrors.questionText}
+            aria-describedby={fieldErrors.questionText ? "questionText-error" : undefined}
+            className={`${inputClass} ${fieldErrors.questionText ? "!border-red-400 focus:!border-red-500" : ""}`}
+          />
+          {fieldErrors.questionText && (
+            <p id="questionText-error" className="mt-1.5 text-[12.5px] font-medium text-red-600">{fieldErrors.questionText}</p>
+          )}
+        </label>
 
         <div className="mt-4 space-y-2.5">
           {choices.map((choice, index) => (
@@ -129,14 +265,43 @@ const courseGroups = Object.values(lessonsByCourse)
               <button type="button" onClick={() => setCorrectChoice(index)} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${choice.isCorrect ? "border-emerald-500" : "border-slate-300"}`}>
                 {choice.isCorrect && <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />}
               </button>
-              <input value={choice.text} onChange={(e) => updateChoiceText(index, e.target.value)} placeholder={`ตัวเลือกที่ ${index + 1}`} className={`min-w-0 flex-1 ${inputClass}`} />
-              {choices.length > 2 && <button type="button" onClick={() => setChoices((c) => c.filter((_, i) => i !== index))} className="text-xs font-bold text-slate-400 hover:text-red-500">✕</button>}
+              <input
+                ref={(el) => { choiceRefs.current[index] = el; }}
+                value={choice.text}
+                onChange={(e) => updateChoiceText(index, e.target.value)}
+                placeholder={`ตัวเลือกที่ ${index + 1}`}
+                aria-invalid={emptyChoiceIndices.has(index)}
+                className={`min-w-0 flex-1 ${inputClass} ${emptyChoiceIndices.has(index) ? "!border-red-400 focus:!border-red-500" : ""}`}
+              />
+              {choices.length > 2 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChoices((c) => c.filter((_, i) => i !== index));
+                    // เลื่อน index ของ error ที่ค้างอยู่ให้ตรงกับ choices ที่เหลือหลังลบ
+                    setEmptyChoiceIndices((prev) => {
+                      const next = new Set<number>();
+                      prev.forEach((i) => {
+                        if (i < index) next.add(i);
+                        else if (i > index) next.add(i - 1);
+                      });
+                      return next;
+                    });
+                  }}
+                  className="text-xs font-bold text-slate-400 hover:text-red-500"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
           <button type="button" onClick={() => setChoices((c) => [...c, { text: "", isCorrect: false }])} className="text-xs font-bold text-[#3157D5]">+ เพิ่มตัวเลือก</button>
+          {choicesError && (
+            <p className="mt-1 text-[12.5px] font-medium text-red-600">{choicesError}</p>
+          )}
         </div>
 
-        <label className="mt-4 block"><span className={labelClass}>คำอธิบายเฉลย (ไม่บังคับ)</span><textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} rows={2} className={inputClass} /></label>
+        <label className="mt-4 block"><span className={labelClass}>คำอธิบายเฉลย</span><textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} rows={2} className={inputClass} /></label>
       </section>
 
       <section className="rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5 sm:p-6">
@@ -149,8 +314,22 @@ const courseGroups = Object.values(lessonsByCourse)
                 </select>
                 </label>
                 {category === "อื่นๆ" && (
-                <label className="sm:col-span-2"><span className={labelClass}>ระบุหมวดเนื้อหา</span>
-                    <input required value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} className={inputClass} />
+                <label className="sm:col-span-2">
+                    <span className={labelClass}>ระบุหมวดเนื้อหา <span className="text-red-500">*</span></span>
+                    <input
+                      ref={customCategoryRef}
+                      value={customCategory}
+                      onChange={(e) => {
+                        setCustomCategory(e.target.value);
+                        setFieldErrors((prev) => (prev.customCategory ? { ...prev, customCategory: undefined } : prev));
+                      }}
+                      aria-invalid={!!fieldErrors.customCategory}
+                      aria-describedby={fieldErrors.customCategory ? "customCategory-error" : undefined}
+                      className={`${inputClass} ${fieldErrors.customCategory ? "!border-red-400 focus:!border-red-500" : ""}`}
+                    />
+                    {fieldErrors.customCategory && (
+                      <p id="customCategory-error" className="mt-1.5 text-[12.5px] font-medium text-red-600">{fieldErrors.customCategory}</p>
+                    )}
                 </label>
                 )}
           <label><span className={labelClass}>ระดับความยาก</span>

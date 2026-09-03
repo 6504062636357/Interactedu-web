@@ -2,10 +2,12 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import CourseExamEditor from "@/components/courses/CourseExamEditor";
+
 import { createClient } from "@/utils/supabase/server";
+import CourseExamReviewActions from "@/components/CourseExamReviewActions";
 
 interface StoredChoice { choice_text: string; is_correct: boolean; order_index: number }
-interface StoredQuestion { question_text: string; explanation: string | null; order_index: number; video_timestamp_seconds: number | null; quiz_choices: StoredChoice[] }
+interface StoredQuestion { question_text: string; explanation: string | null; order_index: number; video_timestamp_seconds: number | null;interaction_type: "multiple_choice" | "true_false"; quiz_choices: StoredChoice[] }
 interface StoredDraft { id: string; created_at: string; quiz_questions: StoredQuestion[] }
 interface StoredLesson { id: string; order_index: number; lesson_drafts: StoredDraft[] }
 
@@ -23,8 +25,8 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
 
   const [{ data: profile }, { data: course }, { data: lessonsData, error: lessonsError }, { data: examConfigData }] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-    supabase.from("courses").select("id, title, created_by, certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
-    supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
+    supabase.from("courses").select("id, title, exam_status, created_by, certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
+    supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
     supabase.from("course_exam_configs").select("build_mode, total_questions, preset_type, custom_constraints").eq("course_id", courseId).maybeSingle(),
   ]);
 
@@ -41,6 +43,7 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
   }).map((question) => ({
     questionText: question.question_text,
     explanation: question.explanation,
+     interactionType: question.interaction_type ?? "multiple_choice",
     choices: [...question.quiz_choices].sort((a, b) => a.order_index - b.order_index).map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
   }));
   
@@ -70,7 +73,17 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
               }
             : null
         }
+        readOnly={workspace === "admin"}
       />
+      {workspace === "admin" && (
+        <div className="mt-8">
+          <CourseExamReviewActions
+            courseId={courseId}
+            examStatus={(course.exam_status ?? "pending") as "pending" | "approved" | "rejected"}
+          />
+        </div>
+        )}
+      
     </div>
   );
 }

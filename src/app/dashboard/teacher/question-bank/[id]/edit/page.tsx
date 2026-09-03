@@ -16,7 +16,7 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
   const [{ data: question }, { data: lessonsData }] = await Promise.all([
     supabase
       .from("question_bank")
-      .select("*, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(course_id, lesson_id)")
+      .select("*, interaction_type, answer_data, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(course_id, lesson_id)")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -45,6 +45,8 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
     format: question.format,
     usageType: question.usage_type,
     privacyScope: question.privacy_scope,
+    interactionType: question.interaction_type,
+    answerData: question.answer_data,
     topicTags: (question.question_bank_topic_tags ?? [])
       .filter((tag: { course_id: string | null }) => tag.course_id)
       .map((tag: { course_id: string | null; lesson_id: string | null }) => ({ courseId: tag.course_id as string, lessonId: tag.lesson_id })),

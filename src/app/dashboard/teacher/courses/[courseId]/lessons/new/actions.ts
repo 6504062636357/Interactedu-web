@@ -1,4 +1,3 @@
-// app/teacher/courses/[courseId]/lessons/new/actions.ts
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
@@ -141,6 +140,65 @@ async function replaceVideoSegments(
   return error ? "บันทึกช่วงวิดีโอไม่สำเร็จ กรุณาตรวจว่าได้อัปเดตฐานข้อมูลแล้ว" : null;
 }
 
+// ★ เดิมโค้ดวนลูป insert คำถามทีละข้อ + insert choices ทีละข้อ (for...await) ทำให้ถ้ามี
+// หลายคำถามต้องรอ network round-trip หลายรอบสะสมกัน (หลักวินาที) ตอนนี้รวมเป็น batch insert
+// ครั้งเดียว: insert คำถามทั้งหมดพร้อมกันก่อน (ได้ id กลับมาตามลำดับที่ insert) แล้วค่อย insert
+// choices ของทุกคำถามรวมเป็นก้อนเดียวอีกที — ลด round-trip จาก 2n เหลือ 2 ครั้งคงที่
+async function batchInsertQuestions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  draftId: string,
+  questions: DraftQuestionInput[]
+): Promise<string | null> {
+  const validQuestions = questions
+    .map((q, originalIndex) => ({ q, originalIndex }))
+    .filter(({ q }) => q.questionText.trim());
+
+  if (validQuestions.length === 0) return null;
+
+  const questionRows = validQuestions.map(({ q, originalIndex }) => ({
+    lesson_draft_id: draftId,
+    question_text: q.questionText,
+    order_index: originalIndex,
+    video_timestamp_seconds: q.timestampSeconds,
+    explanation: q.explanation,
+    source_type: q.sourceType ?? "custom",
+    source_question_id: q.sourceQuestionId ?? null,
+  }));
+
+  const { data: insertedQuestions, error: questionsError } = await supabase
+    .from("quiz_questions")
+    .insert(questionRows)
+    .select("id");
+
+  if (questionsError || !insertedQuestions || insertedQuestions.length !== questionRows.length) {
+    console.error("Failed to batch save questions:", questionsError?.message);
+    return "บันทึกคำถามไม่สำเร็จ กรุณาลองใหม่";
+  }
+
+  // Postgres คืนแถวตามลำดับที่ insert ให้ตอน insert หลายแถวในคำสั่งเดียว จับคู่ตามลำดับได้ปลอดภัย
+  const choiceRows = validQuestions.flatMap(({ q }, i) => {
+    const questionId = insertedQuestions[i].id;
+    return q.choices
+      .filter((c) => c.text.trim())
+      .map((c, cIndex) => ({
+        question_id: questionId,
+        choice_text: c.text,
+        is_correct: c.isCorrect,
+        order_index: cIndex,
+      }));
+  });
+
+  if (choiceRows.length > 0) {
+    const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
+    if (choicesError) {
+      console.error("Failed to batch save choices:", choicesError.message);
+      return "บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่";
+    }
+  }
+
+  return null;
+}
+
 export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<SaveLessonDraftResult> {
   const supabase = await createClient();
 
@@ -204,54 +262,11 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   const segmentError = await replaceVideoSegments(supabase, draft.id, lesson.id, preparedSegments.segments);
   if (segmentError) return { error: segmentError };
 
-  // 4. สร้างคำถาม + ตัวเลือก
-  for (let i = 0; i < input.questions.length; i++) {
-    const q = input.questions[i];
-    if (!q.questionText.trim()) continue;
+  // 4. สร้างคำถาม + ตัวเลือก (batch insert ครั้งเดียว แทนการวนลูป)
+  const questionsError = await batchInsertQuestions(supabase, draft.id, input.questions);
+  if (questionsError) return { error: questionsError };
 
-    // const { data: question, error: questionError } = await supabase
-    //   .from("quiz_questions")
-    //   .insert({ lesson_draft_id: draft.id, question_text: q.questionText, order_index: i })
-    //   .select("id")
-    //   .single();
-    const { data: question, error: questionError } = await supabase
-      .from("quiz_questions")
-      .insert({
-        lesson_draft_id: draft.id,
-        question_text: q.questionText,
-        order_index: i,
-        video_timestamp_seconds: q.timestampSeconds,
-        explanation: q.explanation,
-        source_type: q.sourceType ?? "custom",
-        source_question_id: q.sourceQuestionId ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (questionError || !question) {
-      console.error("Failed to save question:", questionError?.message);
-      return { error: "บันทึกคำถามไม่สำเร็จ กรุณาลองใหม่" };
-    }
-
-    const choiceRows = q.choices
-      .filter((c) => c.text.trim())
-      .map((c, cIndex) => ({
-        question_id: question.id,
-        choice_text: c.text,
-        is_correct: c.isCorrect,
-        order_index: cIndex,
-      }));
-
-    if (choiceRows.length > 0) {
-      const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
-      if (choicesError) {
-        console.error("Failed to save choices:", choicesError.message);
-        return { error: "บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่" };
-      }
-    }
-  }
-
-    // 5. สร้าง marker แบบสุ่มจากคลัง (bank_random) — ไม่มีเนื้อหาคำถาม ผูกแค่เงื่อนไข
+  // 5. สร้าง marker แบบสุ่มจากคลัง (bank_random) — ไม่มีเนื้อหาคำถาม ผูกแค่เงื่อนไข
   if (input.randomMarkers.length > 0) {
     const markerRows = input.randomMarkers.map((m, idx) => ({
       lesson_draft_id: draft.id,
@@ -312,18 +327,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
 
   if (lessonError || !lesson) return { error: "ไม่พบบทเรียนนี้" };
 
-  // const { data: draft, error: draftError } = await supabase
-  //   .from("lesson_drafts")
-  //   .select(
-  //     `id, video_url, content_html, status,
-  //      quiz_questions ( question_text, order_index,
-  //        quiz_choices ( choice_text, is_correct, order_index ) )`
-  //   )
-  //   .eq("lesson_id", lessonId)
-  //   .order("created_at", { ascending: false })
-  //   .limit(1)
-  //   .maybeSingle();
-    const { data: draft, error: draftError } = await supabase
+  const { data: draft, error: draftError } = await supabase
     .from("lesson_drafts")
     .select(
       `id, video_url, content_html, status,
@@ -338,22 +342,24 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
   if (draftError) return { error: "โหลดฉบับร่างไม่สำเร็จ" };
   if (!draft) return { error: "ยังไม่มีฉบับร่างของบทเรียนนี้" };
 
-  const { data: markersData } = await supabase
-    .from("video_quiz_markers")
-    .select("id, timestamp_seconds, random_difficulty")
-    .eq("lesson_draft_id", draft.id)
-    .order("order_index", { ascending: true });
-
-  const { data: segmentData, error: segmentError } = await supabase
-    .from("lesson_video_segments")
-    .select("id, title, summary, start_seconds, end_seconds, source, confidence, order_index")
-    .eq("lesson_draft_id", draft.id)
-    .order("order_index", { ascending: true });
+  // ★ ยิงพร้อมกันแทนรอทีละอัน (ไม่ขึ้นต่อกัน)
+  const [{ data: markersData }, { data: segmentData, error: segmentError }] = await Promise.all([
+    supabase
+      .from("video_quiz_markers")
+      .select("id, timestamp_seconds, random_difficulty")
+      .eq("lesson_draft_id", draft.id)
+      .order("order_index", { ascending: true }),
+    supabase
+      .from("lesson_video_segments")
+      .select("id, title, summary, start_seconds, end_seconds, source, confidence, order_index")
+      .eq("lesson_draft_id", draft.id)
+      .order("order_index", { ascending: true }),
+  ]);
   if (segmentError) return { error: "โหลดข้อมูลช่วงวิดีโอไม่สำเร็จ กรุณาตรวจว่าได้อัปเดตฐานข้อมูลแล้ว" };
 
   const storedQuestions =
     (draft as unknown as { quiz_questions: StoredDraftQuestion[] }).quiz_questions ?? [];
-    const questions = storedQuestions
+  const questions = storedQuestions
     .sort((a, b) => a.order_index - b.order_index)
     .map((q) => ({
       questionText: q.question_text,
@@ -397,7 +403,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
   };
 }
 
-// ---- เพิ่มใหม่: อัปเดต draft เดิม แทนที่จะ insert ใหม่ ----
+// ---- อัปเดต draft เดิม แทนที่จะ insert ใหม่ ----
 export async function updateLessonDraft(input: {
   courseId: string;
   draftId: string;
@@ -420,33 +426,24 @@ export async function updateLessonDraft(input: {
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
-  // 1. อัปเดตชื่อ lesson
-  const { error: lessonError } = await supabase
-    .from("lessons")
-    .update({ title: input.title, video_url: input.videoUrl })
-    .eq("id", input.lessonId);
+  // 1-3. อัปเดต lesson / draft / สถานะคอร์ส พร้อมกัน — ไม่มีอันไหนต้องรอผลอันอื่นก่อน
+  const [{ error: lessonError }, { error: draftError }, { error: courseStatusError }] = await Promise.all([
+    supabase.from("lessons").update({ title: input.title, video_url: input.videoUrl }).eq("id", input.lessonId),
+    supabase
+      .from("lesson_drafts")
+      .update({
+        video_url: input.videoUrl,
+        content_html: input.contentHtml,
+        status: "draft",
+      })
+      .eq("id", input.draftId)
+      .eq("teacher_id", user.id),
+    // เมื่อเปิดรายการที่ส่งตรวจแล้วกลับมาแก้ ให้ถอนคอร์สออกจากคิวจนกว่าจะส่งใหม่
+    supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId),
+  ]);
 
   if (lessonError) return { error: "อัปเดตชื่อบทเรียนไม่สำเร็จ" };
-
-  // 2. อัปเดต draft (กลับเป็นสถานะ draft ทุกครั้งที่แก้ หลังโดนตีกลับ/แก้เพิ่ม)
-  const { error: draftError } = await supabase
-    .from("lesson_drafts")
-    .update({
-      video_url: input.videoUrl,
-      content_html: input.contentHtml,
-      status: "draft",
-    })
-    .eq("id", input.draftId)
-    .eq("teacher_id", user.id);
-
   if (draftError) return { error: "อัปเดตฉบับร่างไม่สำเร็จ" };
-
-  // เมื่อเปิดรายการที่ส่งตรวจแล้วกลับมาแก้ ให้ถอนคอร์สออกจากคิวจนกว่าจะส่งใหม่
-  const { error: courseStatusError } = await supabase
-    .from("courses")
-    .update({ status: "draft" })
-    .eq("id", input.courseId);
-
   if (courseStatusError) return { error: "อัปเดตสถานะคอร์สเป็นฉบับร่างไม่สำเร็จ" };
 
   const segmentError = await replaceVideoSegments(
@@ -466,42 +463,11 @@ export async function updateLessonDraft(input: {
 
   if (deleteError) return { error: "ลบคำถามเก่าไม่สำเร็จ" };
 
-  for (let i = 0; i < input.questions.length; i++) {
-    const q = input.questions[i];
-    if (!q.questionText.trim()) continue;
+  // batch insert ครั้งเดียว แทนการวนลูป insert คำถาม/ตัวเลือกทีละข้อ
+  const questionsError = await batchInsertQuestions(supabase, input.draftId, input.questions);
+  if (questionsError) return { error: questionsError };
 
-      const { data: question, error: questionError } = await supabase
-      .from("quiz_questions")
-      .insert({
-        lesson_draft_id: input.draftId,
-        question_text: q.questionText,
-        order_index: i,
-        video_timestamp_seconds: q.timestampSeconds,
-        explanation: q.explanation,
-        source_type: q.sourceType ?? "custom",
-        source_question_id: q.sourceQuestionId ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (questionError || !question) return { error: "บันทึกคำถามไม่สำเร็จ" };
-
-    const choiceRows = q.choices
-      .filter((c) => c.text.trim())
-      .map((c, cIndex) => ({
-        question_id: question.id,
-        choice_text: c.text,
-        is_correct: c.isCorrect,
-        order_index: cIndex,
-      }));
-
-    if (choiceRows.length > 0) {
-      const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
-      if (choicesError) return { error: "บันทึกตัวเลือกไม่สำเร็จ" };
-    }
-  }
-
-    const { error: deleteMarkersError } = await supabase
+  const { error: deleteMarkersError } = await supabase
     .from("video_quiz_markers")
     .delete()
     .eq("lesson_draft_id", input.draftId);
@@ -520,7 +486,6 @@ export async function updateLessonDraft(input: {
   }
 
   return { draftId: input.draftId, lessonId: input.lessonId };
-
 }
 
 export async function submitDraftForReview(draftId: string, courseId: string): Promise<{ error?: string }> {
@@ -546,34 +511,13 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
     return { error: error?.message ?? "ไม่พบฉบับร่าง หรือไม่มีสิทธิ์ส่งตรวจสอบ" };
   }
 
-  const { data: pendingCourse, error: courseError } = await supabase
-    .from("courses")
-    .update({ status: "pending" })
-    .eq("id", courseId)
-    .eq("created_by", user.id)
-    .select("id, title")
-    .maybeSingle();
+  // หมายเหตุ: ไม่อัปเดตสถานะคอร์สเป็น "pending" ที่นี่อีกต่อไป — การส่ง 1 บทเรียนไม่ควรทำให้
+  // ทั้งคอร์สกลายเป็น "รอตรวจสอบ" ทั้งที่บทอื่นอาจยังไม่เสร็จ คอร์สจะถูกส่งตรวจจริงเมื่อครูกด
+  // "ส่งคอร์สเข้าตรวจ" ที่หน้ารายละเอียดคอร์ส (ต้องครบทุกบทเรียน + บททดสอบท้ายคอร์สก่อน)
+  // ดู submitCourseForReview ใน app/dashboard/teacher/courses/actions.ts
 
-  if (courseError || !pendingCourse) {
-    console.error("Failed to update course status:", courseError?.message ?? "no rows updated");
-    return { error: courseError?.message ?? "ไม่พบคอร์ส หรือไม่มีสิทธิ์อัปเดตสถานะ" };
-  }
-
-  await notifyAdmins({
-    type: "course_review_pending",
-    title: "มีคอร์สใหม่รอตรวจสอบ",
-    message: `มีคอร์ส ${pendingCourse.title} จากผู้สอนรอการตรวจสอบ`,
-    relatedType: "course",
-    relatedId: courseId,
-    actionUrl: `/dashboard/admin/courses/${courseId}/review`,
-    dedupeKey: `course_review_pending:${courseId}:${submittedAt}`,
-  });
-
-  revalidatePath("/dashboard/teacher");
+  revalidatePath(`/dashboard/teacher/courses/${courseId}`);
   revalidatePath("/dashboard/teacher/courses");
-  revalidatePath("/dashboard/admin");
-  revalidatePath("/dashboard/admin/courses");
-  revalidatePath("/admin/review");
   return {};
 }
 
@@ -616,4 +560,3 @@ export async function getBankQuestionsForLesson(
     })),
   };
 }
-

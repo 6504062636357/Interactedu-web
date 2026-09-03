@@ -1,22 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import JSZip from "jszip";
 import "server-only";
-interface QuizChoiceRow {
-  choice_text: string;
+interface QuizChoiceRow { //interface เอาไว้กำหนดชนิดข้อมูลว่ามีอะไรบ้าง ถ้าเรียกใช้ต้องประกาศตัวแปรให้ครบห้ามขาดเกิน 
+  choice_text: string;//ข้อความของชอยส์
   is_correct: boolean;
-  order_index: number;
+  order_index: number;//ลำดับของชอยส์ 
 }
 
-interface QuizQuestionRow {
-  id: string;
+interface QuizQuestionRow {//คำถาม
+  id: string;//ID ของคำถาม
   question_text: string;
   order_index: number;
-  video_timestamp_seconds: number | null;
+  video_timestamp_seconds: number | null;//in quiz video 
   explanation: string | null;
   quiz_choices: QuizChoiceRow[];
 }
 
-interface LessonInfo {
+interface LessonInfo {//ข้อมูลบทเรียน
   id: string;
   course_id: string;
   title: string;
@@ -30,7 +30,7 @@ interface LessonDraftRow {
   lessons: LessonInfo;
 }
 
-interface VideoQuizMarkerRow {
+interface VideoQuizMarkerRow {//ควิซในวิดีโอ
   id: string;
   timestamp_seconds: number;
   random_difficulty: "easy" | "medium" | "hard";
@@ -109,29 +109,29 @@ function errorMessage(error: unknown): string {
 //         choices: q.quiz_choices.sort((a, b) => a.order_index - b.order_index).map((c) => c.choice_text),
 //       })),
 //   };
-function buildLessonPlayerJs(
+function buildLessonPlayerJs(//helper function อยู่บนสุดได้ ฟังชันนี้รับมา 5 พารา
   draft: LessonDraftRow,
   lessonId: string,
-  videoQuizQuestions: QuizQuestionRow[],
-  videoQuizMarkers: VideoQuizMarkerRow[],
-  videoSegments: VideoSegmentRow[]
-): string {
-  const staticQuizzes = videoQuizQuestions.map((q) => ({
-    id: q.id,
+  videoQuizQuestions: QuizQuestionRow[],//arrayของคำถามที่มี video_timestamp_seconds (คำถามที่ถูกตรึงไว้ตายตัวแล้วว่าจะถามอะไร ตอนไหน)
+  videoQuizMarkers: VideoQuizMarkerRow[],//บอกแค่ตำแหน่งเวลาที่จะสุ่ม ไม่มีคำถามตายตัว
+  videoSegments: VideoSegmentRow[]//ช่วง/บทของวิดีโอ (chapters) สำหรับฟีเจอร์แบ่งช่วงวิดีโอ
+): string {//return type เป็น string
+  const staticQuizzes = videoQuizQuestions.map((q) => ({//วน mapใน videoQuizQuestionsทุกตัว 
+    id: q.id,//ตัวใหม่
     timestampSeconds: q.video_timestamp_seconds,
     sourceType: "static" as const,
     questionText: q.question_text,
     choices: q.quiz_choices.sort((a, b) => a.order_index - b.order_index).map((c) => c.choice_text),
-  }));
+  }));//เรียง choice index จากน้อยไปมากและ ดึงเฉพาะ choice_text ออกมาจากแต่ละ choice object เหลือแค่ array ของ string ล้วนๆ
 
-  const randomQuizzes = videoQuizMarkers.map((m) => ({
+  const randomQuizzes = videoQuizMarkers.map((m) => ({ //แปลง videoQuizMarkers แต่ละตัวเป็น object
     id: m.id,
     timestampSeconds: m.timestamp_seconds,
     sourceType: "random_bank" as const,
-    // ไม่มี questionText/choices — จะ fetch สดตอน openQuizModal
+    // ไม่มี questionText/choices เพราะไม่รู้ว่าจะได้คำถามอะไร จะ fetch สดตอน openQuizModal
   }));
 
-  const lessonData = {
+  const lessonData = {//ตัวแปรที่กำหนดข้อมูลที่ browserจะใช้
     lessonId,
     title: draft.lessons.title,
     videoUrl: draft.video_url ?? "",
@@ -150,8 +150,8 @@ function buildLessonPlayerJs(
         endSeconds: segment.end_seconds,
       })),
   };
-  return `var LESSON_DATA = ${JSON.stringify(lessonData)};
-
+  return `var LESSON_DATA = ${JSON.stringify(lessonData)};//แปลง object ทั้งก้อนเป็น string JSON
+// คุมตัวเล่นวิดิโอ + ควิซในวิดีโอ (SCO)ในบทเรียน 
 var REQUIRE_CORRECT_ANSWER = false;
 var answeredQuestionIds = {};
 var pendingQuestion = null;
@@ -244,7 +244,7 @@ function renderLesson() {
 
 //   overlay.classList.add("open");
 // }
-function openQuizModal(question) {
+function openQuizModal(question) { //เปิดคำถามใน modal
   pendingQuestion = question;
 
   if (question.sourceType === "random_bank" && !question.questionText) {
@@ -252,9 +252,9 @@ function openQuizModal(question) {
     var loadingBody = document.getElementById("quiz-modal-body");
     loadingBody.innerHTML = '<p class="quiz-modal-question">กำลังโหลดคำถาม...</p>';
     overlay.classList.add("open");
-
+  //ยิงไปขอคำถามจาก server โดยใช้ fetchJson และส่ง lessonId และ question.id ไปด้วย
     fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-markers/" + question.id + "/sample")
-      .then(function (sampled) {
+      .then(function (sampled) {//ได้คำถามมาแล้ว ไปเซ็ตลงใน object question ตัวเดิม
         question.questionText = sampled.questionText;
         question.choices = sampled.choices;
         renderQuizModalContent(question);
@@ -265,7 +265,7 @@ function openQuizModal(question) {
     return;
   }
 
-  renderQuizModalContent(question);
+  renderQuizModalContent(question);//เรียกเพื่อแสดงคำถามลงใน modal วาด ui 
 }
 
 function renderQuizModalContent(question) {
@@ -648,6 +648,7 @@ window.addEventListener("load", function () {
 // </body>
 // </html>`;
 
+//สร้างตัวเล่นวิดิโอของบทเรียน 
 const LESSON_HTML = `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -1264,9 +1265,9 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 // ============================================================
 // Manifest: 2 items / 2 resources (lesson.html, quiz.html)
 // ============================================================
-
+//สร้างไฟล์ imsmanifest.xml
 function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
-  const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;
+  const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;//สร้าง unique ID ของ manifest
   const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const lessonItem = `<item identifier="ITEM-LESSON" identifierref="RES-LESSON">
@@ -1327,7 +1328,7 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
 // เพิ่ม field "type" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
 // ============================================================
 
-function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) {
+function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) { //สร้าง json เก็บลง db
   const items: Array<{
     identifier: string;
     title: string;
@@ -1369,14 +1370,14 @@ export async function generateScormPackage(
   draftId: string,
   lessonId: string
 ): Promise<{ packageUrl: string } | { error: string }> {
-  // ⚡ Dynamic Import สำหรับ AWS SDK & R2 Config
+  // Dynamic Import สำหรับ AWS SDK & R2 Config
   const [{ PutObjectCommand }, { r2Client, R2_BUCKET_NAME, R2_PUBLIC_URL }] =
     await Promise.all([
       import("@aws-sdk/client-s3"),
       import("@/lib/r2"),
     ]);
 
-  // 1. ดึงข้อมูล Draft บทเรียน
+  // 1. ดึงข้อมูล Draft บทเรียน lessons(...) เป็นการ Join ตารางเพื่อดึงข้อมูลจากตาราง lessons ที่เชื่อมโยงกันอยู่ติดมาด้วย (โดยเอามาแค่ id, course_id, title)
   const { data: draft, error: draftError } = await supabase
     .from("lesson_drafts")
     .select("id, video_url, content_html, status, lessons(id, course_id, title)")
@@ -1480,14 +1481,14 @@ export async function generateScormPackage(
   );
   const quizPlayerJs = hasQuiz ? buildQuizPlayerJs(typedDraft, postExamQuestions) : null;
 
-  // 3. สร้างไฟล์ ZIP ด้วย JSZip (เสถียร 100% บน Next.js / Turbopack)
+  // 3. สร้างไฟล์ ZIP ด้วย JSZip
   let zipBuffer: Buffer;
   try {
     const zip = new JSZip();
     zip.file("imsmanifest.xml", manifestXml);
-    zip.file("lesson.html", LESSON_HTML);
-    zip.file("scorm-api.js", SCORM_API_JS);
-    zip.file("lesson-player.js", lessonPlayerJs);
+    zip.file("lesson.html", LESSON_HTML);//หน้าหลัก
+    zip.file("scorm-api.js", SCORM_API_JS);//ตัวเชื่อมกับ LMSตัวอื่น
+    zip.file("lesson-player.js", lessonPlayerJs);//logic การเล่นวิดิโอและควิซแทรกกลางบทเรียน
     zip.file("style.css", STYLE_CSS);
 
     if (hasQuiz && quizPlayerJs) {
@@ -1495,7 +1496,7 @@ export async function generateScormPackage(
       zip.file("quiz-player.js", quizPlayerJs);
     }
 
-    zipBuffer = await zip.generateAsync({
+    zipBuffer = await zip.generateAsync({//ทำการบีบอัด ไฟล์ทั้งหมดที่ใส่ไว้ให้กลายเป็นไฟล์ zip
       type: "nodebuffer",
       compression: "DEFLATE",
       compressionOptions: { level: 9 },

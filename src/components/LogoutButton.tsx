@@ -8,7 +8,9 @@ export default function LogoutButton() {
 
   const handleLogout = async () => {
     const supabase = createClient();
-    await supabase.auth.signOut();
+    //scope: "local" แค่ล้าง session ในเบราว์เซอร์ ไม่ต้องรอ network call ไป revoke
+    // ที่ฝั่ง Supabase server — กันปุ่ม logout ค้างถ้าเน็ต/antivirus บนเครื่องบล็อค request
+    await supabase.auth.signOut({ scope: "local" });
     router.push("/login");
     router.refresh();
   };

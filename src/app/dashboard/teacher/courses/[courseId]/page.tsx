@@ -4,6 +4,9 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
+import SubmitCourseButton from "@/components/teacher/SubmitCourseButton";
+import DeleteLessonButton from "@/components/teacher/DeleteLessonButton";
+import { checkCourseReadiness } from "../actions";
 
 interface PageProps {
   params: Promise<{ courseId: string }>;
@@ -109,6 +112,9 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
 
   const lessons = (lessonsData ?? []) as unknown as LessonRow[];
 
+  const readiness = await checkCourseReadiness(courseId);
+  const lessonIssueById = new Map(readiness.lessonIssues.map((issue) => [issue.lessonId, issue]));
+
   // หา draft ล่าสุดของแต่ละ lesson (เผื่อมีหลาย draft เก่าสะสมอยู่)
   const lessonsWithDetails = lessons.map((lesson) => {
     const drafts = lesson.lesson_drafts ?? [];
@@ -137,13 +143,44 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
             <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
               {course.title}
             </h1>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-start gap-2">
               <Link href={`/dashboard/teacher/courses/${course.id}/materials`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">เอกสารประกอบ</Link>
-              <Link href={`/dashboard/teacher/courses/${course.id}/exam`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">บททดสอบท้ายคอร์ส</Link>
+              <Link href={`/dashboard/teacher/courses/${course.id}/exam`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">
+                บททดสอบท้ายคอร์ส
+                {readiness.examIssue && <span className="ml-1.5 text-red-400">*</span>}
+              </Link>
               <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new`} className="shrink-0 rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">+ เพิ่มบทเรียนใหม่</Link>
+              {course.status !== "published" && (
+                <SubmitCourseButton courseId={course.id} ready={readiness.ready} />
+              )}
             </div>
           </div>
         </div>
+
+        {!readiness.ready && course.status !== "published" && (
+          <div className="mb-8 rounded-2xl border border-red-100 bg-red-50/60 px-5 py-4">
+            <p className="text-[12.5px] font-bold text-red-500">
+              ยังกรอกข้อมูลไม่ครบ ต้องแก้ไขก่อนกดส่งคอร์สเข้าตรวจได้
+            </p>
+            <ul className="mt-2 space-y-1 text-[12px] text-red-600/90">
+              {!readiness.hasLessons && <li>คอร์สนี้ยังไม่มีบทเรียน</li>}
+              {readiness.lessonIssues.map((issue) => (
+                <li key={issue.lessonId}>
+                  บทเรียน &quot;{issue.title}&quot;:{" "}
+                  {issue.missingVideo && "ยังไม่มีวิดีโอ "}
+                  {issue.insufficientMarkers.map((m, i) => (
+                    <span key={i}>
+                      {i > 0 || issue.missingVideo ? "; " : ""}
+                      คลังคำถามไม่พอสำหรับควิซสุ่มช่วง {Math.floor(m.timestampSeconds / 60)}:
+                      {String(m.timestampSeconds % 60).padStart(2, "0")} (ระดับ {m.difficulty})
+                    </span>
+                  ))}
+                </li>
+              ))}
+              {readiness.examIssue && <li>บททดสอบท้ายคอร์ส: {readiness.examIssue}</li>}
+            </ul>
+          </div>
+        )}
 
         {certificateSettings ? (
           <div className="mb-8">
@@ -181,6 +218,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               const draft = lesson.latestDraft;
               const questions = [...(draft?.quiz_questions ?? [])].sort((a, b) => a.order_index - b.order_index);
               const videoQuizzes = questions.filter((question) => question.video_timestamp_seconds != null);
+              const issue = lessonIssueById.get(lesson.id);
 
               return (
                 <article key={lesson.id} className="overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.06] bg-white">
@@ -195,11 +233,29 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
                           </span>
                           {draft && <span className="text-[11px] text-slate-400">ควิซในวิดีโอ {videoQuizzes.length} ข้อ</span>}
                         </div>
+                        {issue && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {issue.missingVideo && (
+                              <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-red-400">
+                                * ต้องอัปโหลดวิดีโอ
+                              </span>
+                            )}
+                            {issue.insufficientMarkers.map((m, i) => (
+                              <span key={i} className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-red-400">
+                                * คลังคำถามไม่พอ ช่วง {Math.floor(m.timestampSeconds / 60)}:
+                                {String(m.timestampSeconds % 60).padStart(2, "0")} ({m.difficulty})
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`} className="inline-flex shrink-0 items-center justify-center rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[12.5px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">
-                      Edit บทเรียน
-                    </Link>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new?lessonId=${lesson.id}`} className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full border border-transparent bg-[#FF5A3C] px-5 py-2.5 text-[12.5px] font-bold leading-none text-white transition-colors hover:bg-[#EB4A2D]">
+                        Edit บทเรียน
+                      </Link>
+                      <DeleteLessonButton lessonId={lesson.id} courseId={course.id} lessonTitle={lesson.title} />
+                    </div>
                   </div>
 
                   {draft ? (

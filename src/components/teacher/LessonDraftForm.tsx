@@ -496,13 +496,25 @@ export default function LessonDraftForm({
       {activeTab === "info" && (
         <div>
           <div className="mb-8">
-            <label className="block text-[13px] font-bold text-[#0F1B3D]/70 mb-2">ชื่อบทเรียน</label>
+            <label className="block text-[13px] font-bold text-[#0F1B3D]/70 mb-2">
+              ชื่อบทเรียน <span className="text-red-500">*</span>
+            </label>
             <input
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                // พิมพ์แก้ไขแล้ว เคลียร์ error เดิมทิ้ง (เดิม error ค้างอยู่จนกว่าจะกด save ใหม่)
+                if (error === "กรุณาใส่ชื่อบทเรียน") setError(null);
+              }}
               placeholder="เช่น บทที่ 1 บทนำสู่ปัญญาประดิษฐ์"
-              className="w-full px-4 py-3 text-[14px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
+              aria-invalid={error === "กรุณาใส่ชื่อบทเรียน"}
+              className={`w-full px-4 py-3 text-[14px] text-[#0F1B3D] bg-[#F7F8FA] border rounded-xl outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all ${
+                error === "กรุณาใส่ชื่อบทเรียน" ? "border-red-400 focus:!border-red-500" : "border-[#0F1B3D]/[0.08]"
+              }`}
             />
+            {error === "กรุณาใส่ชื่อบทเรียน" && (
+              <p className="mt-1.5 text-[12.5px] font-medium text-red-600">{error}</p>
+            )}
           </div>
 
           <div className="mb-8">

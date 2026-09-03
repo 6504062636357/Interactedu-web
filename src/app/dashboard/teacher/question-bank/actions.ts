@@ -8,6 +8,11 @@ export type QuestionFormat = "multiple_choice" | "code_practical";
 export type UsageType = "popup" | "final";
 export type PrivacyScope = "private" | "department" | "public";
 
+export type InteractionType = "multiple_choice" | "true_false" | "sequencing" | "matching" | "fill_in_blank" | "note_callout";
+
+// type ที่รองรับ choices (question_bank_choices) — ต้อง sync กับ frontend ENABLED_INTERACTION_TYPES
+const CHOICE_BASED_TYPES: InteractionType[] = ["multiple_choice", "true_false"];
+
 export interface QuestionBankChoiceInput {
   text: string;
   isCorrect: boolean;
@@ -29,6 +34,8 @@ export interface QuestionBankInput {
   privacyScope: PrivacyScope;
   topicTags: QuestionBankTopicTagInput[]; // เว้นว่าง [] = ข้อสอบภาพรวม ไม่ผูกกับคอร์ส/บทเรียนใดเลย
   choices: QuestionBankChoiceInput[];
+  interactionType: InteractionType;
+  answerData: unknown | null;// ใช้เฉพาะ sequencing/matching/fill_in_blank/note_callout
 }
 
 async function requireTeacher(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -41,9 +48,21 @@ async function requireTeacher(supabase: Awaited<ReturnType<typeof createClient>>
 
 function validateQuestion(input: QuestionBankInput): string | null {
   if (!input.questionText.trim()) return "กรุณากรอกคำถาม";
-  const choices = input.choices.filter((choice) => choice.text.trim());
-  if (choices.length < 2) return "ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก";
-  if (choices.filter((choice) => choice.isCorrect).length !== 1) return "ต้องมีคำตอบที่ถูกเพียง 1 ตัวเลือก";
+
+  const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
+
+  if (isChoiceBased) {
+    const choices = input.choices.filter((choice) => choice.text.trim());
+    if (choices.length < 2) return "กรุณากรอกตัวเลือกอย่างน้อย 2 ตัวเลือก";
+    if (choices.filter((choice) => choice.isCorrect).length !== 1) return "กรุณาเลือกคำตอบที่ถูกต้องเพียง 1 ตัวเลือก";
+  } else if (input.interactionType !== "note_callout") {
+    // sequencing/matching/fill_in_blank ต้องมี answer_data เสมอ (note_callout ไม่บังคับ)
+    if (!input.answerData) return "กรุณากำหนดเฉลยสำหรับคำถามประเภทนี้";
+  }
+
+  // const choices = input.choices.filter((choice) => choice.text.trim());
+  // if (choices.length < 2) return "ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก";
+  // if (choices.filter((choice) => choice.isCorrect).length !== 1) return "ต้องมีคำตอบที่ถูกเพียง 1 ตัวเลือก";
   return null;
 }
 
@@ -95,6 +114,8 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
   const validationError = validateQuestion(input);
   if (validationError) return { error: validationError };
 
+  const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
+
   const { data: question, error: questionError } = await supabase
     .from("question_bank")
     .insert({
@@ -106,21 +127,35 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
       format: input.format,
       usage_type: input.usageType,
       privacy_scope: input.privacyScope,
+      interaction_type: input.interactionType,
+      answer_data: isChoiceBased ? null : input.answerData,
     })
     .select("id")
     .single();
   if (questionError || !question) return { error: questionError?.message ?? "สร้างคำถามไม่สำเร็จ" };
 
-  const choiceRows = input.choices
-    .filter((choice) => choice.text.trim())
-    .map((choice, index) => ({
-      question_id: question.id,
-      choice_text: choice.text.trim(),
-      is_correct: choice.isCorrect,
-      order_index: index,
-    }));
-  const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
-  if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
+  if (isChoiceBased) {
+    const choiceRows = input.choices
+      .filter((choice) => choice.text.trim())
+      .map((choice, index) => ({
+        question_id: question.id,
+        choice_text: choice.text.trim(),
+        is_correct: choice.isCorrect,
+        order_index: index,
+      }));
+    const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
+    if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
+  }
+  // const choiceRows = input.choices
+  //   .filter((choice) => choice.text.trim())
+  //   .map((choice, index) => ({
+  //     question_id: question.id,
+  //     choice_text: choice.text.trim(),
+  //     is_correct: choice.isCorrect,
+  //     order_index: index,
+  //   }));
+  // const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
+  // if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
 
     if (input.topicTags.length) {
     const { courseMap, lessonMap } = await fetchTitleMaps(supabase, input.topicTags);
@@ -147,6 +182,8 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
   if (!existing) return { error: "ไม่พบคำถามนี้" };
   if (!auth.isAdmin && existing.owner_teacher_id !== auth.user.id) return { error: "ไม่มีสิทธิ์แก้ไขคำถามนี้" };
 
+  const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
+  
   const { error: updateError } = await supabase
     .from("question_bank")
     .update({
@@ -157,6 +194,8 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
       format: input.format,
       usage_type: input.usageType,
       privacy_scope: input.privacyScope,
+      interaction_type: input.interactionType,
+      answer_data: isChoiceBased ? null : input.answerData,
     })
     .eq("id", id);
   if (updateError) return { error: updateError.message };
@@ -164,11 +203,18 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
   // แทนที่ choices/tags ทั้งชุด (ง่ายและปลอดภัยกว่า diff รายตัว)
   const { error: deleteChoicesError } = await supabase.from("question_bank_choices").delete().eq("question_id", id);
   if (deleteChoicesError) return { error: deleteChoicesError.message };
-  const choiceRows = input.choices
-    .filter((choice) => choice.text.trim())
-    .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
-  const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
-  if (insertChoicesError) return { error: insertChoicesError.message };
+  // const choiceRows = input.choices
+  //   .filter((choice) => choice.text.trim())
+  //   .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
+  // const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
+  // if (insertChoicesError) return { error: insertChoicesError.message };
+    if (isChoiceBased) {
+    const choiceRows = input.choices
+      .filter((choice) => choice.text.trim())
+      .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
+    const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
+    if (insertChoicesError) return { error: insertChoicesError.message };
+  }
 
   const { error: deleteTagsError } = await supabase.from("question_bank_topic_tags").delete().eq("question_id", id);
   if (deleteTagsError) return { error: deleteTagsError.message };
@@ -226,6 +272,8 @@ export async function copyQuestionBankItem(sourceId: string): Promise<{ error?: 
       usage_type: source.usage_type,
       privacy_scope: "private", // สำเนาเริ่มเป็น private เสมอ ครู B ปรับเองทีหลังได้
       source_question_id: source.id,
+      interaction_type: source.interaction_type,
+      answer_data: source.answer_data,
     })
     .select("id")
     .single();

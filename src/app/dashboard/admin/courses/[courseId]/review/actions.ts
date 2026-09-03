@@ -43,17 +43,54 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     return { error: "คอร์สนี้ยังไม่มีบทเรียน" };
   }
 
-  // เช็คว่าทุกบทมี draft ที่พร้อมอนุมัติ (submitted / pending_review)
-  const pendingDrafts: { draftId: string; lessonId: string }[] = [];
-  for (const lesson of lessons) {
-    const drafts = (lesson as unknown as { id: string; lesson_drafts: { id: string; status: string }[] })
-      .lesson_drafts;
-    const readyDraft = drafts?.find((d) => d.status === "submitted" || d.status === "pending_review");
-    if (!readyDraft) {
-      return { error: "ยังมีบทเรียนที่ไม่มี draft ส่งตรวจ ไม่สามารถอนุมัติทั้งคอร์สได้" };
-    }
-    pendingDrafts.push({ draftId: readyDraft.id, lessonId: lesson.id });
+  // เช็คว่าบททดสอบท้ายคอร์สผ่านการอนุมัติแล้ว ก่อนจะ publish คอร์สได้
+  const { data: examStatusRow } = await supabase
+    .from("courses")
+    .select("exam_status")
+    .eq("id", courseId)
+    .maybeSingle();
+  if (examStatusRow?.exam_status !== "approved") {
+    return { error: "บททดสอบท้ายคอร์สยังไม่ได้รับการอนุมัติ ไม่สามารถอนุมัติทั้งคอร์สได้" };
   }
+  // เช็คว่าทุกบทมี draft ที่พร้อมอนุมัติ (submitted / pending_review)
+
+  const pendingDrafts: { draftId: string; lessonId: string }[] = [];
+
+  for (const lesson of lessons) {
+  const drafts = (lesson as unknown as { id: string; lesson_drafts: { id: string; status: string; created_at?: string }[] })
+    .lesson_drafts;
+
+  if (!drafts || drafts.length === 0) {
+    return { error: `บทเรียน ยังไม่มีเนื้อหา ไม่สามารถอนุมัติทั้งคอร์สได้` };
+  }
+
+  // 1. หา Draft ล่าสุด (สมมติว่า query เรียง created_at DESC มาแล้ว หรือเอา index 0)
+  // หากยังไม่ได้ sort ใน query ให้ sort หรือใช้ตัวล่าสุด:
+  const latestDraft = drafts[0]; 
+
+  // 2. เช็กสถานะของ Draft ล่าสุด
+  if (latestDraft.status === "rejected" || latestDraft.status === "draft") {
+    return { 
+      error: `บทเรียน ยังมีแบบร่างที่ยังไม่ส่งตรวจหรือถูกปฏิเสธอยู่ ไม่สามารถอนุมัติทั้งคอร์สได้` 
+    };
+  }
+
+  // 3. ถ้าเป็นตัวที่รออนุมัติ ให้เก็บเข้าคิวไป approve
+  if (latestDraft.status === "submitted" || latestDraft.status === "pending_review") {
+    pendingDrafts.push({ draftId: latestDraft.id, lessonId: lesson.id });
+  }
+  // หมายเหตุ: ถ้า latestDraft.status === "approved" อยู่แล้ว ก็ข้ามไป ไม่ต้อง push เข้า pendingDrafts
+}
+
+  // for (const lesson of lessons) {
+  //   const drafts = (lesson as unknown as { id: string; lesson_drafts: { id: string; status: string }[] })
+  //     .lesson_drafts;
+  //   const readyDraft = drafts?.find((d) => d.status === "submitted" || d.status === "pending_review"|| d.status === "approved" );
+  //   if (!readyDraft) {
+  //     return { error: "ยังมีบทเรียนที่ไม่มี draft ส่งตรวจ ไม่สามารถอนุมัติทั้งคอร์สได้" };
+  //   }
+  //   pendingDrafts.push({ draftId: readyDraft.id, lessonId: lesson.id });
+  // }
 
   // generate SCORM ให้ทุกบท
   for (const { draftId, lessonId } of pendingDrafts) {
@@ -249,12 +286,17 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
     const courseId = lessonRow.course_id;
 
     // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้ เพื่อเช็คว่าทุกบทอนุมัติครบหรือยัง
-    const { data: lessons } = await supabase
-      .from("lessons")
-      .select("id, lesson_drafts(id, status, created_at)")
-      .eq("course_id", courseId);
+    const [{ data: lessons }, { data: courseExamRow }] = await Promise.all([
+      supabase
+        .from("lessons")
+        .select("id, lesson_drafts(id, status, created_at)")
+        .eq("course_id", courseId),
+      supabase.from("courses").select("exam_status").eq("id", courseId).maybeSingle(),
+    ]);
 
-    if (lessons && lessons.length > 0) {
+    // ต้องเช็ค exam_status ด้วยเสมอ ไม่งั้นคอร์สจะถูก publish อัตโนมัติจากการอนุมัติบทเรียนครบ
+    // ทั้งที่บททดสอบท้ายคอร์สยังไม่เคยถูกอนุมัติเลย (บั๊กเดิม — เงื่อนไขไม่ตรงกับ approveCourse)
+    if (lessons && lessons.length > 0 && courseExamRow?.exam_status === "approved") {
       const allApproved = lessons.every((lesson) => {
         const drafts =
           (lesson as unknown as { lesson_drafts: { id: string; status: string; created_at: string }[] })
@@ -345,5 +387,54 @@ export async function rejectLesson(draftId: string, reason: string): Promise<{ e
   revalidatePath("/dashboard/admin/courses");
   revalidatePath("/dashboard/admin");
   revalidatePath("/admin/review");
+  return {};
+}
+
+export async function approveCourseExam(courseId: string): Promise<{ error?: string }> {
+  const { supabase, user, error: authError } = await requireAdmin();
+  if (authError) return { error: authError };
+
+  const { error } = await supabase
+    .from("courses")
+    .update({
+      exam_status: "approved",
+      exam_reviewed_by: user!.id,
+      exam_reviewed_at: new Date().toISOString(),
+      exam_rejection_reason: null,
+    })
+    .eq("id", courseId);
+
+  if (error) {
+    console.error("[approveCourseExam] update failed:", error);
+    return { error: `อนุมัติบททดสอบไม่สำเร็จ: ${error.message}` };
+  }
+
+  revalidatePath(`/dashboard/admin/courses/${courseId}/exam`);
+  revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
+  return {};
+}
+
+export async function rejectCourseExam(courseId: string, reason: string): Promise<{ error?: string }> {
+  const { supabase, user, error: authError } = await requireAdmin();
+  if (authError) return { error: authError };
+  if (!reason.trim()) return { error: "กรุณาระบุเหตุผลที่ปฏิเสธ" };
+
+  const { error } = await supabase
+    .from("courses")
+    .update({
+      exam_status: "rejected",
+      exam_reviewed_by: user!.id,
+      exam_reviewed_at: new Date().toISOString(),
+      exam_rejection_reason: reason.trim(),
+    })
+    .eq("id", courseId);
+
+  if (error) {
+    console.error("[rejectCourseExam] update failed:", error);
+    return { error: `ตีกลับบททดสอบไม่สำเร็จ: ${error.message}` };
+  }
+
+  revalidatePath(`/dashboard/admin/courses/${courseId}/exam`);
+  revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
   return {};
 }

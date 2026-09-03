@@ -36,11 +36,25 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
+/* ★ ต้องอยู่ใน @layer base เท่านั้น! เพราะ Tailwind v4 generate utility class (เช่น text-[13px])
+   ไว้ใน @layer utilities — กฎ "เปลือย" ที่ไม่ได้อยู่ใน layer จะชนะกฎใน layer เสมอไม่ว่า specificity
+   จะต่างกันแค่ไหน (ตาม CSS Cascade Layers spec) ถ้าปล่อยกฎด้านล่างนี้ไว้นอก @layer เหมือนเดิม
+   จะไปทับ text-[13px]/font-bold ของปุ่มทุกตัวในเว็บ ทำให้ font-size ปุ่มเพี้ยนกลับไปเป็น default 16px
+   ของ browser แทน (บั๊กที่เจอ: ปุ่ม "ส่งคอร์สเข้าตรวจ" กับ "+ เพิ่มบทเรียนใหม่" ขนาด font ไม่เท่ากัน) */
+@layer base {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  /* กัน browser (โดยเฉพาะ Chrome/Edge บน Windows) ใช้ native OS control แทน style ที่ตั้งไว้
+     ตอนปุ่มอยู่ในสถานะ disabled */
+  button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
 }
 
 button,
