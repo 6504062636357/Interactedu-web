@@ -7,6 +7,7 @@ export interface CourseExamQuestionInput {
   questionText: string;
   explanation: string | null;
   choices: { text: string; isCorrect: boolean }[];
+  interactionType: "multiple_choice" | "true_false";
 }
 
 export async function saveCourseFinalExam(input: {
@@ -35,6 +36,9 @@ export async function saveCourseFinalExam(input: {
     if (choices.length < 2) return { error: `คำถามข้อ ${index + 1} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก` };
     if (choices.filter((choice) => choice.isCorrect).length !== 1) {
       return { error: `คำถามข้อ ${index + 1} ต้องมีคำตอบที่ถูกเพียง 1 ตัวเลือก` };
+    }
+    if (question.interactionType === "true_false" && choices.length !== 2) {
+      return { error: `คำถามข้อ ${index + 1} เป็น True/False ต้องมี 2 ตัวเลือกเท่านั้น` };
     }
   }
 
@@ -85,6 +89,7 @@ export async function saveCourseFinalExam(input: {
         explanation: question.explanation?.trim() || null,
         video_timestamp_seconds: null,
         order_index: questionIndex,
+        interaction_type: question.interactionType,
       })
       .select("id")
       .single();
@@ -102,10 +107,31 @@ export async function saveCourseFinalExam(input: {
     if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
   }
 
-  if (!isAdmin) await supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId);
+  if (!isAdmin) await supabase.from("courses").update({ status: "pending" }).eq("id", input.courseId);
+  // if (!isAdmin) {
+  //   await supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId);
 
+  //   const { data: admins } = await supabase.from("profiles").select("id").eq("role", "admin");
+  //   if (admins?.length) {
+  //     await supabase.from("notifications").insert(
+  //       admins.map((admin) => ({
+  //         user_id: admin.id,
+  //         type: "course_exam_updated",
+  //         course_id: input.courseId,
+  //         message: `มีการอัปเดตบททดสอบท้ายคอร์สใหม่ รอตรวจสอบ`,
+  //       }))
+  //     );
+  //   }
+  // }
+  // revalidatePath(`/dashboard/teacher/courses/${input.courseId}`);
+  // revalidatePath(`/dashboard/teacher/courses/${input.courseId}/exam`);
+  // revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
+  // revalidatePath(`/dashboard/admin/courses/${input.courseId}/exam`);
+  // revalidatePath(`/dashboard/admin/courses/${input.courseId}/review`);
+  // return {};
   revalidatePath(`/dashboard/teacher/courses/${input.courseId}`);
   revalidatePath(`/dashboard/teacher/courses/${input.courseId}/exam`);
+  revalidatePath(`/dashboard/admin/courses`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}/exam`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}/review`);
@@ -463,6 +489,18 @@ export async function saveCourseExamConfig(input: SaveCourseExamConfigInput): Pr
   if (input.buildMode === "preset") {
     if (!input.presetType) return { error: "กรุณาเลือกแม่แบบข้อสอบ" };
   } else {
+    // ★ เพิ่มใหม่: เช็คก่อนว่าคอร์สนี้มีบทเรียนอยู่หรือยัง เพราะโหมด custom ต้องเลือกบทเรียนก่อนถึงจะ
+    // ตั้งเงื่อนไขได้ ถ้าไม่มีบทเรียนเลยผู้ใช้จะเจอแค่ "ผลรวมไม่ตรงกับจำนวนข้อสอบทั้งหมด" ซึ่งไม่บอก
+    // สาเหตุจริง (เข้าใจผิดว่าต้องกรอกจำนวนข้อให้ครบ ทั้งที่ปัญหาจริงคือเลือกบทเรียนไม่ได้ตั้งแต่ต้น)
+    const { count: lessonCount, error: lessonCountError } = await supabase
+      .from("lessons")
+      .select("id", { count: "exact", head: true })
+      .eq("course_id", input.courseId);
+    if (lessonCountError) return { error: lessonCountError.message };
+    if (!lessonCount) {
+      return { error: "คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถสุ่มข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน" };
+    }
+
     if (!input.customConstraints?.length) return { error: "กรุณาตั้งเงื่อนไขสุ่มข้อสอบอย่างน้อย 1 รายการ" };
     const sum = input.customConstraints.reduce((total, constraint) => total + constraint.count, 0);
     if (sum !== input.totalQuestions) {
@@ -494,9 +532,21 @@ export interface PreviewQuestion {
   lessonId: string | null;
   questionText: string;
   choices: { text: string; isCorrect: boolean }[];
+   interactionType: "multiple_choice" | "true_false"; 
 }
 
-export async function previewCourseExamSample(courseId: string): Promise<{ error?: string; questions?: PreviewQuestion[] }> {
+// ★ แก้ใหม่: เดิมฟังก์ชันนี้รับแค่ courseId แล้วไปอ่านกติกาที่ "บันทึกไว้ล่าสุด" จาก DB มาพรีวิว
+// ทำให้ถ้าผู้ใช้เพิ่งสลับโหมด/แก้ค่าบนหน้าจอแต่ยังไม่กดบันทึก กดดูตัวอย่างจะไปสุ่มตามกติกาเก่า
+// (คนละโหมดกับที่กำลังดูอยู่บนจอ) สร้างความสับสน เปลี่ยนมารับค่ากติกาปัจจุบันบนหน้าจอ (ที่ยังไม่ได้
+// บันทึก) เข้ามาโดยตรงแทน จะได้พรีวิวตรงกับสิ่งที่กำลังตั้งค่าอยู่จริงๆ เสมอ
+export async function previewCourseExamSample(input: {
+  courseId: string;
+  buildMode: "custom" | "preset";
+  totalQuestions: number;
+  presetType?: "quick_check" | "standard_final" | "challenging_final" | null;
+  customConstraints?: CustomConstraintInput[] | null;
+}): Promise<{ error?: string; questions?: PreviewQuestion[] }> {
+  const { courseId } = input;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
@@ -511,29 +561,31 @@ export async function previewCourseExamSample(courseId: string): Promise<{ error
     return { error: "ไม่มีสิทธิ์เข้าถึงบททดสอบของคอร์สนี้" };
   }
 
-  const { data: examConfig, error: configError } = await supabase
-    .from("course_exam_configs")
-    .select("build_mode, total_questions, preset_type, custom_constraints")
-    .eq("course_id", courseId)
-    .maybeSingle();
-  if (configError) return { error: configError.message };
-  if (!examConfig) return { error: "ยังไม่ได้บันทึกกติกาสุ่มข้อสอบ กรุณาบันทึกก่อนดูตัวอย่าง" };
+  if (!Number.isInteger(input.totalQuestions) || input.totalQuestions <= 0) {
+    return { error: "จำนวนข้อสอบต้องเป็นจำนวนเต็มมากกว่า 0" };
+  }
+  if (input.buildMode === "preset") {
+    if (!input.presetType) return { error: "กรุณาเลือกแม่แบบข้อสอบ" };
+  } else if (!input.customConstraints?.length) {
+    return { error: "กรุณาตั้งเงื่อนไขสุ่มข้อสอบอย่างน้อย 1 รายการ" };
+  }
 
   try {
     // seed คงที่สำหรับ preview เท่านั้น ไม่ผูกกับ enrollment จริง ไม่กระทบชุดข้อสอบที่นักเรียนจะได้
     const sampled = await loadSampledFinalExamQuestions(supabase, {
       courseId,
       seed: `preview-${courseId}`,
-      buildMode: examConfig.build_mode,
-      totalQuestions: examConfig.total_questions,
-      presetType: examConfig.preset_type,
-      customConstraints: examConfig.custom_constraints,
+      buildMode: input.buildMode,
+      totalQuestions: input.totalQuestions,
+      presetType: input.presetType,
+      customConstraints: input.customConstraints,
     });
     return {
       questions: sampled.map((question) => ({
         id: question.id,
         lessonId: question.lessonId ?? null,
         questionText: question.question_text,
+        interactionType: question.interactionType,
         choices: [...question.quiz_choices]
           .sort((a, b) => a.order_index - b.order_index)
           .map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),

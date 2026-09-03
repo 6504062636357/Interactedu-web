@@ -71,23 +71,36 @@ if (!chargeResponse.ok) {
 console.log("Omise charge response:", JSON.stringify(charge, null, 2)); // เพิ่มบรรทัดนี้ชั่วคราว
 
   // สร้าง/อัปเดต enrollment เป็น pending พร้อมผูก charge id ไว้เช็คสถานะทีหลัง
+  // ★ บั๊กเดิม: เขียนคอลัมน์ paid_amount โดยไม่เคยเช็ค error ของ insert/update เลย ทำให้
+  // ตอนคอลัมน์นี้ยังไม่มีอยู่จริงในตาราง enrollments มันล้มเหลวเงียบๆ — enrollment แถวนี้
+  // เลยไม่เคยถูกสร้าง/อัปเดตจริง พอไปเช็คสถานะที่ /api/omise/charge-status จึงหาไม่เจอ
+  // ("Charge not found") ทั้งที่จ่ายเงินผ่าน Omise สำเร็จแล้วจริงๆ — แก้โดยเช็ค error ทุกครั้ง
+  // และเพิ่มคอลัมน์ paid_amount เข้าไปในตาราง enrollments จริงๆ (migration) แทนการตัดออก
   if (existing) {
-    await supabase
+    const { error: updateError } = await supabase
       .from("enrollments")
       .update({
         status: "pending",
         payment_slip_url: charge.id,
-        paid_amount: Number(course.price),
+        paid_amount: course.price,
       })
       .eq("id", existing.id);
+    if (updateError) {
+      console.error("Failed to update enrollment for charge:", updateError.message);
+      return NextResponse.json({ error: "Failed to record enrollment" }, { status: 500 });
+    }
   } else {
-    await supabase.from("enrollments").insert({
+    const { error: insertError } = await supabase.from("enrollments").insert({
       student_id: user.id,
       course_id: courseId,
       status: "pending",
       payment_slip_url: charge.id, // เก็บ omise charge id ไว้ในคอลัมน์นี้ชั่วคราว
-      paid_amount: Number(course.price),
+      paid_amount: course.price,
     });
+    if (insertError) {
+      console.error("Failed to create enrollment for charge:", insertError.message);
+      return NextResponse.json({ error: "Failed to record enrollment" }, { status: 500 });
+    }
   }
 
   return NextResponse.json({

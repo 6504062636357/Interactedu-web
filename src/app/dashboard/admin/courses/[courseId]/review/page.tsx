@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import CourseReviewAccordion from "@/components/CourseReviewAccordion";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
-
+import CourseApproveActions from "@/components/CourseApproveActions";
 interface QuizChoiceRow {
   choice_text: string;
   is_correct: boolean;
@@ -237,6 +237,13 @@ export default async function AdminCourseReviewPage({
         <div className="mb-6 flex flex-wrap gap-2">
           <a href={`/dashboard/admin/courses/${course.id}`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">จัดการเนื้อหา</a>
           <a href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">ตรวจบททดสอบท้ายคอร์ส</a>
+        </div>
+
+        <div className="mb-6">
+          <CourseApproveActions
+            courseId={course.id}
+            courseStatus={course.status}
+          />
         </div>
 
         {certificateSettings ? (

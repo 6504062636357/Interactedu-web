@@ -132,8 +132,8 @@ export default function ProfileDropdown({ displayName, role }: ProfileDropdownPr
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  const handleLogout = async (): Promise<void> => {
-    await supabase.auth.signOut();
+    const handleLogout = async (): Promise<void> => {
+    await supabase.auth.signOut({ scope: "local" });
     setOpen(false);
     router.refresh();
     router.push("/");

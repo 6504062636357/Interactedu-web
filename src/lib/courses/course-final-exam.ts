@@ -143,6 +143,9 @@ async function loadCourseExamData(
 if (examConfigError) throw new Error(examConfigError.message);
 
 let questions: QuestionRow[];
+// true = คำถามชุดนี้มาจาก question_bank (มี course_exam_configs ตั้งไว้) -> ตอนบันทึกคำตอบต้องลง
+// quiz_attempts/quiz_attempt_questions (FK ผูกกับ question_bank) ไม่ใช่ video_quiz_attempts (FK ผูกกับ quiz_questions)
+const usingQuestionBank = Boolean(examConfig);
 if (examConfig) {
   // ทางใหม่: สุ่มจาก question_bank ตาม config, seed จาก enrollment_id (deterministic)
   try {
@@ -199,6 +202,7 @@ if (examConfig) {
     lessonById,
     lessonIdByDraft,
     questions,
+    usingQuestionBank,
   };
 }
 
@@ -279,23 +283,53 @@ export async function gradeCourseFinalExam(
   });
 
   const attemptedAt = new Date().toISOString();
-  const attemptRows = data.questions.map((question) => ({
-  student_id: userId,
-  lesson_id: resolveLessonId(question, data.lessonIdByDraft),
-    question_id: question.id,
-    selected_choice_index: answersByQuestion.get(question.id),
-    is_correct: details.find((detail) => detail.questionId === question.id)?.isCorrect ?? false,
-    attempted_at: attemptedAt,
-  }));
-  const { error: answerSaveError } = await supabase
-    .from("video_quiz_attempts")
-    .upsert(attemptRows, { onConflict: "student_id,question_id" });
-  if (answerSaveError) throw new Error(answerSaveError.message);
-
   const correctAnswers = details.filter((detail) => detail.isCorrect).length;
   const scorePercentage = Math.round((correctAnswers / data.questions.length) * 10000) / 100;
   const passPercentage = Number(data.course.certificate_pass_percentage ?? DEFAULT_PASS_PERCENTAGE);
   const passed = scorePercentage >= passPercentage;
+
+  if (data.usingQuestionBank) {
+    // คำถามชุดนี้มาจาก question_bank -> log คำตอบลง quiz_attempts/quiz_attempt_questions
+    // (question_id ในตารางนี้ FK ผูกกับ question_bank โดยตรง ไม่ชนกับ video_quiz_attempts ที่ผูกกับ quiz_questions)
+    const { data: quizAttempt, error: quizAttemptError } = await supabase
+      .from("quiz_attempts")
+      .insert({
+        enrollment_id: data.enrollment.id,
+        submitted_at: attemptedAt,
+        score: scorePercentage,
+        passed,
+      })
+      .select("id")
+      .single();
+    if (quizAttemptError) throw new Error(quizAttemptError.message);
+
+    const attemptQuestionRows = data.questions.map((question) => ({
+      attempt_id: quizAttempt.id,
+      question_id: question.id,
+      is_correct: details.find((detail) => detail.questionId === question.id)?.isCorrect ?? false,
+      selected_choice_id: null,
+      student_answer: { selected_choice_index: answersByQuestion.get(question.id) },
+    }));
+    const { error: answerSaveError } = await supabase
+      .from("quiz_attempt_questions")
+      .insert(attemptQuestionRows);
+    if (answerSaveError) throw new Error(answerSaveError.message);
+  } else {
+    // ทางเดิม: ไม่มี examConfig = คำถามยังมาจาก quiz_questions (คอร์สเก่าที่ยังไม่ตั้งค่า) -> พฤติกรรมเดิมเป๊ะ
+    const attemptRows = data.questions.map((question) => ({
+      student_id: userId,
+      lesson_id: resolveLessonId(question, data.lessonIdByDraft),
+      question_id: question.id,
+      selected_choice_index: answersByQuestion.get(question.id),
+      is_correct: details.find((detail) => detail.questionId === question.id)?.isCorrect ?? false,
+      attempted_at: attemptedAt,
+    }));
+    const { error: answerSaveError } = await supabase
+      .from("video_quiz_attempts")
+      .upsert(attemptRows, { onConflict: "student_id,question_id" });
+    if (answerSaveError) throw new Error(answerSaveError.message);
+  }
+
   const attemptLesson = data.lessons[data.lessons.length - 1];
   const { data: tracking, error: trackingError } = await supabase
     .from("scorm_tracking")
