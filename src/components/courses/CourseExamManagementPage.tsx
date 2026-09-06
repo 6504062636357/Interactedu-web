@@ -23,16 +23,50 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirect=/dashboard/${workspace}/courses/${courseId}/exam`);
 
-  const [{ data: profile }, { data: course }, { data: lessonsData, error: lessonsError }, { data: examConfigData }] = await Promise.all([
+  const [
+    { data: profile },
+    { data: course, error: courseError },
+    { data: certificateSettings },
+    { data: lessonsData, error: lessonsError },
+    { data: examConfigData },
+  ] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-    supabase.from("courses").select("id, title, exam_status, created_by, certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
+    // Keep the existence/ownership query limited to the original course columns.
+    // Optional feature columns may not exist yet while a migration is rolling out;
+    // bundling them here used to turn that schema error into a misleading 404.
+    supabase.from("courses").select("id, title, created_by").eq("id", courseId).maybeSingle(),
+    supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
     supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
     supabase.from("course_exam_configs").select("build_mode, total_questions, preset_type, custom_constraints").eq("course_id", courseId).maybeSingle(),
   ]);
 
+  if (courseError) {
+    console.error("[course/exam] failed to load course:", courseId, courseError.message);
+    return (
+      <div className="mx-auto max-w-3xl py-20 text-center">
+        <p className="mb-2 text-[15px] font-bold text-red-500">โหลดข้อมูลคอร์สไม่สำเร็จ</p>
+        <p className="mb-6 text-[13.5px] text-[#0F1B3D]/50">อาจเกิดจากปัญหาการเชื่อมต่อชั่วคราว กรุณาลองใหม่อีกครั้ง</p>
+        <Link
+          href={`/dashboard/${workspace}/courses/${courseId}/exam`}
+          className="inline-block rounded-xl bg-[#0F1B3D] px-5 py-2.5 text-[13.5px] font-bold text-white transition-colors hover:bg-[#0F1B3D]/90"
+        >
+          ลองใหม่
+        </Link>
+      </div>
+    );
+  }
   if (!course) notFound();
   const allowed = profile?.role === "admin" || (profile?.role === "teacher" && course.created_by === user.id);
   if (!allowed) redirect(`/dashboard/${workspace}`);
+
+  // `exam_status` was introduced after the exam screen. It is only needed by
+  // the admin review controls, so a missing column must not block teachers.
+  const { data: examReview } = workspace === "admin"
+    ? await supabase.from("courses").select("exam_status").eq("id", courseId).maybeSingle()
+    : { data: null };
+
+  const certificateEnabled = certificateSettings?.certificate_enabled ?? false;
+  const certificatePassPercentage = Number(certificateSettings?.certificate_pass_percentage ?? 70);
 
   const lessons = (lessonsData ?? []) as unknown as StoredLesson[];
   const questions = lessons.flatMap((lesson) => {
@@ -56,7 +90,7 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
       <h1 className="mt-1 text-[26px] font-extrabold tracking-[-0.02em] text-[#0F1B3D]">บททดสอบท้ายคอร์ส</h1>
       <p className="mt-1 text-sm font-semibold text-[#0F1B3D]/65">{course.title}</p>
       <div className="my-6 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-[13px] leading-6 text-blue-800">
-        ผู้เรียนจะทำบททดสอบนี้หลังเรียนครบทุกบท และต้องได้อย่างน้อย <strong>{Number(course.certificate_pass_percentage)}%</strong> เพื่อรับใบรับรอง {course.certificate_enabled ? "(เปิดใช้งานใบรับรองแล้ว)" : "(ขณะนี้ปิดการออกใบรับรอง)"}
+        ผู้เรียนจะทำบททดสอบนี้หลังเรียนครบทุกบท และต้องได้อย่างน้อย <strong>{certificatePassPercentage}%</strong> เพื่อรับใบรับรอง {certificateEnabled ? "(เปิดใช้งานใบรับรองแล้ว)" : "(ขณะนี้ปิดการออกใบรับรอง)"}
       </div>
       {lessonsError && <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">โหลดคำถามเดิมไม่สำเร็จ: {lessonsError.message}</p>}
       <CourseExamEditor
@@ -73,13 +107,14 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
               }
             : null
         }
+        workspace={workspace}
         readOnly={workspace === "admin"}
       />
       {workspace === "admin" && (
         <div className="mt-8">
           <CourseExamReviewActions
             courseId={courseId}
-            examStatus={(course.exam_status ?? "pending") as "pending" | "approved" | "rejected"}
+            examStatus={(examReview?.exam_status ?? "pending") as "pending" | "approved" | "rejected"}
           />
         </div>
         )}
