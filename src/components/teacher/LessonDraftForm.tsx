@@ -87,6 +87,7 @@ export default function LessonDraftForm({
   const [videoUrl, setVideoUrl] = useState<string | null>(initialData?.videoUrl ?? null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [videoSegments, setVideoSegments] = useState<VideoSegment[]>(
     initialData?.videoSegments.map((segment) => ({
       ...segment,
@@ -141,22 +142,33 @@ export default function LessonDraftForm({
       e.target.value = "";
       return;
     }
+    const fileInput = e.currentTarget;
+    const previousVideoUrl = videoUrl;
     setVideoFile(file);
     setVideoUrl(null);
     setVideoPreviewUrl(URL.createObjectURL(file));
-    setVideoSegments([]);
-    setVideoQuizQuestions([]);
-    setRandomMarkers([]);
     setError(null);
+    setSubmitError(null);
+    setUploadProgress(0);
     setUploadingVideo(true);
 
     try {
-      const url = await uploadVideoToR2(file, () => undefined);
+      const url = await uploadVideoToR2(file, setUploadProgress);
       setVideoUrl(url);
+      // ล้างตำแหน่งเดิมหลังอัปโหลดไฟล์ใหม่สำเร็จเท่านั้น
+      setVideoSegments([]);
+      setVideoQuizQuestions([]);
+      setRandomMarkers([]);
     } catch (err) {
+      // ถ้าอัปโหลดไฟล์ใหม่ล้มเหลว ให้กลับไปใช้วิดีโอเดิมและเลือกไฟล์เดิมซ้ำได้
+      setVideoFile(null);
+      setVideoUrl(previousVideoUrl);
+      setVideoPreviewUrl(null);
+      fileInput.value = "";
       setError(err instanceof Error ? err.message : "อัปโหลดวิดีโอไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setUploadingVideo(false);
+      setUploadProgress(null);
     }
   };
 
@@ -523,9 +535,23 @@ export default function LessonDraftForm({
               type="file"
               accept="video/*"
               onChange={handleVideoChange}
-              className="w-full text-[13.5px] text-[#0F1B3D]/70 file:mr-4 file:py-2.5 file:px-4 file:rounded-full file:border-0 file:text-[13px] file:font-bold file:bg-[#0F1B3D]/[0.06] file:text-[#0F1B3D] hover:file:bg-[#0F1B3D]/10"
+              disabled={uploadingVideo}
+              className="w-full text-[13.5px] text-[#0F1B3D]/70 file:mr-4 file:py-2.5 file:px-4 file:rounded-full file:border-0 file:text-[13px] file:font-bold file:bg-[#0F1B3D]/[0.06] file:text-[#0F1B3D] hover:file:bg-[#0F1B3D]/10 disabled:cursor-wait disabled:opacity-60"
             />
-            {uploadingVideo && <p className="mt-2 text-[13px] text-[#0F1B3D]/50 font-medium">กำลังอัปโหลด...</p>}
+            {uploadingVideo && (
+              <div className="mt-3" aria-live="polite">
+                <div className="flex items-center justify-between gap-3 text-[13px] font-medium text-[#0F1B3D]/60">
+                  <span>กำลังอัปโหลดวิดีโอ กรุณาอย่าปิดหรือเปลี่ยนหน้า</span>
+                  <span>{uploadProgress ?? 0}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#0F1B3D]/10">
+                  <div
+                    className="h-full rounded-full bg-[#FF5A3C] transition-[width] duration-200"
+                    style={{ width: `${uploadProgress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {videoUrl && !uploadingVideo && (
               <>
                 <div className="mt-2 mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -905,17 +931,27 @@ export default function LessonDraftForm({
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={saving || submitting || uploadingVideo}
+                title={uploadingVideo ? "กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน" : undefined}
                 className="inline-flex items-center justify-center rounded-full border border-[#0F1B3D]/15 px-5 py-3 text-[13.5px] font-bold text-[#0F1B3D] transition-colors hover:bg-[#0F1B3D]/[0.04] disabled:opacity-60"
               >
-                {saving ? "กำลังบันทึก..." : savedDraftId ? "บันทึกการแก้ไข" : "บันทึกฉบับร่าง"}
+                {uploadingVideo
+                  ? `รออัปโหลดวิดีโอ ${uploadProgress ?? 0}%`
+                  : saving
+                    ? "กำลังบันทึก..."
+                    : savedDraftId
+                      ? "บันทึกการแก้ไข"
+                      : "บันทึกฉบับร่าง"}
               </button>
               <button
                 type="button"
                 onClick={handleSubmitForReview}
                 disabled={saving || submitting || uploadingVideo}
+                title={uploadingVideo ? "กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน" : undefined}
                 className="shrink-0 rounded-full bg-[#FF5A3C] px-6 py-3 text-[14px] font-bold text-white transition-colors hover:bg-[#EB4A2D] disabled:opacity-60"
               >
-                {submitting
+                {uploadingVideo
+                  ? `รออัปโหลดวิดีโอ ${uploadProgress ?? 0}%`
+                  : submitting
                   ? isAdmin
                     ? "กำลังบันทึกและเผยแพร่..."
                     : "กำลังบันทึกและส่ง..."

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveCourseFinalExam, saveCourseExamConfig, previewCourseExamSample, type CourseExamQuestionInput, type PreviewQuestion } from "@/app/dashboard/course-exam-actions";
 type EditableQuestion = CourseExamQuestionInput & { key: string };
@@ -41,11 +42,13 @@ export default function CourseExamEditor({
   initialQuestions,
   lessons,
   initialExamConfig,
+  workspace = "teacher",
   readOnly = false, // ⬅️ ใหม่: default false เพื่อไม่กระทบหน้า teacher เดิม
 }: {
   courseId: string;
   initialQuestions: CourseExamQuestionInput[];
   lessons: { id: string; title: string }[];
+  workspace?: "teacher" | "admin";
   readOnly?: boolean; // ⬅️ ใหม่
   initialExamConfig?: {
     buildMode: BuildMode;
@@ -112,6 +115,11 @@ export default function CourseExamEditor({
   async function save() {
     if (readOnly) return; // ⬅️ ใหม่: กันยิง action จากฝั่ง admin เด็ดขาด
 
+    if (lessons.length === 0) {
+      setError("กรุณาเพิ่มและบันทึกบทเรียนอย่างน้อย 1 บทก่อนสร้างบททดสอบท้ายคอร์ส");
+      return;
+    }
+
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       if (q.interactionType === "true_false") {
@@ -125,17 +133,22 @@ export default function CourseExamEditor({
     setSaving(true);
     setError(null);
     setMessage(null);
-    const result = await saveCourseFinalExam({
-      courseId,
-      questions: questions.map(({ questionText, explanation, choices, interactionType }) => ({ questionText, explanation, choices, interactionType })),
-    });
-    setSaving(false);
-    if (result.error) {
-      setError(result.error);
-      return;
+    try {
+      const result = await saveCourseFinalExam({
+        courseId,
+        questions: questions.map(({ questionText, explanation, choices, interactionType }) => ({ questionText, explanation, choices, interactionType })),
+      });
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setMessage("บันทึกบททดสอบท้ายคอร์สเรียบร้อยแล้ว");
+      router.refresh();
+    } catch {
+      setError("เชื่อมต่อระบบบันทึกข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setSaving(false);
     }
-    setMessage("บันทึกบททดสอบท้ายคอร์สเรียบร้อยแล้ว");
-    router.refresh();
   }
 
   const [buildMode, setBuildMode] = useState<BuildMode>(initialExamConfig?.buildMode ?? "preset");
@@ -154,25 +167,34 @@ export default function CourseExamEditor({
 
   async function saveConfig() {
     if (readOnly) return; // ⬅️ ใหม่
+    if (lessons.length === 0) {
+      setConfigError("กรุณาเพิ่มและบันทึกบทเรียนอย่างน้อย 1 บทก่อนตั้งค่าข้อสอบแบบสุ่ม");
+      return;
+    }
     setConfigSaving(true);
     setConfigError(null);
     setConfigMessage(null);
-    const result = await saveCourseExamConfig({
-      courseId,
-      buildMode,
-      totalQuestions,
-      presetType: buildMode === "preset" ? presetType : null,
-      customConstraints: buildMode === "custom"
-        ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
-        : null,
-    });
-    setConfigSaving(false);
-    if (result.error) {
-      setConfigError(result.error);
-      return;
+    try {
+      const result = await saveCourseExamConfig({
+        courseId,
+        buildMode,
+        totalQuestions,
+        presetType: buildMode === "preset" ? presetType : null,
+        customConstraints: buildMode === "custom"
+          ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
+          : null,
+      });
+      if (result.error) {
+        setConfigError(result.error);
+        return;
+      }
+      setConfigMessage("บันทึกกติกาสุ่มข้อสอบเรียบร้อยแล้ว");
+      router.refresh();
+    } catch {
+      setConfigError("เชื่อมต่อระบบบันทึกกติกาข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setConfigSaving(false);
     }
-    setConfigMessage("บันทึกกติกาสุ่มข้อสอบเรียบร้อยแล้ว");
-    router.refresh();
   }
 
   function updateConstraint(key: string, updates: Partial<CustomConstraintRow>) {
@@ -190,23 +212,33 @@ export default function CourseExamEditor({
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewQuestions(null);
-    // ★ แก้ใหม่: ส่งกติกาปัจจุบันบนหน้าจอ (ที่อาจยังไม่ได้กดบันทึก) ไปพรีวิวตรงๆ แทนที่จะให้ server
-    // ไปอ่านกติกาที่บันทึกไว้ล่าสุด — กันไม่ให้พรีวิวคนละโหมดกับที่กำลังดูอยู่บนจอ
-    const result = await previewCourseExamSample({
-      courseId,
-      buildMode,
-      totalQuestions,
-      presetType: buildMode === "preset" ? presetType : null,
-      customConstraints: buildMode === "custom"
-        ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
-        : null,
-    });
-    setPreviewLoading(false);
-    if (result.error) {
-      setPreviewError(result.error);
+    if (lessons.length === 0) {
+      setPreviewLoading(false);
+      setPreviewError("กรุณาเพิ่มและบันทึกบทเรียนอย่างน้อย 1 บทก่อนดูตัวอย่างข้อสอบ");
       return;
     }
-    setPreviewQuestions(result.questions ?? []);
+    // ★ แก้ใหม่: ส่งกติกาปัจจุบันบนหน้าจอ (ที่อาจยังไม่ได้กดบันทึก) ไปพรีวิวตรงๆ แทนที่จะให้ server
+    // ไปอ่านกติกาที่บันทึกไว้ล่าสุด — กันไม่ให้พรีวิวคนละโหมดกับที่กำลังดูอยู่บนจอ
+    try {
+      const result = await previewCourseExamSample({
+        courseId,
+        buildMode,
+        totalQuestions,
+        presetType: buildMode === "preset" ? presetType : null,
+        customConstraints: buildMode === "custom"
+          ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
+          : null,
+      });
+      if (result.error) {
+        setPreviewError(result.error);
+        return;
+      }
+      setPreviewQuestions(result.questions ?? []);
+    } catch {
+      setPreviewError("โหลดตัวอย่างข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   // ★ เพิ่มใหม่: สลับโหมด preset/custom แล้วล้าง error/message เก่าของอีกโหมดทิ้งด้วย
@@ -236,6 +268,21 @@ export default function CourseExamEditor({
           <p className="text-[12.5px] font-bold text-[#0F1B3D]/60">
             โหมดรีวิว ดูบททดสอบท้ายคอร์สได้อย่างเดียว ไม่สามารถแก้ไขจากหน้านี้
           </p>
+        </div>
+      )}
+
+      {!readOnly && lessons.length === 0 && (
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+          <p className="text-[13.5px] font-bold text-amber-800">ต้องมีบทเรียนก่อนสร้างบททดสอบท้ายคอร์ส</p>
+          <p className="mt-1 text-[12.5px] leading-5 text-amber-700">
+            ข้อสอบท้ายคอร์สจะผูกกับข้อมูลบทเรียน จึงต้องเพิ่มและบันทึกบทเรียนอย่างน้อย 1 บทก่อน
+          </p>
+          <Link
+            href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`}
+            className="mt-3 inline-flex rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[12.5px] font-bold text-white transition-colors hover:bg-[#EB4A2D]"
+          >
+            + เพิ่มบทเรียนแรก
+          </Link>
         </div>
       )}
 
@@ -327,13 +374,19 @@ export default function CourseExamEditor({
 
           {/* ⬅️ ใหม่: ซ่อนปุ่มบันทึกกติกาสุ่มข้อสอบเมื่อ readOnly */}
           {!readOnly && (
-            <button type="button" disabled={configSaving || (buildMode === "custom" && lessons.length === 0)} onClick={saveConfig} className="mt-4 rounded-full bg-[#0F1B3D] px-6 py-2.5 text-[13px] font-extrabold text-white disabled:opacity-60">
-              {configSaving ? "กำลังบันทึก..." : "บันทึกกติกาสุ่มข้อสอบ"}
-            </button>
+            lessons.length === 0 ? (
+              <Link href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`} className="mt-4 inline-flex rounded-full bg-[#FF5A3C] px-6 py-2.5 text-[13px] font-extrabold text-white hover:bg-[#EB4A2D]">
+                + เพิ่มบทเรียนก่อนสร้างข้อสอบ
+              </Link>
+            ) : (
+              <button type="button" disabled={configSaving} onClick={saveConfig} className="mt-4 rounded-full bg-[#0F1B3D] px-6 py-2.5 text-[13px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {configSaving ? "กำลังบันทึก..." : "บันทึกกติกาสุ่มข้อสอบ"}
+              </button>
+            )
           )}
 
           {/* ปุ่มดูตัวอย่างปล่อยให้ admin กดได้ด้วย (read-only โดยธรรมชาติ) */}
-          <button type="button" disabled={previewLoading || (buildMode === "custom" && lessons.length === 0)} onClick={handlePreview} className="mt-2.5 ml-2.5 rounded-full border border-[#0F1B3D]/15 bg-white px-6 py-2.5 text-[13px] font-bold text-[#0F1B3D] disabled:opacity-60">
+          <button type="button" disabled={previewLoading || lessons.length === 0} onClick={handlePreview} className="mt-2.5 ml-2.5 rounded-full border border-[#0F1B3D]/15 bg-white px-6 py-2.5 text-[13px] font-bold text-[#0F1B3D] disabled:cursor-not-allowed disabled:opacity-60">
             {previewLoading ? "กำลังสุ่มตัวอย่าง..." : "ดูตัวอย่างชุดข้อสอบ"}
           </button>
 
@@ -444,9 +497,15 @@ export default function CourseExamEditor({
               <button type="button" onClick={() => setQuestions((current) => [...current, emptyQuestion()])} className="mt-4 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D]">+ เพิ่มคำถาม</button>
               {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{error}</p>}
               {message && <p aria-live="polite" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-700">{message}</p>}
-              <button type="button" disabled={saving} onClick={save} className="mt-5 w-full rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white disabled:opacity-60">
-                {saving ? "กำลังบันทึก..." : "บันทึกบททดสอบท้ายคอร์ส"}
-              </button>
+              {lessons.length === 0 ? (
+                <Link href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`} className="mt-5 flex w-full justify-center rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white hover:bg-[#EB4A2D]">
+                  + เพิ่มบทเรียนก่อนสร้างข้อสอบ
+                </Link>
+              ) : (
+                <button type="button" disabled={saving} onClick={save} className="mt-5 w-full rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                  {saving ? "กำลังบันทึก..." : "บันทึกบททดสอบท้ายคอร์ส"}
+                </button>
+              )}
             </>
           )}
         </div>
