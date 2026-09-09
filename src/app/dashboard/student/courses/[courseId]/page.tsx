@@ -10,6 +10,7 @@ interface LessonRow {
   video_url: string | null;
   video_duration_seconds: number;
   is_scorm: boolean | null;
+  is_published: boolean | null;
 }
 
 interface ModuleRow {
@@ -107,13 +108,22 @@ export default async function CourseLessonsPage({
 
   const { data: modulesData } = await supabase
     .from("modules")
-    .select("id, title, order_index, lessons(id, title, order_index, video_url, video_duration_seconds, is_scorm)")
+    .select(
+      "id, title, order_index, lessons(id, title, order_index, video_url, video_duration_seconds, is_scorm, is_published)"
+    )
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
 
+  // กรองบทเรียนที่ยังไม่ publish (ครูสร้าง/แก้ไขค้างไว้ ยังไม่ผ่านการอนุมัติ generate) ออกก่อน
+  // แสดงให้นักเรียน — เดิมไม่กรองเลย ทำให้บทเรียนที่ยังไม่มีแพ็กเกจ SCORM จริง (scorm_entry_point
+  // เป็น null) โผล่ในหน้านี้ กดเข้าไปแล้วเจอ error "Failed to fetch scorm info" ที่หน้า /play ทันที
+  // เพราะ /api/lessons/[lessonId]/scorm-info เช็ค is_scorm/entry point แล้วไม่เจอ — จุดเดียวกับที่
+  // แก้ไปแล้วใน api/courses/[courseId]/lessons/route.ts แก้ที่นี่ด้วยเพราะเป็นคนละหน้า คนละ query
   const modules = ((modulesData ?? []) as ModuleRow[]).map((m) => ({
     ...m,
-    lessons: [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index),
+    lessons: [...(m.lessons ?? [])]
+      .filter((l) => l.is_published)
+      .sort((a, b) => a.order_index - b.order_index),
   }));
 
   const { data: trackingData } = await supabase

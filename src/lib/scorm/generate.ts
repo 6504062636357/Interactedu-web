@@ -48,67 +48,6 @@ interface VideoSegmentRow {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-// ============================================================
-// LESSON SCO (วิดีโอ + เนื้อหา) — ไม่มีควิซแล้ว
-// ============================================================
-
-// function buildLessonPlayerJs(draft: LessonDraftRow): string {
-//   const lessonData = {
-//     title: draft.lessons.title,
-//     videoUrl: draft.video_url ?? "",
-//     contentHtml: draft.content_html ?? "",
-//   };
-
-//   return `var LESSON_DATA = ${JSON.stringify(lessonData)};
-
-// function renderLesson() {
-//   document.getElementById("lesson-title").textContent = LESSON_DATA.title;
-//   document.getElementById("lesson-video").src = LESSON_DATA.videoUrl;
-//   document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
-// }
-
-// window.addEventListener("load", function () {
-//   ScormAPI.initialize();
-//   ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
-//   renderLesson();
-
-//   var video = document.getElementById("lesson-video");
-//   if (video) {
-//     // ดูวิดีโอจบ = ถือว่าเรียนบทนี้เสร็จ (ไม่เกี่ยวกับควิซ ซึ่งเป็นคนละ SCO แล้ว)
-//     video.addEventListener("ended", function () {
-//       ScormAPI.setValue("cmi.core.lesson_status", "completed");
-//       ScormAPI.commit();
-//     });
-//   }
-// });
-
-// window.addEventListener("beforeunload", function () {
-//   ScormAPI.commit();
-//   ScormAPI.terminate();
-// });
-// `;
-// }
-// function buildLessonPlayerJs(
-//   draft: LessonDraftRow,
-//   lessonId: string,
-//   videoQuizQuestions: QuizQuestionRow[]
-// ): string {
-//   const lessonData = {
-//     lessonId,
-//     title: draft.lessons.title,
-//     videoUrl: draft.video_url ?? "",
-//     contentHtml: draft.content_html ?? "",
-//     quizzes: videoQuizQuestions
-//       .slice()
-//       .sort((a, b) => (a.video_timestamp_seconds ?? 0) - (b.video_timestamp_seconds ?? 0))
-//       .map((q) => ({
-//         id: q.id,
-//         timestampSeconds: q.video_timestamp_seconds,
-//         questionText: q.question_text,
-//         choices: q.quiz_choices.sort((a, b) => a.order_index - b.order_index).map((c) => c.choice_text),
-//       })),
-//   };
 function buildLessonPlayerJs(//helper function อยู่บนสุดได้ ฟังชันนี้รับมา 5 พารา
   draft: LessonDraftRow,
   lessonId: string,
@@ -157,6 +96,17 @@ var answeredQuestionIds = {};
 var pendingQuestion = null;
 var savePositionTimer = null;
 var lastSavedPosition = 0;
+// [งานข้อ 22] จับเวลาเริ่ม session ตั้งแต่บรรทัดนี้ทำงาน (สคริปต์นี้ execute ตอน parse หน้าเว็บ ก่อน
+// window "load" ด้วยซ้ำ) ไว้คำนวณ cmi.core.session_time ตอนจบ session — เดิมไม่เคย setValue ค่านี้
+// เลยสักครั้ง รายงานเวลาเรียนของผู้เรียนที่ LMS/dashboard เห็นจึงเป็นศูนย์ตลอดไม่ว่าจะเรียนนานแค่ไหน
+var sessionStartTime = Date.now();
+// [งานข้อ 11] คะแนนควิซระหว่างวิดีโอ — ผู้เรียน/ครูเห็นตัวเลขจริงจาก DB (video_quiz_attempts)
+// ผ่าน API คนละเส้นทาง (ดู page.tsx และ dashboard/teacher/analytics) สองตัวแปรนี้แค่ไว้เขียน
+// คู่ขนานลง CMI (cmi.interactions.n.* / cmi.objectives.n.score) ให้ LMS ภายนอกอ่านได้ ไม่ใช่แหล่ง
+// ความจริงหลัก — ตั้งใจแยกจาก cmi.core.score.raw ของ certificate โดยเด็ดขาด (formative คนละ
+// ประเภทกับคะแนนตัดสินใบรับรอง)
+var quizSummary = { correct: 0, total: 0 };
+var interactionIndex = 0;
 
 function apiUrl(path) { return path; }
 
@@ -168,24 +118,150 @@ function fetchJson(url, options) {
 function loadInitialAttempts() {
   return fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts")
     .then(function (data) {
-      (data.attempts || []).forEach(function (a) { answeredQuestionIds[a.questionId] = true; });
+      (data.attempts || []).forEach(function (a) {
+        answeredQuestionIds[a.questionId] = true;
+        // [งานข้อ 11] นับสถิติที่เคยตอบไปแล้ว (รอบก่อนหน้า/session อื่น) มารวมด้วย ไม่ใช่แค่ที่
+        // ตอบใน session นี้ — ตัวเลขนี้มาจาก DB ตรงๆ (แหล่งความจริงเดียวกับที่ผู้เรียน/ครูเห็น)
+        quizSummary.total++;
+        if (a.isCorrect) quizSummary.correct++;
+      });
+      // เผื่อกลับมาเรียนซ้ำ (resume) ต้องต่อ index ของ cmi.interactions ให้ไม่ชนกับที่เคยเขียนไว้
+      // รอบก่อน (ซึ่งถูกโหลดกลับเข้า CMI แล้วผ่าน loadFromJSON ฝั่ง page.tsx ก่อน SCO นี้จะ initialize)
+      interactionIndex = quizSummary.total;
+      reportQuizSummaryToCmi();
     })
     .catch(function (err) { console.warn("Failed to load quiz attempts", err); });
 }
 
-function loadResumePosition() {
-  return fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/watch-position")
-    .then(function (data) { return data.lastPositionSeconds || 0; })
-    .catch(function (err) { console.warn("Failed to load resume position", err); return 0; });
+// [งานข้อ 11] เขียนคะแนนควิซระหว่างวิดีโอ (formative) คู่ขนานลง cmi.objectives.0 — เป็น
+// objective รวมของทั้งบทเรียน แยกจาก cmi.core.score.raw (คะแนนสอบปลายคอร์สที่ตัดสินใบรับรอง)
+// โดยเจตนา ไม่เอามารวมกันเด็ดขาด
+function reportQuizSummaryToCmi() {
+  if (!LESSON_DATA.quizzes.length) return;
+  var percent = quizSummary.total > 0 ? Math.round((quizSummary.correct / quizSummary.total) * 100) : 0;
+  ScormAPI.setValue("cmi.objectives.0.id", "video-quiz-summary");
+  ScormAPI.setValue("cmi.objectives.0.score.raw", String(percent));
+  ScormAPI.setValue("cmi.objectives.0.score.min", "0");
+  ScormAPI.setValue("cmi.objectives.0.score.max", "100");
 }
 
+// [งานข้อ 20] ย้ายจาก fetch("/api/lessons/.../watch-position") มาใช้ cmi.core.lesson_location
+// ตรงตามที่ SCORM ออกแบบไว้ให้ทำอยู่แล้ว — เหตุผลที่ย้าย: ตัว REST endpoint เดิมมีเพดานเงื่อนไข
+// resumeSeconds > 5 ที่ทำให้ผู้เรียนงงว่า "ทำไมไม่ resume" ตอนทดสอบสั้นๆ และที่สำคัญกว่านั้นคือ
+// มันเป็นคนละแหล่งความจริงกับ CMI ที่งานข้อ 01/02 วางระบบ loadFromJSON/resume ไว้แล้วทั้งระบบ
+// — เก็บผ่าน cmi.core.lesson_location ตัวเดียว ได้ resume ครบวงจรทั้งแพ็กเกจเราเองและมาตรฐาน
+// SCORM ทั่วไปที่ LMS ภายนอกอ่านค่านี้ได้อยู่แล้วโดยไม่ต้องรู้จัก endpoint ของเราเลย
+// ค่านี้ถูกใส่กลับเข้า API ผ่าน loadFromJSON ฝั่ง page.tsx ไปแล้วตั้งแต่ก่อน SCO นี้ initialize
+// ด้วยซ้ำ (ดู Effect ที่ 2 ใน play/[courseId]/[lessonId]/page.tsx) อ่านค่าแบบ sync ได้เลย
+// ไม่ต้อง fetch แยกอีกเส้นทางเหมือนเดิม
+function loadResumePosition() {
+  var raw = ScormAPI.getValue("cmi.core.lesson_location");
+  var seconds = raw ? Number(raw) : 0;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+}
+
+// เก็บแค่ setValue ไม่ commit ในนี้ — ผู้เรียกแต่ละจุด (interval ระหว่างเล่น, pause, ended,
+// beforeunload) เป็นคนตัดสินเองว่าควร commit ตอนไหน กันยิง commit ถี่เกินจำเป็นตอน setValue
+// ล้วนๆ หลายค่าติดกัน (เช่น ตอน ended ที่ setValue ทั้ง location และ lesson_status ก่อน commit
+// รวบครั้งเดียว)
 function savePosition(seconds) {
-  fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/watch-position", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    keepalive: true,
-    body: JSON.stringify({ positionSeconds: seconds }),
-  }).catch(function (err) { console.warn("Failed to save position", err); });
+  ScormAPI.setValue("cmi.core.lesson_location", String(Math.floor(seconds)));
+}
+
+// [งานข้อ 22] แปลงเวลาที่ผ่านไปตั้งแต่ sessionStartTime เป็นฟอร์แมต CMITimespan ของ SCORM 1.2
+// ("HHHH:MM:SS.SS" — ชั่วโมง 4 หลักตายตัว, นาที/วินาที 2 หลัก, เศษวินาที 2 หลักหน่วยเซนติวินาที
+// ตามสเปกของ ADL RTE3 พอดี) ต้อง setValue ค่านี้ก่อน LMSFinish เสมอ ไม่งั้น LMS จะได้ session_time
+// เป็นค่าว่าง/ศูนย์ (ปัญหาที่พบตอนนี้)
+function formatSessionTime() {
+  var elapsedMs = Date.now() - sessionStartTime;
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+  var totalCentiseconds = Math.floor(elapsedMs / 10);
+  var hundredths = totalCentiseconds % 100;
+  var totalSeconds = Math.floor(totalCentiseconds / 100);
+  var seconds = totalSeconds % 60;
+  var totalMinutes = Math.floor(totalSeconds / 60);
+  var minutes = totalMinutes % 60;
+  var hours = Math.floor(totalMinutes / 60); // ไม่ mod เพราะ CMITimespan รองรับสูงสุด 9999 ชั่วโมง
+
+  var hoursStr = String(hours);
+  while (hoursStr.length < 4) hoursStr = "0" + hoursStr;
+
+  return hoursStr + ":" + pad2(minutes) + ":" + pad2(seconds) + "." + pad2(hundredths);
+}
+
+// [งานข้อ 22] ตัดสินค่า cmi.core.exit ก่อน LMSFinish ตามสถานะบทเรียนตอนออกจากหน้า — ถ้ายังเรียนไม่จบ
+// ("completed"/"passed") ต้องตั้งเป็น "suspend" เพื่อให้ LMS รู้ว่าต้อง resume (cmi.core.entry =
+// "resume") ตอนกลับเข้ามาเรียนต่อรอบหน้า ตรงกับ flow ที่งานข้อ 01/02 วางไว้อยู่แล้ว — ถ้าจบแล้วจริง
+// ตั้งเป็น "" (ค่าว่าง = จบ session ตามปกติ ตามสเปก SCORM 1.2 ไม่ใช่ "logout"/"time-out")
+function determineExitValue() {
+  var status = ScormAPI.getValue("cmi.core.lesson_status");
+  return status === "completed" || status === "passed" ? "" : "suspend";
+}
+
+var quizIndexById = null;
+
+function getQuizIndexMap() {
+  if (!quizIndexById) {
+    quizIndexById = {};
+    LESSON_DATA.quizzes.forEach(function (q, i) { quizIndexById[q.id] = i; });
+  }
+  return quizIndexById;
+}
+
+// [งานข้อ 21] ย้ายชุดข้อที่ตอบแล้ว (answeredQuestionIds) จากที่เดิมพึ่งพา fetch REST
+// ("/video-quiz-attempts") อย่างเดียว มาเก็บคู่ขนานลง cmi.suspend_data ด้วย — ตาราง
+// video_quiz_attempts ใน DB ยังคงอยู่เหมือนเดิมสำหรับ analytics (ตัวเลขคะแนน/สถิติที่ครูเห็นใน
+// dashboard) ไม่ได้ตัดออก แค่ไม่ใช่แหล่งเดียวที่ใช้ gate การเล่นวิดีโอ (findNextUnansweredAt/
+// getMaxAllowedSeekTime) อีกต่อไป เหตุผลเดียวกับงานข้อ 20: ถ้าแพ็กเกจนี้ถูกนำไปเปิดใน LMS ภายนอก
+// (งานข้อ 23) endpoint REST ของเราจะเรียกไม่ได้เลย (คนละโดเมน/ไม่มี cookie auth ของเรา) แต่
+// cmi.suspend_data เป็นมาตรฐาน SCORM ที่ LMS ไหนก็ต้องอ่าน/เขียนให้ได้อยู่แล้ว จึงอ่านได้แบบ sync
+// ทันทีตอนโหลดเหมือน loadResumePosition() โดยไม่ต้องรอ network เลย
+//
+// เก็บเป็น "ลำดับ index ใน LESSON_DATA.quizzes" ไม่ใช่ UUID ตรงๆ เพราะ cmi.suspend_data ของ
+// SCORM 1.2 จำกัดไว้ที่ 4096 ตัวอักษร ถ้าเก็บ UUID (36 ตัวอักษร + comma คั่น) ตรงๆ จะรองรับได้แค่
+// ราว 100 ข้อเท่านั้น ส่วนการเข้ารหัสเป็น bitmask แบบ hex (4 บิต/ตัวอักษร) รองรับได้หลักพันข้อสบายๆ
+// ภายในเพดานเดียวกัน — ข้อควรระวัง: index อ้างอิงตามลำดับการ sort ตอน generate เท่านั้น ถ้าครูแก้ไข/
+// เพิ่ม/ลบ/สลับลำดับคำถามแล้ว regenerate แพ็กเกจใหม่ ข้อมูล suspend_data เก่าที่ค้างใน LMS (ของ
+// ผู้เรียนที่เคยเริ่มเรียนด้วยแพ็กเกจรุ่นก่อน) จะอ้างอิง index ผิดข้อไปทันที — ยอมรับความเสี่ยงนี้ตาม
+// ที่ระบุไว้ใน task card เพราะเป็นทางเดียวที่จะพอเก็บได้ในเพดาน 4096 ตัวอักษร
+function encodeAnsweredBitmask() {
+  var indexMap = getQuizIndexMap();
+  var total = LESSON_DATA.quizzes.length;
+  var bits = [];
+  for (var i = 0; i < total; i++) bits.push(0);
+  Object.keys(answeredQuestionIds).forEach(function (id) {
+    if (!answeredQuestionIds[id]) return;
+    var idx = indexMap[id];
+    if (idx !== undefined) bits[idx] = 1;
+  });
+  var hex = "";
+  for (var i2 = 0; i2 < total; i2 += 4) {
+    var nibble = (bits[i2] || 0) * 8 + (bits[i2 + 1] || 0) * 4 + (bits[i2 + 2] || 0) * 2 + (bits[i2 + 3] || 0);
+    hex += nibble.toString(16);
+  }
+  return hex;
+}
+
+function saveAnsweredToSuspendData() {
+  ScormAPI.setValue("cmi.suspend_data", encodeAnsweredBitmask());
+}
+
+function loadAnsweredFromSuspendData() {
+  var raw = ScormAPI.getValue("cmi.suspend_data");
+  if (!raw) return;
+  for (var i = 0; i < LESSON_DATA.quizzes.length; i++) {
+    var charIndex = Math.floor(i / 4);
+    var hexChar = raw.charAt(charIndex);
+    if (!hexChar) break;
+    var nibble = parseInt(hexChar, 16);
+    if (isNaN(nibble)) continue;
+    var bitPos = 3 - (i % 4);
+    var bit = (nibble >> bitPos) & 1;
+    if (bit) answeredQuestionIds[LESSON_DATA.quizzes[i].id] = true;
+  }
 }
 
 function findNextUnansweredAt(currentTime) {
@@ -205,45 +281,98 @@ function getMaxAllowedSeekTime() {
   return max;
 }
 
+// [งานข้อ 18] เดิม renderLesson() เอา LESSON_DATA.contentHtml ใส่ innerHTML ตรงๆ โดยไม่กรองอะไรเลย
+// ตรวจสอบต้นทาง (lib/quiz/dispatcher.ts, lib/quiz/submit-*-answer.ts, และ save path ของ content_html
+// ในตัวแก้ไขบทเรียนฝั่งครู) แล้วไม่พบว่ามีการ sanitize HTML ตอนบันทึกที่จุดใดเลย — content_html เก็บ
+// HTML ดิบจาก rich text editor ของครูตรงๆ ถ้าบัญชีครูถูกขโมย/ครูวางโค้ดที่แฝง <script>/<iframe>/
+// onerror= มาโดยไม่รู้ตัว (เช่น copy-paste จากเว็บอื่น) โค้ดนั้นจะถูก execute ทันทีตอนนักเรียนเปิดบทเรียน
+// เพราะแพ็กเกจ SCORM เป็นไฟล์ static ที่โหลดจาก R2 ตรงๆ ไม่มี CSP ของแอปหลักมาช่วยกันอีกชั้น จึง sanitize
+// ที่จุด render นี้เอง (defense-in-depth — ไม่พึ่งพาว่าต้นทางจะกรองให้ เพราะเป็นจุดสุดท้ายก่อน innerHTML
+// จริง และไม่ต้องพึ่ง library ภายนอกเพราะแพ็กเกจนี้เป็นไฟล์ static ที่รันเดี่ยวๆ ไม่มี bundler ตอนรันจริง)
+function sanitizeLessonHtml(html) {
+  if (!html) return "";
+
+  var ALLOWED_TAGS = {
+    P: 1, BR: 1, STRONG: 1, B: 1, EM: 1, I: 1, U: 1, S: 1, SPAN: 1, DIV: 1,
+    H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, UL: 1, OL: 1, LI: 1,
+    A: 1, IMG: 1, TABLE: 1, THEAD: 1, TBODY: 1, TR: 1, TD: 1, TH: 1,
+    BLOCKQUOTE: 1, CODE: 1, PRE: 1, HR: 1, SUB: 1, SUP: 1, MARK: 1,
+  };
+  var ALLOWED_ATTRS = {
+    A: ["href", "title"],
+    IMG: ["src", "alt", "width", "height", "title"],
+    "*": ["class"],
+  };
+
+  function isSafeUrl(value, forImage) {
+    if (!value) return false;
+    var v = String(value).trim().toLowerCase();
+    if (v.indexOf("javascript:") === 0) return false;
+    if (v.indexOf("vbscript:") === 0) return false;
+    if (v.indexOf("data:") === 0) {
+      // data: URL อนุญาตเฉพาะรูปภาพเท่านั้น (กัน data:text/html ที่รันโค้ดได้)
+      return !!forImage && v.indexOf("data:image/") === 0;
+    }
+    return true;
+  }
+
+  function cleanNode(node) {
+    var children = Array.prototype.slice.call(node.childNodes);
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
+      if (child.nodeType === 1) {
+        var tag = child.tagName;
+        if (!ALLOWED_TAGS[tag]) {
+          // แท็กนอก allowlist (script, iframe, style, object, embed, form, link, meta, svg ฯลฯ) —
+          // ลบทั้งแท็กและเนื้อหาข้างในทิ้งไปเลย ไม่ใช่แค่แกะแท็กออกแล้วเหลือเนื้อหาไว้
+          child.parentNode.removeChild(child);
+          continue;
+        }
+        // ลบ attribute ทุกตัวที่ไม่อยู่ใน allowlist ของแท็กนั้น (กัน onerror=/onclick=/style=/srcdoc= ฯลฯ)
+        var attrs = Array.prototype.slice.call(child.attributes);
+        var allowedForTag = (ALLOWED_ATTRS[tag] || []).concat(ALLOWED_ATTRS["*"]);
+        for (var j = 0; j < attrs.length; j++) {
+          var attrName = attrs[j].name.toLowerCase();
+          if (allowedForTag.indexOf(attrName) === -1) {
+            child.removeAttribute(attrs[j].name);
+            continue;
+          }
+          if ((tag === "A" && attrName === "href") || (tag === "IMG" && attrName === "src")) {
+            if (!isSafeUrl(attrs[j].value, tag === "IMG")) {
+              child.removeAttribute(attrs[j].name);
+            }
+          }
+        }
+        if (tag === "A") {
+          // กัน reverse tabnabbing จากลิงก์ที่เปิดแท็บใหม่
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener noreferrer nofollow");
+        }
+        cleanNode(child);
+      } else if (child.nodeType === 8) {
+        // ลบ HTML comment ทิ้ง (กันเทคนิคซ่อนโค้ดในคอมเมนต์)
+        child.parentNode.removeChild(child);
+      }
+      // nodeType 3 (text node) ปล่อยผ่านตามปกติ — DOMParser ไม่ execute สคริปต์ระหว่าง parse อยู่แล้ว
+    }
+  }
+
+  try {
+    var doc = new DOMParser().parseFromString(String(html), "text/html");
+    cleanNode(doc.body);
+    return doc.body.innerHTML;
+  } catch (e) {
+    console.error("[sanitizeLessonHtml] parse failed:", e);
+    return "";
+  }
+}
+
 function renderLesson() {
   document.getElementById("lesson-title").textContent = LESSON_DATA.title;
-  document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
+  document.getElementById("lesson-content").innerHTML = sanitizeLessonHtml(LESSON_DATA.contentHtml);
 }
 
 /* ---------------- Quiz modal (เหมือนเดิม) ---------------- */
-
-// function openQuizModal(question) {
-//   pendingQuestion = question;
-//   var overlay = document.getElementById("quiz-overlay");
-//   var body = document.getElementById("quiz-modal-body");
-//   body.innerHTML = "";
-
-//   var title = document.createElement("p");
-//   title.className = "quiz-modal-question";
-//   title.textContent = question.questionText;
-//   body.appendChild(title);
-
-//   var choicesWrap = document.createElement("div");
-//   choicesWrap.className = "quiz-modal-choices";
-
-//   question.choices.forEach(function (choiceText, idx) {
-//     var btn = document.createElement("button");
-//     btn.type = "button";
-//     btn.className = "quiz-modal-choice-btn";
-//     btn.textContent = choiceText;
-//     btn.addEventListener("click", function () { submitAnswer(question, idx, choicesWrap); });
-//     choicesWrap.appendChild(btn);
-//   });
-
-//   body.appendChild(choicesWrap);
-
-//   var feedback = document.createElement("div");
-//   feedback.id = "quiz-modal-feedback";
-//   feedback.className = "quiz-modal-feedback";
-//   body.appendChild(feedback);
-
-//   overlay.classList.add("open");
-// }
 function openQuizModal(question) { //เปิดคำถามใน modal
   pendingQuestion = question;
 
@@ -260,7 +389,22 @@ function openQuizModal(question) { //เปิดคำถามใน modal
         renderQuizModalContent(question);
       })
       .catch(function () {
-        loadingBody.innerHTML = '<p class="quiz-modal-error">โหลดคำถามไม่สำเร็จ ลองใหม่อีกครั้ง</p>';
+        // [งานข้อ 14] เดิมมีแค่ข้อความ ไม่มีปุ่มให้กด "ลองใหม่" จริงๆ สักปุ่ม (ข้อความบอกให้ลองใหม่
+        // แต่กดอะไรไม่ได้เลยนอกจากปุ่มปิดที่เพิ่งเพิ่มด้านบน) — เพิ่มปุ่มลองโหลดคำถามเดิมซ้ำจริงๆ
+        loadingBody.innerHTML = "";
+        var errorMsg = document.createElement("p");
+        errorMsg.className = "quiz-modal-error";
+        errorMsg.textContent = "โหลดคำถามไม่สำเร็จ";
+        loadingBody.appendChild(errorMsg);
+        var retryLoadBtn = document.createElement("button");
+        retryLoadBtn.type = "button";
+        retryLoadBtn.className = "quiz-modal-continue-btn";
+        retryLoadBtn.textContent = "ลองใหม่อีกครั้ง";
+        retryLoadBtn.addEventListener("click", function () {
+          question.questionText = null;
+          openQuizModal(question);
+        });
+        loadingBody.appendChild(retryLoadBtn);
       });
     return;
   }
@@ -309,8 +453,30 @@ function submitAnswer(question, choiceIndex, choicesWrap) {
     body: JSON.stringify({ questionId: question.id, selectedChoiceIndex: choiceIndex }),
   })
     .then(function (result) {
+      // [งานข้อ 11] นับ/เขียน CMI เฉพาะครั้งแรกที่ตอบข้อนี้จริงๆ — กันนับซ้ำถ้าเผลอกดตอบซ้ำ
+      // (video_quiz_attempts ก็ upsert คีย์เดียวกันนี้ ไม่สร้างแถวซ้ำเหมือนกัน)
+      var isNewAnswer = !answeredQuestionIds[question.id];
+
       answeredQuestionIds[question.id] = true;
       updateMarkerAnswered(question.id);
+
+      if (isNewAnswer) {
+        quizSummary.total++;
+        if (result.isCorrect) quizSummary.correct++;
+
+        // cmi.interactions.n.* — บันทึกคู่ขนานทีละข้อ (interaction แยกจาก objective รวม)
+        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".id", String(question.id));
+        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".type", "choice");
+        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".student_response", String(choiceIndex));
+        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".result", result.isCorrect ? "correct" : "wrong");
+        interactionIndex++;
+
+        reportQuizSummaryToCmi();
+        // [งานข้อ 21] บันทึกชุดข้อที่ตอบแล้วลง cmi.suspend_data คู่ขนานไปกับ REST — commit
+        // รวมไปกับ setValue อื่นๆ ข้างบนในจังหวะเดียวกันเลย ไม่ยิง commit แยกเพิ่ม
+        saveAnsweredToSuspendData();
+        ScormAPI.commit();
+      }
 
       var chosenBtn = choicesWrap.children[choiceIndex];
       chosenBtn.classList.add(result.isCorrect ? "correct" : "incorrect");
@@ -560,17 +726,37 @@ function attachVideoBehavior(video) {
         if (Math.abs(video.currentTime - lastSavedPosition) >= 1) {
           lastSavedPosition = video.currentTime;
           savePosition(video.currentTime);
+          // [งานข้อ 20] เดิม savePosition ยิง fetch ของตัวเองแยกจาก CMI เลยไม่ต้อง commit ตรงนี้
+          // ตอนนี้ savePosition แค่ setValue เข้า CMI เฉยๆ ต้อง commit เองถึงจะขึ้นเซิร์ฟเวอร์จริง
+          // (เผื่อ browser/แท็บถูกปิดกะทันหันโดยไม่ทัน beforeunload)
+          ScormAPI.commit();
         }
       }, 10000);
     }
   });
 
+  // [งานข้อ 19] เดิม savePositionTimer ที่ตั้งด้วย setInterval ตอน "play" ไม่เคยถูก clearInterval
+  // เลยสักที่ในไฟล์นี้ — ต่อให้วิดีโอ pause/เล่นจบ/ผู้เรียนออกจากหน้าไปแล้ว interval ก็ยังนับต่อ
+  // ยิง savePosition() ทุก 10 วิไปเรื่อยๆ (เสียทรัพยากรเปล่าๆ) และที่ร้ายกว่านั้นคือถ้าผู้เรียนกด
+  // เล่นซ้ำ (play ครั้งที่ 2 ขึ้นไป) เงื่อนไข "if (!savePositionTimer)" จะเช็คไม่ทันเพราะตัวแปรยังไม่ถูก
+  // เคลียร์เป็น null เลย ทำให้บางเคสอาจไม่ตั้ง timer ใหม่ให้ถูกต้อง จึงต้อง clearInterval แล้ว set
+  // กลับเป็น null ทุกจุดที่วิดีโอหยุดนับความคืบหน้า (pause/ended/beforeunload) ให้ครบ
+  function stopSavePositionTimer() {
+    if (savePositionTimer) {
+      clearInterval(savePositionTimer);
+      savePositionTimer = null;
+    }
+  }
+
   video.addEventListener("pause", function () {
+    stopSavePositionTimer();
     lastSavedPosition = video.currentTime;
     savePosition(video.currentTime);
+    ScormAPI.commit();
   });
 
   video.addEventListener("ended", function () {
+    stopSavePositionTimer();
     lastSavedPosition = video.currentTime;
     savePosition(video.currentTime);
     ScormAPI.setValue("cmi.core.lesson_status", "completed");
@@ -578,7 +764,12 @@ function attachVideoBehavior(video) {
   });
 
   window.addEventListener("beforeunload", function () {
+    stopSavePositionTimer();
     savePosition(video.currentTime);
+    // [งานข้อ 22] ต้อง setValue ทั้ง session_time และ exit ก่อน commit/LMSFinish เสมอ — LMSFinish
+    // ไม่รับประกันว่าจะ commit ค่าที่ setValue ไว้ก่อนหน้าให้อัตโนมัติตามสเปก จึง commit เองให้ชัดเจน
+    ScormAPI.setValue("cmi.core.session_time", formatSessionTime());
+    ScormAPI.setValue("cmi.core.exit", determineExitValue());
     ScormAPI.commit();
     ScormAPI.terminate();
   });
@@ -586,18 +777,56 @@ function attachVideoBehavior(video) {
 
 window.addEventListener("load", function () {
   ScormAPI.initialize();
-  ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
+  // [แก้บั๊กข้อ 12] เดิมโค้ดตรงนี้ setValue("incomplete") แบบไม่มีเงื่อนไขทุกครั้งที่โหลด SCO —
+  // ทับสถานะ "completed"/"passed" ที่เพิ่งถูก loadFromJSON คืนกลับมาจากฝั่ง page.tsx ทันที
+  // ต้องเช็คก่อนว่ามีสถานะเดิมอยู่แล้วหรือยัง (ไม่ใช่ "not attempted"/ว่างเปล่า) ถ้ามีแล้วห้ามทับ
+  var existingStatus = ScormAPI.getValue("cmi.core.lesson_status");
+  if (!existingStatus || existingStatus === "not attempted") {
+    ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
+  }
   renderLesson();
+
+  // [งานข้อ 14] ผูกปุ่มปิด modal ควิซตรงนี้ครั้งเดียวตอนโหลดหน้า — ใช้ closeQuizModal ตัวเดียวกับ
+  // ปุ่ม "เรียนต่อ" (เคลียร์ pendingQuestion + สั่งวิดีโอเล่นต่อ) กดปิดได้เสมอไม่ว่า modal จะค้าง
+  // อยู่ในสถานะไหน (กำลังโหลด/โหลดพลาด/กำลังตอบ/ตอบเสร็จแล้ว)
+  var quizModalCloseBtn = document.getElementById("quiz-modal-close-btn");
+  if (quizModalCloseBtn) quizModalCloseBtn.addEventListener("click", closeQuizModal);
 
   var video = document.getElementById("lesson-video");
   video.src = LESSON_DATA.videoUrl;
   setupCustomControls(video);
 
-  Promise.all([loadInitialAttempts(), loadResumePosition()]).then(function (results) {
-    var resumeSeconds = results[1];
+  // [งานข้อ 20] resumeSeconds อ่านจาก CMI แบบ sync ได้เลยตอนนี้ (ไม่ต้อง fetch แยก) เพราะ
+  // cmi.core.lesson_location ถูก loadFromJSON เข้า API ไปแล้วตั้งแต่ก่อน SCO นี้ initialize —
+  // เหลือแค่รอ loadInitialAttempts() (ยังต้อง fetch จริงจาก video-quiz-attempts) ก่อนเดินหน้าต่อ
+  var resumeSeconds = loadResumePosition();
+
+  // [งานข้อ 21] อ่านชุดข้อที่ตอบแล้วจาก cmi.suspend_data แบบ sync ก่อนเลย (เหมือน loadResumePosition
+  // ด้านบน) เพื่อให้ findNextUnansweredAt/getMaxAllowedSeekTime/renderProgressMarkers gate/วาดจุดถูก
+  // ตั้งแต่ก่อน loadInitialAttempts() (REST) จะ resolve ด้วยซ้ำ — ทำให้บทเรียนทำงานถูกต้องได้แม้ไม่มี
+  // network เลยหรือถูกเปิดใน LMS ภายนอกที่เรียก endpoint ของเราไม่ได้ (ดูคอมเมนต์เต็มที่นิยาม
+  // ฟังก์ชันนี้ด้านบน) — loadInitialAttempts() ด้านล่างยังคงเรียกอยู่เหมือนเดิมเพื่อรวมสถิติ
+  // correct/total มาเขียน objectives.0 (ต้องอาศัย isCorrect ที่มีแค่ใน DB เท่านั้น) และเผื่อ merge
+  // ชุดคำตอบที่ suspend_data อาจไม่มี (เช่นเบราว์เซอร์/LMS เดิมไม่เคยรองรับ suspend_data มาก่อน)
+  loadAnsweredFromSuspendData();
+
+  loadInitialAttempts().then(function () {
+    // [งานข้อ 15] setupCustomControls ผูก renderProgressMarkers ไว้กับ "loadedmetadata" ซึ่งมัก
+    // ยิงเสร็จไปแล้วก่อนที่ loadInitialAttempts() (ต้องรอ fetch จริง) จะ resolve — จุดควิซที่เคย
+    // ตอบไปแล้วในรอบก่อนจึงถูกวาดเป็น "ยังไม่ตอบ" (answeredQuestionIds ยังว่างอยู่ตอนวาดรอบแรก)
+    // ต้องสั่งวาดจุดซ้ำอีกทีตรงนี้ หลัง answeredQuestionIds มีข้อมูลครบแล้วจริงๆ — renderProgressMarkers
+    // เองมี guard "ถ้ายังไม่รู้ duration ก็ข้าม" อยู่แล้ว จะเรียกซ้ำตอนนี้อย่างปลอดภัยไม่ว่า metadata
+    // จะโหลดมาก่อนหรือหลัง loadInitialAttempts() ก็ตาม
+    renderProgressMarkers(video);
 
     function proceedAfterMetadata() {
-      if (resumeSeconds > 5 && resumeSeconds < video.duration - 2) {
+      // [บั๊กที่เจอตอนไล่ตรวจข้อ 20] เดิมเช็คแค่ resumeSeconds (จาก cmi.core.lesson_location)
+      // อย่างเดียว ไม่เคยเช็ค cmi.core.entry เลย — ถ้ามีค่า location เก่าค้างอยู่ใน cmi_data
+      // (เช่นเคยดูไปถึงวินาทีที่ 18 ในรอบก่อน แต่หลังจากนั้นสถานะถูกล้าง/reset จน entry
+      // กลายเป็น "ab-initio" แล้วจริง) popup ก็ยังเด้งถามอยู่ดี ทั้งที่ตามสเปก SCORM ต้อง resume
+      // เฉพาะตอน entry === "resume" เท่านั้น — เพิ่มเช็คนี้เป็นเงื่อนไขร่วม
+      var entryValue = ScormAPI.getValue("cmi.core.entry");
+      if (entryValue === "resume" && resumeSeconds > 5 && resumeSeconds < video.duration - 2) {
         showResumePrompt(video, resumeSeconds).then(function (seekTo) {
           if (seekTo > 0) video.currentTime = seekTo;
           attachVideoBehavior(video);
@@ -607,8 +836,8 @@ window.addEventListener("load", function () {
       }
     }
 
-    // readyState >= 1 (HAVE_METADATA) แปลว่า loadedmetadata อาจยิงไปแล้วก่อนที่ Promise.all
-    // (ซึ่งต้องรอ network 2 ตัว) จะ resolve เสร็จ — ถ้าแนบ listener ตอนนี้จะไม่มีวันถูกเรียก
+    // readyState >= 1 (HAVE_METADATA) แปลว่า loadedmetadata อาจยิงไปแล้วก่อนที่ loadInitialAttempts()
+    // (ซึ่งต้องรอ network) จะ resolve เสร็จ — ถ้าแนบ listener ตอนนี้จะไม่มีวันถูกเรียก
     // เช็ค readyState ก่อนเพื่อกัน race condition นี้
     if (video.readyState >= 1) {
       proceedAfterMetadata();
@@ -619,36 +848,6 @@ window.addEventListener("load", function () {
 });
 `;
 }
-
-// const LESSON_HTML = `<!DOCTYPE html>
-// <html lang="th">
-// <head>
-//   <meta charset="UTF-8" />
-//   <title>Lesson</title>
-//   <link rel="preconnect" href="https://fonts.googleapis.com" />
-//   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-//   <link
-//     href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap"
-//     rel="stylesheet"
-//   />
-//   <link rel="stylesheet" href="style.css" />
-// </head>
-// <body>
-//   <div class="lesson-wrap">
-//     <header class="lesson-header">
-//       <h1 id="lesson-title"></h1>
-//     </header>
-//     <div class="video-wrap">
-//       <video id="lesson-video" controls></video>
-//     </div>
-//     <div id="lesson-content" class="lesson-content"></div>
-//   </div>
-//   <script src="scorm-api.js"></script>
-//   <script src="lesson-player.js"></script>
-// </body>
-// </html>`;
-
-//สร้างตัวเล่นวิดิโอของบทเรียน 
 const LESSON_HTML = `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -718,8 +917,12 @@ const LESSON_HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Quiz modal -->
+  <!-- [งานข้อ 14] เดิม modal นี้ไม่มีปุ่มปิดเลย ถ้าโหลดคำถามสุ่มพลาด (network hiccup) ผู้เรียนจะติด
+       อยู่ตรงนี้ถาวร วิดีโอ pause ค้าง ไม่มีทางออกนอกจาก refresh หน้าทั้งหน้า — เพิ่มปุ่ม × ที่กด
+       ปิดได้เสมอไม่ว่าจะอยู่สถานะไหน (เรียก closeQuizModal ตัวเดียวกับปุ่ม "เรียนต่อ") -->
   <div id="quiz-overlay" class="quiz-overlay">
     <div class="quiz-modal">
+      <button id="quiz-modal-close-btn" type="button" class="quiz-modal-close-btn" aria-label="ปิด">×</button>
       <div id="quiz-modal-body"></div>
     </div>
   </div>
@@ -737,182 +940,6 @@ const LESSON_HTML = `<!DOCTYPE html>
 
   <script src="scorm-api.js"></script>
   <script src="lesson-player.js"></script>
-</body>
-</html>`;
-
-// ============================================================
-// QUIZ SCO (แบบทดสอบอย่างเดียว) — แยกไฟล์ต่างหาก
-// ============================================================
-
-// function buildQuizPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
-//   const quizData = {
-//     title: draft.lessons.title,
-//     questions: questions.map((q) => ({
-//       questionText: q.question_text,
-//       choices: q.quiz_choices
-//         .sort((a, b) => a.order_index - b.order_index)
-//         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
-//     })),
-//   };
-function buildQuizPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
-  const quizData = {
-    lessonId: draft.lessons.id,
-    title: draft.lessons.title,
-    questions: questions.map((q) => ({
-      id: q.id,
-      questionText: q.question_text,
-      choices: q.quiz_choices
-        .sort((a, b) => a.order_index - b.order_index)
-        .map((c) => ({ text: c.choice_text })),
-    })),
-  };
-  return `var QUIZ_DATA = ${JSON.stringify(quizData)};
-
-function renderQuiz() {
-  var container = document.getElementById("quiz-container");
-  container.innerHTML = "";
-
-  QUIZ_DATA.questions.forEach(function (q, qIndex) {
-    var qDiv = document.createElement("div");
-    qDiv.className = "quiz-question";
-
-    var qTitle = document.createElement("p");
-    qTitle.className = "quiz-question-text";
-    qTitle.textContent = (qIndex + 1) + ". " + q.questionText;
-    qDiv.appendChild(qTitle);
-
-    q.choices.forEach(function (c, cIndex) {
-      var label = document.createElement("label");
-      label.className = "quiz-choice";
-
-      var input = document.createElement("input");
-      input.type = "radio";
-      input.name = "question-" + qIndex;
-      input.value = cIndex;
-
-      label.appendChild(input);
-      label.appendChild(document.createTextNode(" " + c.text));
-      qDiv.appendChild(label);
-    });
-
-    container.appendChild(qDiv);
-  });
-}
-
-function submitQuiz() {
-  var answers = [];
-  var allAnswered = true;
-  QUIZ_DATA.questions.forEach(function (q, qIndex) {
-    var selected = document.querySelector('input[name="question-' + qIndex + '"]:checked');
-    if (!selected) allAnswered = false;
-    else answers.push({ questionId: q.id, selectedChoiceIndex: Number(selected.value) });
-  });
-  var resultBox = document.getElementById("quiz-result");
-  var submitButton = document.getElementById("submit-quiz-btn");
-  if (!allAnswered) {
-    resultBox.textContent = "กรุณาตอบคำถามให้ครบทุกข้อก่อนส่งคำตอบ";
-    return;
-  }
-
-  submitButton.disabled = true;
-  resultBox.textContent = "กำลังตรวจคำตอบ...";
-  fetch("/api/lessons/" + QUIZ_DATA.lessonId + "/final-quiz", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers: answers })
-  })
-    .then(function (response) {
-      return response.json().then(function (data) {
-        if (!response.ok) throw new Error(data.error || "ส่งคำตอบไม่สำเร็จ");
-        return data;
-      });
-    })
-    .then(function (result) {
-      result.details.forEach(function (detail, qIndex) {
-        var qDiv = document.querySelectorAll(".quiz-question")[qIndex];
-        if (!qDiv) return;
-        var labels = qDiv.querySelectorAll(".quiz-choice");
-        labels.forEach(function (label, choiceIndex) {
-          var input = label.querySelector("input");
-          input.disabled = true;
-          if (choiceIndex === detail.correctChoiceIndex) label.classList.add("choice-correct");
-          else if (input.checked) label.classList.add("choice-incorrect");
-        });
-        var feedback = document.createElement("div");
-        feedback.className = "quiz-question-feedback " + (detail.isCorrect ? "is-correct" : "is-incorrect");
-        var resultLine = document.createElement("p");
-        resultLine.className = "quiz-question-result-text";
-        resultLine.textContent = detail.isCorrect ? "ตอบถูกต้อง" : "ตอบไม่ถูกต้อง";
-        feedback.appendChild(resultLine);
-        if (detail.explanation) {
-          var explanationText = document.createElement("p");
-          explanationText.className = "quiz-question-explanation";
-          explanationText.textContent = detail.explanation;
-          feedback.appendChild(explanationText);
-        }
-        qDiv.appendChild(feedback);
-      });
-
-      resultBox.textContent = (result.passed ? "ผ่านเกณฑ์" : "ยังไม่ผ่านเกณฑ์") +
-        " — คะแนน " + result.score_percentage + "% / เกณฑ์ " + result.pass_percentage + "%";
-      if (result.certificate_download_url) {
-        var downloadLink = document.createElement("a");
-        downloadLink.href = result.certificate_download_url;
-        downloadLink.textContent = "ดาวน์โหลด Certificate";
-        downloadLink.target = "_blank";
-        downloadLink.rel = "noopener";
-        downloadLink.style.cssText = "display:inline-block;margin-left:12px;color:#FF5A3C;font-weight:700";
-        resultBox.appendChild(downloadLink);
-      }
-      ScormAPI.setValue("cmi.core.score.raw", String(result.score_percentage));
-      ScormAPI.setValue("cmi.core.lesson_status", result.passed ? "passed" : "failed");
-      ScormAPI.commit();
-    })
-    .catch(function (error) {
-      resultBox.textContent = error.message || "ส่งคำตอบไม่สำเร็จ กรุณาลองใหม่";
-      submitButton.disabled = false;
-    });
-}
-
-window.addEventListener("load", function () {
-  ScormAPI.initialize();
-  ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
-  document.getElementById("quiz-title").textContent = "แบบทดสอบหลังเรียน: " + QUIZ_DATA.title;
-  renderQuiz();
-  document.getElementById("submit-quiz-btn").addEventListener("click", submitQuiz);
-});
-
-window.addEventListener("beforeunload", function () {
-  ScormAPI.commit();
-  ScormAPI.terminate();
-});
-`;
-}
-
-const QUIZ_HTML = `<!DOCTYPE html>
-<html lang="th">
-<head>
-  <meta charset="UTF-8" />
-  <title>Quiz</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
-  />
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <div class="lesson-wrap">
-    <div class="quiz-section">
-      <h2 id="quiz-title" class="quiz-heading">แบบทดสอบหลังเรียน</h2>
-      <div id="quiz-container"></div>
-      <button id="submit-quiz-btn">ส่งคำตอบ</button>
-      <p id="quiz-result" class="quiz-result"></p>
-    </div>
-  </div>
-  <script src="scorm-api.js"></script>
-  <script src="quiz-player.js"></script>
 </body>
 </html>`;
 
@@ -1160,7 +1187,25 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   width: 100%;
   padding: 26px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+  position: relative;
 }
+
+/* [งานข้อ 14] ปุ่มปิด — วางมุมขวาบนของ modal เสมอ ไม่ว่า body ข้างในจะเป็นสถานะไหน */
+.quiz-modal-close-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #94A3B8;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.quiz-modal-close-btn:hover { background: #F1F5F9; color: #334155; }
 
 .quiz-modal-question { font-weight: 700; font-size: 16px; margin: 0 0 16px; color: #0F1B3D; }
 .quiz-modal-choices { display: flex; flex-direction: column; gap: 8px; }
@@ -1266,17 +1311,22 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 // Manifest: 2 items / 2 resources (lesson.html, quiz.html)
 // ============================================================
 //สร้างไฟล์ imsmanifest.xml
-function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
+function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean, masteryScore: number): string {
   const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;//สร้าง unique ID ของ manifest
   const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  // [งานข้อ 09] <adlcp:masteryscore> เป็น child ของ <item> ตามสเปก SCORM 1.2 CAM (ไม่ใช่ของ
+  // <resource>) — ค่ามาจาก courses.certificate_pass_percentage เดียวกับที่ตัดสินใบรับรอง
+  // ให้ SCO ที่ตรวจคะแนนตัวเองอ่านค่านี้จาก manifest แล้วเทียบกับ cmi.core.score.raw ได้เอง
   const lessonItem = `<item identifier="ITEM-LESSON" identifierref="RES-LESSON">
         <title>${escapedTitle}</title>
+        <adlcp:masteryscore>${masteryScore}</adlcp:masteryscore>
       </item>`;
 
   const quizItem = hasQuiz
     ? `<item identifier="ITEM-QUIZ" identifierref="RES-QUIZ">
         <title>แบบทดสอบหลังเรียน</title>
+        <adlcp:masteryscore>${masteryScore}</adlcp:masteryscore>
       </item>`
     : "";
 
@@ -1328,7 +1378,7 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean): string {
 // เพิ่ม field "type" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
 // ============================================================
 
-function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) { //สร้าง json เก็บลง db
+function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean, masteryScore: number) { //สร้าง json เก็บลง db
   const items: Array<{
     identifier: string;
     title: string;
@@ -1358,6 +1408,9 @@ function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean) { //สร�
   return {
     organizationTitle: draft.lessons.title,
     items,
+    // [งานข้อ 09] เก็บไว้ให้ player อ่านต่อ (api/lessons/[lessonId]/scorm-info ส่ง manifest นี้
+    // ผ่านตรงๆ) แล้วป้อนเป็น cmi.student_data.mastery_score ก่อน SCO initialize — ดู page.tsx
+    masteryScore,
   };
 }
 
@@ -1389,21 +1442,25 @@ export async function generateScormPackage(
     return { error: "Draft not found" };
   }
 
-  // // 2. ดึงข้อมูลแบบทดสอบ
-  // const { data: questions, error: questionsError } = await supabase
-  //   .from("quiz_questions")
-  //   .select("id, question_text, order_index, quiz_choices(choice_text, is_correct, order_index)")
-  //   .eq("lesson_draft_id", draftId)
-  //   .order("order_index", { ascending: true });
+  // [งานข้อ 13] เดิม select "status" มาจาก lesson_drafts แต่ไม่เคยเช็คเลยสักที่ในฟังก์ชันนี้ —
+  // ปล่อยให้ draft ที่ยังไม่ผ่านการอนุมัติ (status "draft" หรือ "pending_review") ถูก generate
+  // เป็นแพ็กเกจ SCORM จริงได้ตามปกติ และไม่เช็ค video_url เลยด้วย ถ้าว่าง video.src จะกลายเป็น ""
+  // ทำให้ loadedmetadata ไม่มีวันยิง -> attachVideoBehavior ไม่ถูกเรียก -> ไม่มีควิซขึ้น ไม่มีการ
+  // บันทึกความคืบหน้าใดๆ -> ผู้เรียนจบบทเรียนนั้นไม่ได้เลย แต่ท้ายฟังก์ชันนี้ (ดูด้านล่าง) ยังตั้ง
+  // is_published: true ให้เหมือนบทเรียนพร้อมใช้งานแล้วอยู่ดี ต้องกันตั้งแต่ต้นทางก่อนจะเสียเวลา
+  // generate/upload ไฟล์จริงไปเปล่าๆ (เช็คค่าจริงจาก DB — 'approved' คือสถานะเดียวที่มีทุกแถวใน
+  // ข้อมูลจริงตอนนี้ที่มี video_url ครบ ส่วน 'draft'/'pending_review' ยังไม่ผ่านการตรวจของครู)
+  if (draft.status !== "approved") {
+    return {
+      error: `บทเรียนนี้ยังไม่ได้รับการอนุมัติ (สถานะปัจจุบัน: "${draft.status}") ต้องอนุมัติ (approved) ก่อนถึงจะสร้างแพ็กเกจ SCORM ได้`,
+    };
+  }
+  if (!draft.video_url || draft.video_url.trim() === "") {
+    return {
+      error: "บทเรียนนี้ยังไม่มีลิงก์วิดีโอ (video_url ว่าง) ต้องอัปโหลด/ใส่วิดีโอให้บทเรียนก่อนถึงจะสร้างแพ็กเกจ SCORM ได้",
+    };
+  }
 
-  // if (questionsError) {
-  //   console.error("[generateScormPackage] quiz questions fetch failed:", questionsError);
-  //   return { error: "Failed to fetch quiz data" };
-  // }
-
-  // const typedDraft = draft as unknown as LessonDraftRow;
-  // const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
-  // const hasQuiz = typedQuestions.length > 0;
   // 2. ดึงข้อมูลแบบทดสอบ (ทั้งสองประเภทมาพร้อมกัน แล้วค่อยแยกทีหลัง)
   const { data: questions, error: questionsError } = await supabase
     .from("quiz_questions")
@@ -1418,28 +1475,13 @@ export async function generateScormPackage(
     return { error: "Failed to fetch quiz data" };
   }
 
-  // const typedDraft = draft as unknown as LessonDraftRow;
-  // const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
-
-  // // ควิซแทรกกลางวิดีโอ (มี timestamp) vs ควิซท้ายบทแบบเดิม (ไม่มี timestamp)
-  // const videoQuizQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds != null);
-  // // คำถามที่ไม่มี timestamp จะถูกรวมเป็นข้อสอบหลังเรียนระดับคอร์สโดย API
-  // // ไม่สร้าง quiz SCO แยกในแต่ละบทอีก เพื่อให้มีคะแนนตัดสินใบรับรองเพียงชุดเดียว
-  // const postExamQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds == null);
-  // const hasQuiz = false;
-
-  // const courseId = typedDraft.lessons.course_id;
-
-  // const manifestXml = buildManifestXml(typedDraft, hasQuiz);
-  // const lessonPlayerJs = buildLessonPlayerJs(typedDraft, lessonId, videoQuizQuestions, typedMarkers);
-    const typedDraft = draft as unknown as LessonDraftRow;
+  const typedDraft = draft as unknown as LessonDraftRow;
   const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
 
   // ควิซแทรกกลางวิดีโอ (มี timestamp) vs ควิซท้ายบทแบบเดิม (ไม่มี timestamp)
   const videoQuizQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds != null);
   // คำถามที่ไม่มี timestamp จะถูกรวมเป็นข้อสอบหลังเรียนระดับคอร์สโดย API
   // ไม่สร้าง quiz SCO แยกในแต่ละบทอีก เพื่อให้มีคะแนนตัดสินใบรับรองเพียงชุดเดียว
-  const postExamQuestions = typedQuestions.filter((q) => q.video_timestamp_seconds == null);
   const hasQuiz = false;
 
   // ควิซแบบสุ่มจากคลัง (bank_random) — เก็บแยกจาก quiz_questions
@@ -1471,7 +1513,23 @@ export async function generateScormPackage(
 
   const courseId = typedDraft.lessons.course_id;
 
-  const manifestXml = buildManifestXml(typedDraft, hasQuiz);
+  // [งานข้อ 09] เกณฑ์ผ่าน (mastery score) ของคอร์สนี้ — ใช้ค่าเดียวกับที่ตัดสินใบรับรองจริง
+  // (courses.certificate_pass_percentage ผ่าน gradeCourseFinalExam — งานข้อ 03/05) ไม่ตั้งเกณฑ์
+  // แยกต่างหากสำหรับ SCO เพราะจะเสี่ยงไม่ตรงกับเกณฑ์ใบรับรองจริงถ้าครูแก้ค่าใดค่าหนึ่งทีหลัง
+  const { data: courseSettings, error: courseSettingsError } = await supabase
+    .from("courses")
+    .select("certificate_pass_percentage")
+    .eq("id", courseId)
+    .maybeSingle();
+  if (courseSettingsError) {
+    console.error("[generateScormPackage] fetch certificate_pass_percentage failed:", courseSettingsError);
+  }
+  const configuredMasteryScore = Number(courseSettings?.certificate_pass_percentage);
+  // ตรงกับ DEFAULT_PASS_PERCENTAGE ใน lib/courses/course-final-exam.ts — คอร์สที่ยังไม่ตั้งค่านี้
+  // (หรือ query พลาด) ควรได้ SCO ที่ใช้เกณฑ์เดียวกับที่ตัดสินใบรับรองอยู่ดี ไม่ใช่ไม่มีเกณฑ์เลย
+  const masteryScore = Number.isFinite(configuredMasteryScore) ? configuredMasteryScore : 70;
+
+  const manifestXml = buildManifestXml(typedDraft, hasQuiz, masteryScore);
   const lessonPlayerJs = buildLessonPlayerJs(
     typedDraft,
     lessonId,
@@ -1479,7 +1537,6 @@ export async function generateScormPackage(
     typedMarkers,
     typedSegments
   );
-  const quizPlayerJs = hasQuiz ? buildQuizPlayerJs(typedDraft, postExamQuestions) : null;
 
   // 3. สร้างไฟล์ ZIP ด้วย JSZip
   let zipBuffer: Buffer;
@@ -1490,11 +1547,6 @@ export async function generateScormPackage(
     zip.file("scorm-api.js", SCORM_API_JS);//ตัวเชื่อมกับ LMSตัวอื่น
     zip.file("lesson-player.js", lessonPlayerJs);//logic การเล่นวิดิโอและควิซแทรกกลางบทเรียน
     zip.file("style.css", STYLE_CSS);
-
-    if (hasQuiz && quizPlayerJs) {
-      zip.file("quiz.html", QUIZ_HTML);
-      zip.file("quiz-player.js", quizPlayerJs);
-    }
 
     zipBuffer = await zip.generateAsync({//ทำการบีบอัด ไฟล์ทั้งหมดที่ใส่ไว้ให้กลายเป็นไฟล์ zip
       type: "nodebuffer",
@@ -1517,11 +1569,57 @@ export async function generateScormPackage(
     { name: "style.css", content: STYLE_CSS, contentType: "text/css" },
   ];
 
-  if (hasQuiz && quizPlayerJs) {
-    filesToUpload.push(
-      { name: "quiz.html", content: QUIZ_HTML, contentType: "text/html" },
-      { name: "quiz-player.js", content: quizPlayerJs, contentType: "application/javascript" }
-    );
+  // [งานข้อ 17] ลบไฟล์เก่าที่ตกค้างใน R2 ก่อนอัปทับไฟล์ชุดใหม่ — เดิมไม่มีขั้นตอนนี้เลย ถ้าโครงสร้าง
+  // แพ็กเกจเปลี่ยนชื่อไฟล์ (เช่นรุ่นก่อนมี quiz.html/quiz-player.js ที่รุ่นปัจจุบันไม่ได้สร้างแล้ว)
+  // ไฟล์เก่าจะค้างอยู่ใน R2 ตลอดไป เพราะ PutObjectCommand เขียนทับเฉพาะไฟล์ที่ชื่อตรงกันเท่านั้น ไฟล์ที่
+  // manifest รุ่นปัจจุบันไม่อ้างถึงแล้วจะไม่มีวันถูกลบเอง — เปลืองพื้นที่และเสี่ยงสับสนว่าไฟล์ไหนคือของจริง
+  // จึง list ไฟล์ทั้งหมดใต้ basePath นี้ก่อน แล้วลบไฟล์ที่ "ไม่อยู่ในชุดที่กำลังจะอัปโหลดรอบนี้" ทิ้งทั้งหมด
+  // (คง package.zip ไว้ในชุด keepKeys เพราะยังอัปโหลดต่อด้านล่าง — ไม่ใช่ไฟล์เก่าที่ต้องลบ)
+  try {
+    const { ListObjectsV2Command, DeleteObjectsCommand } = await import("@aws-sdk/client-s3");
+    const keepKeys = new Set([
+      ...filesToUpload.map((file) => `${basePath}/${file.name}`),
+      `${basePath}/package.zip`,
+    ]);
+
+    let continuationToken: string | undefined;
+    const keysToDelete: string[] = [];
+    do {
+      const listResult = await r2Client.send(
+        new ListObjectsV2Command({
+          Bucket: R2_BUCKET_NAME,
+          Prefix: `${basePath}/`,
+          ContinuationToken: continuationToken,
+        })
+      );
+      for (const obj of listResult.Contents ?? []) {
+        if (obj.Key && !keepKeys.has(obj.Key)) {
+          keysToDelete.push(obj.Key);
+        }
+      }
+      continuationToken = listResult.IsTruncated ? listResult.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    if (keysToDelete.length > 0) {
+      // DeleteObjectsCommand ลบได้สูงสุด 1000 keys ต่อ request (ข้อจำกัดของ S3 API) — วนลบทีละชุด
+      for (let i = 0; i < keysToDelete.length; i += 1000) {
+        const batch = keysToDelete.slice(i, i + 1000);
+        await r2Client.send(
+          new DeleteObjectsCommand({
+            Bucket: R2_BUCKET_NAME,
+            Delete: { Objects: batch.map((Key) => ({ Key })) },
+          })
+        );
+      }
+      console.log(
+        `[generateScormPackage] ลบไฟล์เก่าที่ตกค้างใน R2 ก่อน regenerate (${keysToDelete.length} ไฟล์):`,
+        keysToDelete
+      );
+    }
+  } catch (error: unknown) {
+    // ไม่ return error ตรงนี้ — การลบไฟล์เก่าล้มเหลวไม่ควรบล็อกการสร้างแพ็กเกจใหม่ (ไฟล์เก่าที่ตกค้าง
+    // ไม่ทำให้แพ็กเกจใหม่พัง เพราะ manifest รุ่นใหม่ไม่อ้างถึงมันอยู่แล้ว) แค่ log ไว้ตรวจสอบทีหลัง
+    console.error("[generateScormPackage] Failed to clean up stale R2 files:", error);
   }
 
   try {
@@ -1580,7 +1678,7 @@ export async function generateScormPackage(
   // 6. อัปเดต lessons table ให้ player (/api/lessons/[lessonId]/scorm-info) อ่านได้ตรง
   //    entryPoint ต้องชี้ไป lesson.html (SCO แรก) ไม่ใช่ quiz.html
   //    manifest เป็น JSON ที่มี item ควิซแยกออกมา (type: "quiz") ให้ page.tsx แสดงเป็นบล็อกต่างหาก
-  const manifestJson = buildManifestJson(typedDraft, hasQuiz);
+  const manifestJson = buildManifestJson(typedDraft, hasQuiz, masteryScore);
 
   const { error: lessonUpdateError } = await supabase
     .from("lessons")
@@ -1590,6 +1688,10 @@ export async function generateScormPackage(
       scorm_version: "1.2",
       scorm_manifest: manifestJson,
       is_published: true,
+      // [งานข้อ 06] ระบุชัดว่าแพ็กเกจนี้มาจาก generator ของแพลตฟอร์มเอง (ไม่ใช่อัปโหลดของคนอื่น)
+      // ระบุตรงๆ แทนที่จะพึ่ง default ของคอลัมน์ เผื่อกรณีบทเรียนนี้เคยเป็น imported มาก่อนแล้ว
+      // ครูสร้างแพ็กเกจใหม่ทับด้วยตัว generator — ต้องสลับกลับมาเป็น generated ด้วย
+      scorm_source: "generated",
     })
     .eq("id", lessonId);
 
@@ -1601,774 +1703,3 @@ export async function generateScormPackage(
   console.log("✅ SCORM Package Generated & Uploaded Successfully!", packageUrl);
   return { packageUrl };
 }
-
-// // import type { SupabaseClient } from "@supabase/supabase-js";
-// // import { PassThrough } from "stream";
-// // import "server-only"; // ป้องกันไม่ให้โค้ดไฟล์นี้หลุดไปฝั่ง Client แน่นอน
-
-// // interface QuizChoiceRow {
-// //   choice_text: string;
-// //   is_correct: boolean;
-// //   order_index: number;
-// // }
-
-// // interface QuizQuestionRow {
-// //   id: string;
-// //   question_text: string;
-// //   order_index: number;
-// //   quiz_choices: QuizChoiceRow[];
-// // }
-
-// // interface LessonInfo {
-// //   id: string;
-// //   course_id: string;
-// //   title: string;
-// // }
-
-// // interface LessonDraftRow {
-// //   id: string;
-// //   video_url: string | null;
-// //   content_html: string | null;
-// //   status: string;
-// //   lessons: LessonInfo;
-// // }
-
-// // function buildPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
-// //   const lessonData = {
-// //     title: draft.lessons.title,
-// //     videoUrl: draft.video_url ?? "",
-// //     contentHtml: draft.content_html ?? "",
-// //     questions: questions.map((q) => ({
-// //       questionText: q.question_text,
-// //       choices: q.quiz_choices
-// //         .sort((a, b) => a.order_index - b.order_index)
-// //         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
-// //     })),
-// //   };
-
-// //   return `var LESSON_DATA = ${JSON.stringify(lessonData)};
-
-// // var quizAnswered = false;
-// // var quizScore = 0;
-
-// // function renderLesson() {
-// //   document.getElementById("lesson-title").textContent = LESSON_DATA.title;
-// //   document.getElementById("lesson-video").src = LESSON_DATA.videoUrl;
-// //   document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
-// //   renderQuiz();
-// // }
-
-// // function renderQuiz() {
-// //   var container = document.getElementById("quiz-container");
-// //   container.innerHTML = "";
-
-// //   LESSON_DATA.questions.forEach(function (q, qIndex) {
-// //     var qDiv = document.createElement("div");
-// //     qDiv.className = "quiz-question";
-
-// //     var qTitle = document.createElement("p");
-// //     qTitle.className = "quiz-question-text";
-// //     qTitle.textContent = (qIndex + 1) + ". " + q.questionText;
-// //     qDiv.appendChild(qTitle);
-
-// //     q.choices.forEach(function (c, cIndex) {
-// //       var label = document.createElement("label");
-// //       label.className = "quiz-choice";
-
-// //       var input = document.createElement("input");
-// //       input.type = "radio";
-// //       input.name = "question-" + qIndex;
-// //       input.value = cIndex;
-// //       input.dataset.correct = c.isCorrect;
-
-// //       label.appendChild(input);
-// //       label.appendChild(document.createTextNode(" " + c.text));
-// //       qDiv.appendChild(label);
-// //     });
-
-// //     container.appendChild(qDiv);
-// //   });
-// // }
-
-// // function submitQuiz() {
-// //   var total = LESSON_DATA.questions.length;
-// //   var correct = 0;
-
-// //   LESSON_DATA.questions.forEach(function (q, qIndex) {
-// //     var selected = document.querySelector('input[name="question-' + qIndex + '"]:checked');
-// //     if (selected && selected.dataset.correct === "true") {
-// //       correct++;
-// //     }
-// //   });
-
-// //   quizScore = total > 0 ? Math.round((correct / total) * 100) : 0;
-// //   quizAnswered = true;
-
-// //   document.getElementById("quiz-result").textContent =
-// //     "คุณได้คะแนน " + correct + "/" + total + " (" + quizScore + "%)";
-
-// //   ScormAPI.setValue("cmi.core.score.raw", String(quizScore));
-// //   ScormAPI.setValue("cmi.core.lesson_status", quizScore >= 60 ? "passed" : "failed");
-// //   ScormAPI.commit();
-// // }
-
-// // window.addEventListener("load", function () {
-// //   ScormAPI.initialize();
-// //   ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
-// //   renderLesson();
-// //   document.getElementById("submit-quiz-btn").addEventListener("click", submitQuiz);
-// // });
-
-// // window.addEventListener("beforeunload", function () {
-// //   ScormAPI.commit();
-// //   ScormAPI.terminate();
-// // });
-// // `;
-// // }
-
-// // function buildManifestXml(draft: LessonDraftRow): string {
-// //   const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;
-// //   const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-// //   return `<?xml version="1.0" standalone="no" ?>
-// // <manifest identifier="${identifier}" version="1"
-// //   xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
-// //   xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
-// //   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-// //   xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd
-// //                        http://www.imsglobal.org/xsd/imsmd_rootv1p2p1 imsmd_rootv1p2p1.xsd
-// //                        http://www.adlnet.org/xsd/adlcp_rootv1p2 adlcp_rootv1p2.xsd">
-// //   <metadata>
-// //     <schema>ADL SCORM</schema>
-// //     <schemaversion>1.2</schemaversion>
-// //   </metadata>
-// //   <organizations default="ORG-${draft.id}">
-// //     <organization identifier="ORG-${draft.id}">
-// //       <title>${escapedTitle}</title>
-// //       <item identifier="ITEM-${draft.id}" identifierref="RES-${draft.id}">
-// //         <title>${escapedTitle}</title>
-// //       </item>
-// //     </organization>
-// //   </organizations>
-// //   <resources>
-// //     <resource identifier="RES-${draft.id}" type="webcontent" adlcp:scormtype="sco" href="index.html">
-// //       <file href="index.html" />
-// //       <file href="scorm-api.js" />
-// //       <file href="player.js" />
-// //       <file href="style.css" />
-// //     </resource>
-// //   </resources>
-// // </manifest>`;
-// // }
-
-// // const INDEX_HTML = `<!DOCTYPE html>
-// // <html lang="th">
-// // <head>
-// //   <meta charset="UTF-8" />
-// //   <title>Lesson</title>
-// //   <link rel="stylesheet" href="style.css" />
-// // </head>
-// // <body>
-// //   <div class="lesson-wrap">
-// //     <h1 id="lesson-title"></h1>
-// //     <video id="lesson-video" controls></video>
-// //     <div id="lesson-content" class="lesson-content"></div>
-// //     <div class="quiz-section">
-// //       <h2>แบบทดสอบท้ายบท</h2>
-// //       <div id="quiz-container"></div>
-// //       <button id="submit-quiz-btn">ส่งคำตอบ</button>
-// //       <p id="quiz-result" class="quiz-result"></p>
-// //     </div>
-// //   </div>
-// //   <script src="scorm-api.js"></script>
-// //   <script src="player.js"></script>
-// // </body>
-// // </html>`;
-
-// // const SCORM_API_JS = `var ScormAPI = (function () {
-// //   var apiHandle = null;
-// //   var findAttemptLimit = 500;
-
-// //   function scanForAPI(win) {
-// //     var attempts = 0;
-// //     while (win.API == null && win.parent != null && win.parent !== win && attempts < findAttemptLimit) {
-// //       attempts++;
-// //       win = win.parent;
-// //     }
-// //     return win.API || null;
-// //   }
-
-// //   function findAPI() {
-// //     var theAPI = null;
-// //     if (window.parent != null && window.parent !== window) {
-// //       theAPI = scanForAPI(window.parent);
-// //     }
-// //     if (theAPI == null && window.opener != null) {
-// //       theAPI = scanForAPI(window.opener);
-// //     }
-// //     return theAPI;
-// //   }
-
-// //   function getAPI() {
-// //     if (apiHandle == null) apiHandle = findAPI();
-// //     return apiHandle;
-// //   }
-
-// //   function initialize() {
-// //     var api = getAPI();
-// //     if (!api) { console.warn("SCORM API not found."); return false; }
-// //     return api.LMSInitialize("") === "true";
-// //   }
-
-// //   function setValue(key, value) {
-// //     var api = getAPI();
-// //     if (!api) return false;
-// //     return api.LMSSetValue(key, value) === "true";
-// //   }
-
-// //   function getValue(key) {
-// //     var api = getAPI();
-// //     if (!api) return "";
-// //     return api.LMSGetValue(key);
-// //   }
-
-// //   function commit() {
-// //     var api = getAPI();
-// //     if (!api) return false;
-// //     return api.LMSCommit("") === "true";
-// //   }
-
-// //   function terminate() {
-// //     var api = getAPI();
-// //     if (!api) return false;
-// //     return api.LMSFinish("") === "true";
-// //   }
-
-// //   return { initialize: initialize, setValue: setValue, getValue: getValue, commit: commit, terminate: terminate };
-// // })();`;
-
-// // const STYLE_CSS = `body { font-family: -apple-system, "Segoe UI", sans-serif; background: #f7f8fa; margin: 0; color: #0f1b3d; }
-// // .lesson-wrap { max-width: 720px; margin: 0 auto; padding: 24px; }
-// // h1 { font-size: 22px; margin-bottom: 16px; }
-// // video { width: 100%; border-radius: 12px; background: #000; }
-// // .lesson-content { margin: 20px 0; line-height: 1.6; font-size: 14px; }
-// // .quiz-section { margin-top: 32px; padding: 20px; background: #fff; border-radius: 16px; }
-// // .quiz-question { margin-bottom: 20px; }
-// // .quiz-question-text { font-weight: bold; margin-bottom: 8px; }
-// // .quiz-choice { display: block; padding: 8px 0; font-size: 14px; }
-// // #submit-quiz-btn { background: #ff5a3c; color: white; border: none; padding: 12px 24px; border-radius: 999px; font-weight: bold; cursor: pointer; }
-// // .quiz-result { margin-top: 12px; font-weight: bold; }`;
-
-// // export async function generateScormPackage(
-// //   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-// //   supabase: SupabaseClient<any>,
-// //   draftId: string,
-// //   lessonId: string
-// // ): Promise<{ packageUrl: string } | { error: string }> {
-// //   // ⚡ DYNAMIC IMPORTS: โหลดเฉพาะตอนที่ฟังก์ชันถูกเรียกใช้จริงเท่านั้น
-// //  const [archiverModule, { PutObjectCommand }, { r2Client, R2_BUCKET_NAME, R2_PUBLIC_URL }] =
-// //     await Promise.all([
-// //       import("archiver"),
-// //       import("@aws-sdk/client-s3"),
-// //       import("@/lib/r2"),
-// //     ]);
-
-// //   // ใส่ (archiverModule as any) ตรงนี้เพื่อแก้ TS2339
-// //   const archiverFn = ((archiverModule as any).default || archiverModule) as unknown as (
-// //     format: string,
-// //     options?: import("archiver").ArchiverOptions
-// //   ) => import("archiver").Archiver;
-
-// //   const { data: draft, error: draftError } = await supabase
-// //     .from("lesson_drafts")
-// //     .select("id, video_url, content_html, status, lessons(id, course_id, title)")
-// //     .eq("id", draftId)
-// //     .single();
-
-// //   if (draftError || !draft || !draft.lessons) {
-// //     console.error("[generateScormPackage] draft fetch failed", draftError);
-// //     return { error: "Draft not found" };
-// //   }
-
-// //   const { data: questions, error: questionsError } = await supabase
-// //     .from("quiz_questions")
-// //     .select("id, question_text, order_index, quiz_choices(choice_text, is_correct, order_index)")
-// //     .eq("lesson_draft_id", draftId)
-// //     .order("order_index", { ascending: true });
-
-// //   if (questionsError) {
-// //     return { error: "Failed to fetch quiz data" };
-// //   }
-
-// //   const typedDraft = draft as unknown as LessonDraftRow;
-// //   const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
-
-// //   const courseId = typedDraft.lessons.course_id;
-
-// //   const manifestXml = buildManifestXml(typedDraft);
-// //   const playerJs = buildPlayerJs(typedDraft, typedQuestions);
-
-// //   const zipBuffer: Buffer = await new Promise((resolve, reject) => {
-// //     const archive = archiverFn("zip", { zlib: { level: 9 } });
-// //     const chunks: Buffer[] = [];
-// //     const passthrough = new PassThrough();
-
-// //     passthrough.on("data", (chunk) => chunks.push(chunk));
-// //     passthrough.on("end", () => resolve(Buffer.concat(chunks)));
-// //     archive.on("error", (err: Error) => reject(err));
-// //     archive.pipe(passthrough);
-// //     archive.append(manifestXml, { name: "imsmanifest.xml" });
-// //     archive.append(INDEX_HTML, { name: "index.html" });
-// //     archive.append(SCORM_API_JS, { name: "scorm-api.js" });
-// //     archive.append(playerJs, { name: "player.js" });
-// //     archive.append(STYLE_CSS, { name: "style.css" });
-// //     archive.finalize();
-// //   });
-
-// //   const key = `scorm-packages/${courseId}/${lessonId}/package.zip`;
-
-// //   try {
-// //     await r2Client.send(
-// //       new PutObjectCommand({
-// //         Bucket: R2_BUCKET_NAME,
-// //         Key: key,
-// //         Body: zipBuffer,
-// //         ContentType: "application/zip",
-// //       })
-// //     );
-// //   } catch (err) {
-// //     console.error("Failed to upload SCORM package to R2:", err);
-// //     return { error: "Failed to upload package" };
-// //   }
-
-// //   const packageUrl = `${R2_PUBLIC_URL}/${key}`;
-
-// //   const { error: insertError } = await supabase
-// //     .from("scorm_packages")
-// //     .upsert(
-// //       {
-// //         lesson_draft_id: typedDraft.id,
-// //         lesson_id: lessonId,
-// //         package_url: packageUrl,
-// //         version: "1.2",
-// //       },
-// //       { onConflict: "lesson_id" }
-// //     );
-
-// //   if (insertError) {
-// //     console.error("Failed to record SCORM package:", insertError.message);
-// //     return { error: "Failed to save package record" };
-// //   }
-
-// //   return { packageUrl };
-// // }
-
-// import type { SupabaseClient } from "@supabase/supabase-js";
-// import { PassThrough } from "stream";
-// import "server-only";
-
-// interface QuizChoiceRow {
-//   choice_text: string;
-//   is_correct: boolean;
-//   order_index: number;
-// }
-
-// interface QuizQuestionRow {
-//   id: string;
-//   question_text: string;
-//   order_index: number;
-//   quiz_choices: QuizChoiceRow[];
-// }
-
-// interface LessonInfo {
-//   id: string;
-//   course_id: string;
-//   title: string;
-// }
-
-// interface LessonDraftRow {
-//   id: string;
-//   video_url: string | null;
-//   content_html: string | null;
-//   status: string;
-//   lessons: LessonInfo;
-// }
-
-// function buildPlayerJs(draft: LessonDraftRow, questions: QuizQuestionRow[]): string {
-//   const lessonData = {
-//     title: draft.lessons.title,
-//     videoUrl: draft.video_url ?? "",
-//     contentHtml: draft.content_html ?? "",
-//     questions: questions.map((q) => ({
-//       questionText: q.question_text,
-//       choices: q.quiz_choices
-//         .sort((a, b) => a.order_index - b.order_index)
-//         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
-//     })),
-//   };
-
-//   return `var LESSON_DATA = ${JSON.stringify(lessonData)};
-
-// var quizAnswered = false;
-// var quizScore = 0;
-
-// function renderLesson() {
-//   document.getElementById("lesson-title").textContent = LESSON_DATA.title;
-//   document.getElementById("lesson-video").src = LESSON_DATA.videoUrl;
-//   document.getElementById("lesson-content").innerHTML = LESSON_DATA.contentHtml;
-//   renderQuiz();
-// }
-
-// function renderQuiz() {
-//   var container = document.getElementById("quiz-container");
-//   container.innerHTML = "";
-
-//   LESSON_DATA.questions.forEach(function (q, qIndex) {
-//     var qDiv = document.createElement("div");
-//     qDiv.className = "quiz-question";
-
-//     var qTitle = document.createElement("p");
-//     qTitle.className = "quiz-question-text";
-//     qTitle.textContent = (qIndex + 1) + ". " + q.questionText;
-//     qDiv.appendChild(qTitle);
-
-//     q.choices.forEach(function (c, cIndex) {
-//       var label = document.createElement("label");
-//       label.className = "quiz-choice";
-
-//       var input = document.createElement("input");
-//       input.type = "radio";
-//       input.name = "question-" + qIndex;
-//       input.value = cIndex;
-//       input.dataset.correct = c.isCorrect;
-
-//       label.appendChild(input);
-//       label.appendChild(document.createTextNode(" " + c.text));
-//       qDiv.appendChild(label);
-//     });
-
-//     container.appendChild(qDiv);
-//   });
-// }
-
-// function submitQuiz() {
-//   var total = LESSON_DATA.questions.length;
-//   var correct = 0;
-
-//   LESSON_DATA.questions.forEach(function (q, qIndex) {
-//     var selected = document.querySelector('input[name="question-' + qIndex + '"]:checked');
-//     if (selected && selected.dataset.correct === "true") {
-//       correct++;
-//     }
-//   });
-
-//   quizScore = total > 0 ? Math.round((correct / total) * 100) : 0;
-//   quizAnswered = true;
-
-//   document.getElementById("quiz-result").textContent =
-//     "คุณได้คะแนน " + correct + "/" + total + " (" + quizScore + "%)";
-
-//   ScormAPI.setValue("cmi.core.score.raw", String(quizScore));
-//   ScormAPI.setValue("cmi.core.lesson_status", quizScore >= 60 ? "passed" : "failed");
-//   ScormAPI.commit();
-// }
-
-// window.addEventListener("load", function () {
-//   ScormAPI.initialize();
-//   ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
-//   renderLesson();
-//   document.getElementById("submit-quiz-btn").addEventListener("click", submitQuiz);
-// });
-
-// window.addEventListener("beforeunload", function () {
-//   ScormAPI.commit();
-//   ScormAPI.terminate();
-// });
-// `;
-// }
-
-// function buildManifestXml(draft: LessonDraftRow): string {
-//   const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;
-//   const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-//   return `<?xml version="1.0" standalone="no" ?>
-// <manifest identifier="${identifier}" version="1"
-//   xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
-//   xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
-//   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-//   xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd
-//                        http://www.imsglobal.org/xsd/imsmd_rootv1p2p1 imsmd_rootv1p2p1.xsd
-//                        http://www.adlnet.org/xsd/adlcp_rootv1p2 adlcp_rootv1p2.xsd">
-//   <metadata>
-//     <schema>ADL SCORM</schema>
-//     <schemaversion>1.2</schemaversion>
-//   </metadata>
-//   <organizations default="ORG-${draft.id}">
-//     <organization identifier="ORG-${draft.id}">
-//       <title>${escapedTitle}</title>
-//       <item identifier="ITEM-${draft.id}" identifierref="RES-${draft.id}">
-//         <title>${escapedTitle}</title>
-//       </item>
-//     </organization>
-//   </organizations>
-//   <resources>
-//     <resource identifier="RES-${draft.id}" type="webcontent" adlcp:scormtype="sco" href="index.html">
-//       <file href="index.html" />
-//       <file href="scorm-api.js" />
-//       <file href="player.js" />
-//       <file href="style.css" />
-//     </resource>
-//   </resources>
-// </manifest>`;
-// }
-
-// const INDEX_HTML = `<!DOCTYPE html>
-// <html lang="th">
-// <head>
-//   <meta charset="UTF-8" />
-//   <title>Lesson</title>
-//   <link rel="stylesheet" href="style.css" />
-// </head>
-// <body>
-//   <div class="lesson-wrap">
-//     <h1 id="lesson-title"></h1>
-//     <video id="lesson-video" controls></video>
-//     <div id="lesson-content" class="lesson-content"></div>
-//     <div class="quiz-section">
-//       <h2>แบบทดสอบท้ายบท</h2>
-//       <div id="quiz-container"></div>
-//       <button id="submit-quiz-btn">ส่งคำตอบ</button>
-//       <p id="quiz-result" class="quiz-result"></p>
-//     </div>
-//   </div>
-//   <script src="scorm-api.js"></script>
-//   <script src="player.js"></script>
-// </body>
-// </html>`;
-
-// const SCORM_API_JS = `var ScormAPI = (function () {
-//   var apiHandle = null;
-//   var findAttemptLimit = 500;
-
-//   function scanForAPI(win) {
-//     var attempts = 0;
-//     while (win.API == null && win.parent != null && win.parent !== win && attempts < findAttemptLimit) {
-//       attempts++;
-//       win = win.parent;
-//     }
-//     return win.API || null;
-//   }
-
-//   function findAPI() {
-//     var theAPI = null;
-//     if (window.parent != null && window.parent !== window) {
-//       theAPI = scanForAPI(window.parent);
-//     }
-//     if (theAPI == null && window.opener != null) {
-//       theAPI = scanForAPI(window.opener);
-//     }
-//     return theAPI;
-//   }
-
-//   function getAPI() {
-//     if (apiHandle == null) apiHandle = findAPI();
-//     return apiHandle;
-//   }
-
-//   function initialize() {
-//     var api = getAPI();
-//     if (!api) { console.warn("SCORM API not found."); return false; }
-//     return api.LMSInitialize("") === "true";
-//   }
-
-//   function setValue(key, value) {
-//     var api = getAPI();
-//     if (!api) return false;
-//     return api.LMSSetValue(key, value) === "true";
-//   }
-
-//   function getValue(key) {
-//     var api = getAPI();
-//     if (!api) return "";
-//     return api.LMSGetValue(key);
-//   }
-
-//   function commit() {
-//     var api = getAPI();
-//     if (!api) return false;
-//     return api.LMSCommit("") === "true";
-//   }
-
-//   function terminate() {
-//     var api = getAPI();
-//     if (!api) return false;
-//     return api.LMSFinish("") === "true";
-//   }
-
-//   return { initialize: initialize, setValue: setValue, getValue: getValue, commit: commit, terminate: terminate };
-// })();`;
-
-// const STYLE_CSS = `body { font-family: -apple-system, "Segoe UI", sans-serif; background: #f7f8fa; margin: 0; color: #0f1b3d; }
-// .lesson-wrap { max-width: 720px; margin: 0 auto; padding: 24px; }
-// h1 { font-size: 22px; margin-bottom: 16px; }
-// video { width: 100%; border-radius: 12px; background: #000; }
-// .lesson-content { margin: 20px 0; line-height: 1.6; font-size: 14px; }
-// .quiz-section { margin-top: 32px; padding: 20px; background: #fff; border-radius: 16px; }
-// .quiz-question { margin-bottom: 20px; }
-// .quiz-question-text { font-weight: bold; margin-bottom: 8px; }
-// .quiz-choice { display: block; padding: 8px 0; font-size: 14px; }
-// #submit-quiz-btn { background: #ff5a3c; color: white; border: none; padding: 12px 24px; border-radius: 999px; font-weight: bold; cursor: pointer; }
-// .quiz-result { margin-top: 12px; font-weight: bold; }`;
-
-// export async function generateScormPackage(
-//   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-//   supabase: SupabaseClient<any>,
-//   draftId: string,
-//   lessonId: string
-// ): Promise<{ packageUrl: string } | { error: string }> {
-//   // ⚡ 1. โหลด AWS SDK และ R2 Config แบบ Dynamic Import
-//   const [{ PutObjectCommand }, { r2Client, R2_BUCKET_NAME, R2_PUBLIC_URL }] =
-//     await Promise.all([
-//       import("@aws-sdk/client-s3"),
-//       import("@/lib/r2"),
-//     ]);
-
-//   // 🛠️ 2. โหลด archiver (เมื่อตั้ง serverExternalPackages แล้ว จะโหลดเป็น Native Node Module ได้สมบูรณ์ 100%)
-//   let archiverFn: any;
-//   try {
-//     const archiverModule = await import("archiver");
-//     const mod = archiverModule as any;
-//     archiverFn =
-//       (typeof mod === "function" ? mod : null) ||
-//       (typeof mod?.default === "function" ? mod.default : null) ||
-//       (typeof mod?.create === "function" ? mod.create : null) ||
-//       (typeof mod?.default?.create === "function" ? mod.default.create : null);
-//   } catch (e) {
-//     console.error("[generateScormPackage] Error importing archiver:", e);
-//   }
-
-//   if (typeof archiverFn !== "function") {
-//     try {
-//       const raw = require("archiver");
-//       archiverFn = typeof raw === "function" ? raw : raw?.default || raw?.create;
-//     } catch {}
-//   }
-
-//   if (typeof archiverFn !== "function") {
-//     console.error("[generateScormPackage] Failed to resolve archiver. Check serverExternalPackages in next.config.");
-//     return { error: "Failed to initialize SCORM archiver module" };
-//   }
-
-//   // 3. ดึงข้อมูล Draft บทเรียน
-//   const { data: draft, error: draftError } = await supabase
-//     .from("lesson_drafts")
-//     .select("id, video_url, content_html, status, lessons(id, course_id, title)")
-//     .eq("id", draftId)
-//     .single();
-
-//   if (draftError || !draft || !draft.lessons) {
-//     console.error("[generateScormPackage] draft fetch failed:", draftError);
-//     return { error: "Draft not found" };
-//   }
-
-//   // 4. ดึงข้อมูลแบบทดสอบท้ายบท
-//   const { data: questions, error: questionsError } = await supabase
-//     .from("quiz_questions")
-//     .select("id, question_text, order_index, quiz_choices(choice_text, is_correct, order_index)")
-//     .eq("lesson_draft_id", draftId)
-//     .order("order_index", { ascending: true });
-
-//   if (questionsError) {
-//     console.error("[generateScormPackage] quiz questions fetch failed:", questionsError);
-//     return { error: "Failed to fetch quiz data" };
-//   }
-
-//   const typedDraft = draft as unknown as LessonDraftRow;
-//   const typedQuestions = (questions ?? []) as unknown as QuizQuestionRow[];
-
-//   const courseId = typedDraft.lessons.course_id;
-
-//   const manifestXml = buildManifestXml(typedDraft);
-//   const playerJs = buildPlayerJs(typedDraft, typedQuestions);
-
-//   // 5. บีบอัดไฟล์ทั้งหมดเป็น ZIP Buffer ในหน่วยความจำ
-//   let zipBuffer: Buffer;
-//   try {
-//     zipBuffer = await new Promise((resolve, reject) => {
-//       const archive = archiverFn("zip", { zlib: { level: 9 } });
-//       const chunks: Buffer[] = [];
-//       const passthrough = new PassThrough();
-
-//       passthrough.on("data", (chunk: Buffer) => chunks.push(chunk));
-//       passthrough.on("end", () => resolve(Buffer.concat(chunks)));
-//       archive.on("error", (err: Error) => reject(err));
-
-//       archive.pipe(passthrough);
-//       archive.append(manifestXml, { name: "imsmanifest.xml" });
-//       archive.append(INDEX_HTML, { name: "index.html" });
-//       archive.append(SCORM_API_JS, { name: "scorm-api.js" });
-//       archive.append(playerJs, { name: "player.js" });
-//       archive.append(STYLE_CSS, { name: "style.css" });
-//       archive.finalize();
-//     });
-//   } catch (err: any) {
-//     console.error("[generateScormPackage] ZIP creation failed:", err);
-//     return { error: `Failed to generate ZIP package: ${err?.message || err}` };
-//   }
-
-//   // 6. อัปโหลดไฟล์ ZIP เข้า Cloudflare R2
-//   const key = `scorm-packages/${courseId}/${lessonId}/package.zip`;
-
-//   try {
-//     await r2Client.send(
-//       new PutObjectCommand({
-//         Bucket: R2_BUCKET_NAME,
-//         Key: key,
-//         Body: zipBuffer,
-//         ContentType: "application/zip",
-//       })
-//     );
-//   } catch (err: any) {
-//     console.error("[generateScormPackage] Failed to upload SCORM package to R2:", err);
-//     return { error: "Failed to upload package to storage" };
-//   }
-
-//   const packageUrl = `${R2_PUBLIC_URL}/${key}`;
-
-//   // 7. บันทึก / อัปเดตข้อมูลลง Supabase
-//   const { error: insertError } = await supabase
-//     .from("scorm_packages")
-//     .upsert(
-//       {
-//         lesson_draft_id: typedDraft.id,
-//         lesson_id: lessonId,
-//         package_url: packageUrl,
-//         version: "1.2",
-//       },
-//       { onConflict: "lesson_id" }
-//     );
-
-//   if (insertError) {
-//     console.error("[generateScormPackage] Failed to record SCORM package:", insertError.message);
-//     return { error: "Failed to save package record" };
-//   }
-
-//   console.log("✅ SCORM Package Generated & Uploaded Successfully!", packageUrl);
-//   return { packageUrl };
-// }
-
-
-
-// interface QuizChoiceRow {
-//   choice_text: string;
-//   is_correct: boolean;
-//   order_index: number;
-// }
-
-// interface QuizQuestionRow {
-//   id: string;
-//   question_text: string;
-//   order_index: number;
-//   quiz_choices: QuizChoiceRow[];
-// }
-

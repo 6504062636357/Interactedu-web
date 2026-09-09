@@ -30,9 +30,9 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
 
   // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้
   const { data: lessons, error: lessonsError } = await supabase
-    .from("lessons")
-    .select("id, lesson_drafts(id, status)")
-    .eq("course_id", courseId);
+  .from("lessons")
+  .select("id, title, lesson_drafts(id, status)")
+  .eq("course_id", courseId);
 
   if (lessonsError || !lessons) {
     console.error("[approveCourse] lessons fetch failed", lessonsError);
@@ -54,32 +54,32 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
   }
   // เช็คว่าทุกบทมี draft ที่พร้อมอนุมัติ (submitted / pending_review)
 
-  const pendingDrafts: { draftId: string; lessonId: string }[] = [];
+const pendingDrafts: { draftId: string; lessonId: string; lessonTitle: string }[] = [];
 
-  for (const lesson of lessons) {
-  const drafts = (lesson as unknown as { id: string; lesson_drafts: { id: string; status: string; created_at?: string }[] })
+for (const lesson of lessons) {
+  const { id: lessonId, title } = lesson as unknown as {
+    id: string;
+    title: string;
+    lesson_drafts: { id: string; status: string; created_at?: string }[];
+  };
+  const drafts = (lesson as unknown as { lesson_drafts: { id: string; status: string; created_at?: string }[] })
     .lesson_drafts;
 
   if (!drafts || drafts.length === 0) {
-    return { error: `บทเรียน ยังไม่มีเนื้อหา ไม่สามารถอนุมัติทั้งคอร์สได้` };
+    return { error: `บทเรียน "${title}" ยังไม่มีเนื้อหา ไม่สามารถอนุมัติทั้งคอร์สได้` };
   }
 
-  // 1. หา Draft ล่าสุด (สมมติว่า query เรียง created_at DESC มาแล้ว หรือเอา index 0)
-  // หากยังไม่ได้ sort ใน query ให้ sort หรือใช้ตัวล่าสุด:
-  const latestDraft = drafts[0]; 
+  const latestDraft = drafts[0];
 
-  // 2. เช็กสถานะของ Draft ล่าสุด
   if (latestDraft.status === "rejected" || latestDraft.status === "draft") {
-    return { 
-      error: `บทเรียน ยังมีแบบร่างที่ยังไม่ส่งตรวจหรือถูกปฏิเสธอยู่ ไม่สามารถอนุมัติทั้งคอร์สได้` 
+    return {
+      error: `บทเรียน "${title}" ยังมีแบบร่างที่ยังไม่ส่งตรวจหรือถูกปฏิเสธอยู่ ไม่สามารถอนุมัติทั้งคอร์สได้`,
     };
   }
 
-  // 3. ถ้าเป็นตัวที่รออนุมัติ ให้เก็บเข้าคิวไป approve
   if (latestDraft.status === "submitted" || latestDraft.status === "pending_review") {
-    pendingDrafts.push({ draftId: latestDraft.id, lessonId: lesson.id });
+    pendingDrafts.push({ draftId: latestDraft.id, lessonId, lessonTitle: title });
   }
-  // หมายเหตุ: ถ้า latestDraft.status === "approved" อยู่แล้ว ก็ข้ามไป ไม่ต้อง push เข้า pendingDrafts
 }
 
   // for (const lesson of lessons) {
@@ -92,17 +92,7 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
   //   pendingDrafts.push({ draftId: readyDraft.id, lessonId: lesson.id });
   // }
 
-  // generate SCORM ให้ทุกบท
-  for (const { draftId, lessonId } of pendingDrafts) {
-    const genResult = await generateScormPackage(supabase, draftId, lessonId);
-    if ("error" in genResult) {
-      return { error: `สร้างไฟล์ SCORM ของบทเรียน ${lessonId} ไม่สำเร็จ: ${genResult.error}` };
-    }
-    // หมายเหตุ: generateScormPackage อัปเดต lessons (is_scorm, scorm_entry_point,
-    // scorm_version, scorm_manifest) ให้ครบอยู่แล้วภายในตัวมันเอง ไม่ต้อง update ซ้ำตรงนี้
-  }
-
-  // อัปเดต draft ทุกอันเป็น approved
+    // เช็คว่า draft.status === "approved" ถึงจะยอมสร้างแพ็กเกจ (เหมือน approveLesson)
   const draftIds = pendingDrafts.map((d) => d.draftId);
   const { data: updatedDrafts, error: draftUpdateError } = await supabase
     .from("lesson_drafts")
@@ -113,6 +103,19 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
   if (draftUpdateError || !updatedDrafts || updatedDrafts.length !== draftIds.length) {
     console.error("[approveCourse] draft status update failed:", draftUpdateError);
     return { error: "อัปเดตสถานะ draft บางรายการไม่สำเร็จ (อาจติด RLS)" };
+  }
+
+  // generate SCORM ให้ทุกบท (ตอนนี้ status เป็น approved แล้ว ผ่านเช็คใน generateScormPackage ได้)
+  for (const { draftId, lessonId, lessonTitle } of pendingDrafts) {
+    const genResult = await generateScormPackage(supabase, draftId, lessonId);
+    if ("error" in genResult) {
+      // rollback: ดึง draft ทั้งชุดที่เพิ่ง approved ไปกลับเป็น pending_review
+      // เพื่อไม่ให้ค้างสถานะ approved ทั้งที่บางบทยังไม่มีแพ็กเกจจริง
+      await supabase.from("lesson_drafts").update({ status: "pending_review" }).in("id", draftIds);
+      return { error: `สร้างไฟล์ SCORM ของบทเรียน "${lessonTitle}" ไม่สำเร็จ: ${genResult.error}` };
+    }
+    // หมายเหตุ: generateScormPackage อัปเดต lessons (is_scorm, scorm_entry_point,
+    // scorm_version, scorm_manifest) ให้ครบอยู่แล้วภายในตัวมันเอง ไม่ต้อง update ซ้ำตรงนี้
   }
 
   // อัปเดตสถานะคอร์สเป็น published
@@ -258,21 +261,31 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
   const { supabase, user, error: authError } = await requireAdmin();
   if (authError) return { error: authError };
 
-  const genResult = await generateScormPackage(supabase, draftId, lessonId);
-  if ("error" in genResult) {
-    return { error: `สร้างไฟล์ SCORM ไม่สำเร็จ: ${genResult.error}` };
-  }
+  // ★ ต้อง set status เป็น approved ก่อน generate เสมอ เพราะ generateScormPackage เช็คว่า
+  // draft.status === "approved" ถึงจะยอมสร้างแพ็กเกจ (กันไม่ให้ generate เนื้อหาที่ยังไม่ผ่านตรวจ)
+  // ถ้า generate ล้มเหลวทีหลัง จะ rollback สถานะกลับเป็น pending_review ให้
+  const { data: draftBefore } = await supabase
+    .from("lesson_drafts")
+    .select("status")
+    .eq("id", draftId)
+    .maybeSingle();
+  const previousStatus = draftBefore?.status ?? "pending_review";
 
-  const { data: updatedDraft, error: draftUpdateError } = await supabase
+  const { error: preApproveError } = await supabase
     .from("lesson_drafts")
     .update({ status: "approved", reviewed_by: user!.id, reviewed_at: new Date().toISOString() })
-    .eq("id", draftId)
-    .select()
-    .single();
+    .eq("id", draftId);
 
-  if (draftUpdateError || !updatedDraft) {
-    console.error("[approveLesson] draft status update failed:", draftUpdateError);
-    return { error: "อัปเดตสถานะ draft ไม่สำเร็จ (อาจติด RLS)" };
+  if (preApproveError) {
+    console.error("[approveLesson] pre-approve status update failed:", preApproveError);
+    return { error: "อัปเดตสถานะ draft ไม่สำเร็จ" };
+  }
+
+  const genResult = await generateScormPackage(supabase, draftId, lessonId);
+  if ("error" in genResult) {
+    // rollback กลับสถานะเดิม เพื่อไม่ให้ draft ค้างเป็น approved ทั้งที่ยังไม่มีแพ็กเกจจริง
+    await supabase.from("lesson_drafts").update({ status: previousStatus }).eq("id", draftId);
+    return { error: `สร้างไฟล์ SCORM ไม่สำเร็จ: ${genResult.error}` };
   }
 
   // ดึง course_id ของ lesson นี้ เพื่อ revalidate หน้า review และเช็คว่าควร publish คอร์สหรือยัง

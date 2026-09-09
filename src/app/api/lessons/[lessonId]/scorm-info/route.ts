@@ -51,7 +51,7 @@ export async function GET(
   // แล้วดึง courseTitle จาก lesson.chapters.courses.title แทน
   const { data: lesson, error } = await supabase
     .from('lessons')
-    .select('title, is_scorm, scorm_entry_point, scorm_version, scorm_manifest, course_id, courses(title)')
+    .select('title, is_scorm, scorm_entry_point, scorm_version, scorm_manifest, scorm_source, course_id, courses(title)')
     .eq('id', lessonId)
     .single();
 
@@ -74,5 +74,9 @@ export async function GET(
     entryPoint: lesson.scorm_entry_point,
     scormVersion: lesson.scorm_version,
     manifest: lesson.scorm_manifest ?? null, // { organizationTitle, items: [...] } หรือ null ถ้าเป็นแพ็กเกจเก่าที่ยังไม่มี manifest เก็บไว้
+    // [งานข้อ 07] 'generated' | 'imported' — เผื่อแถวเก่าก่อนงานข้อ 06 ที่คอลัมน์นี้อาจว่าง
+    // ให้ fallback เป็น 'generated' (ตรงกับ default ของคอลัมน์ใน DB) เพื่อไม่ให้พฤติกรรมเดิม
+    // ของแพ็กเกจที่เราสร้างเองเปลี่ยนไปโดยไม่ตั้งใจ
+    scormSource: lesson.scorm_source === 'imported' ? 'imported' : 'generated',
   });
 }

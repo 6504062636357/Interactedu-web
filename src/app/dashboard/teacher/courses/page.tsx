@@ -208,26 +208,32 @@ export default function TeacherCoursesPage(): ReactElement {
       ) : filteredCourses.length === 0 ? (
         <p className="text-[13.5px] text-slate-400 py-10 text-center">ไม่พบคอร์สที่ตรงกับเงื่อนไข</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        // ★ แก้: เปลี่ยนจาก grid การ์ดหลายคอลัมน์ เป็นรายการเรียงยาวลงมาทีละแถวแทน
+        <div className="flex flex-col divide-y divide-slate-100 rounded-xl border border-slate-100 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
           {filteredCourses.map((course) => (
             <div
               key={course.id}
-              className="bg-white rounded-xl border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)] p-5 flex flex-col"
+              className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 px-5 py-4"
             >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <p className="text-[14.5px] font-semibold text-slate-900 leading-snug">{course.title}</p>
-                {course.latestStatus && <StatusBadge status={course.latestStatus} />}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[14.5px] font-semibold text-slate-900 leading-snug truncate">{course.title}</p>
+                  {course.latestStatus && <StatusBadge status={course.latestStatus} />}
+                </div>
+                {course.latestStatus === "rejected" && course.latestRejectionReason && (
+                  <p className="mt-1 text-[12px] text-red-500">เหตุผล: {course.latestRejectionReason}</p>
+                )}
               </div>
-              <p className="text-[12.5px] text-slate-500 mb-1">
-                {course.lessonCount} บทเรียน · {course.studentCount} นักเรียน
-              </p>
-              <p className="text-[12.5px] text-slate-500 mb-4">฿{course.price.toLocaleString()}</p>
-              {course.latestStatus === "rejected" && course.latestRejectionReason && (
-                <p className="text-[12px] text-red-500 mb-3">เหตุผล: {course.latestRejectionReason}</p>
-              )}
+
+              <div className="flex items-center gap-4 shrink-0 text-[12.5px] text-slate-500">
+                <span>{course.lessonCount} บทเรียน</span>
+                <span>{course.studentCount} นักเรียน</span>
+                <span className="font-medium text-slate-600">฿{course.price.toLocaleString()}</span>
+              </div>
+
               <Link
                 href={`/dashboard/teacher/courses/${course.id}`}
-                className="mt-auto inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+                className="shrink-0 inline-flex items-center justify-center text-[12.5px] font-semibold text-blue-950 border border-slate-200 px-3.5 py-2 rounded-lg hover:bg-slate-50 transition-colors"
               >
                 เปิดพื้นที่จัดการคอร์ส
               </Link>

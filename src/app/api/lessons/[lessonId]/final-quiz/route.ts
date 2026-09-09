@@ -1,92 +1,28 @@
-import { NextRequest, NextResponse } from "next/server";
-import { ensureCertificateForCourse } from "@/lib/certificates/service";
-import { gradeFinalQuiz, type FinalQuizAnswer } from "@/lib/scorm/grade-final-quiz";
-import { createNotification } from "@/lib/notifications/service";
-import { createClient } from "@/utils/supabase/server";
+// src/app/api/lessons/[lessonId]/final-quiz/route.ts
+//
+// [งานข้อ 04] ปิดการใช้งานแล้ว — เดิม endpoint นี้ตรวจข้อสอบของ SCO ควิซแบบเก่า (แยกทีละ
+// บทเรียน) แล้วเขียนคะแนน/สถานะลง scorm_tracking ของบทเรียนนั้นตรงๆ ผ่าน gradeFinalQuiz()
+// ซึ่งชนกับแหล่งความจริงใหม่ของคะแนนสอบปลายคอร์ส (quiz_attempts ผ่าน gradeCourseFinalExam —
+// งานข้อ 03) ถ้ายังปล่อยให้เรียกได้อยู่ มันเขียนทับคะแนนใบรับรองที่ตรวจแล้วได้ทันที
+//
+// SCO ควิซที่ endpoint นี้เคยตรวจให้ ก็ไม่เคยถูกสร้างขึ้นมาอีกแล้วเช่นกัน ตั้งแต่
+// lib/scorm/generate.ts ตั้ง hasQuiz = false ถาวร (ลบ buildQuizPlayerJs/QUIZ_HTML/
+// postExamQuestions ออกจากไฟล์นั้นพร้อมกันในงานข้อนี้) จึงไม่มีทางที่ผู้เรียนจะยิงมาโดนจากการ
+// ใช้งานปกติอยู่แล้ว — คืน 410 ไว้เผื่อมีคนยิงตรงมาที่ endpoint นี้เอง (เช่นจาก request เก่าที่
+// แคชไว้ หรือพยายามยิงตรงๆ) ไม่ให้มันมีผลอะไรกับข้อมูลอีก
+//
+// TODO(ลบไฟล์): เซสชันนี้ลบไฟล์บนเครื่องคุณไม่ได้ — ลบทั้งไฟล์นี้และโฟลเดอร์
+// api/lessons/[lessonId]/final-quiz/ ทิ้งได้เลยเมื่อสะดวก ไม่มีอะไรอ้างอิงถึงมันแล้ว
+// (ตรวจแล้วว่าไม่มีหน้าไหนในระบบเรียก POST /api/lessons/[lessonId]/final-quiz อยู่)
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ lessonId: string }> }
-) {
-  const { lessonId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+import { NextResponse } from "next/server";
 
-  let body: { answers?: FinalQuizAnswer[] };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  if (!Array.isArray(body.answers)) {
-    return NextResponse.json({ error: "answers must be an array" }, { status: 400 });
-  }
-
-  try {
-    const grade = await gradeFinalQuiz(supabase, user.id, lessonId, body.answers);
-    const { data: lesson } = await supabase
-      .from("lessons")
-      .select("title")
-      .eq("id", lessonId)
-      .maybeSingle();
-    const lessonName = lesson?.title ?? "นี้";
-
-    await createNotification({
-      userId: user.id,
-      type: grade.passed ? "exercise_passed" : "exercise_failed",
-      title: grade.passed ? "ผ่านแบบฝึกหัดแล้ว" : "แบบฝึกหัดยังไม่ผ่าน",
-      message: grade.passed
-        ? `คุณผ่านแบบฝึกหัดบท ${lessonName} แล้ว คะแนน ${grade.scorePercentage}%`
-        : `คะแนนแบบฝึกหัดบท ${lessonName} ยังไม่ผ่านเกณฑ์ กรุณาทบทวนและลองใหม่`,
-      relatedType: "lesson",
-      relatedId: lessonId,
-      actionUrl: `/play/${grade.courseId}/${lessonId}`,
-      dedupeKey: grade.passed ? `exercise_passed:${user.id}:${lessonId}` : null,
-    });
-
-    let certificateIssued = false;
-    let certificateId: string | null = null;
-    let certificateDownloadUrl: string | null = null;
-    let certificateMessage = "Quiz graded successfully";
-
-    // การออก Certificate เป็นขั้นเสริม ต้องไม่ทำให้ผลสอบที่ตรวจแล้วกลายเป็น 500
-    try {
-      const certificate = await ensureCertificateForCourse({
-        supabase,
-        userId: user.id,
-        courseId: grade.courseId,
-        attemptId: grade.attemptId,
-      });
-      certificateIssued = certificate.certificateIssued;
-      certificateId = certificate.certificate?.id ?? null;
-      certificateDownloadUrl = certificate.certificate
-        ? `/api/me/certificates/${certificate.certificate.id}/download`
-        : null;
-      certificateMessage = certificate.message;
-    } catch (certificateError) {
-      certificateMessage = "ตรวจคะแนนสำเร็จ แต่ระบบใบประกาศยังไม่พร้อม";
-      console.warn("[final-quiz POST] Certificate skipped:", certificateError);
-    }
-
-    return NextResponse.json({
-      total_questions: grade.totalQuestions,
-      correct_answers: grade.correctAnswers,
-      score_percentage: grade.scorePercentage,
-      pass_percentage: grade.passPercentage,
-      passed: grade.passed,
-      details: grade.details,
-      certificate_issued: certificateIssued,
-      certificate_id: certificateId,
-      certificate_download_url: certificateDownloadUrl,
-      message: certificateMessage,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Final quiz submission failed";
-    const status = /not found/i.test(message) ? 404 : /required|invalid|answer every/i.test(message) ? 400 : 500;
-    console.error("[final-quiz POST]", error);
-    return NextResponse.json({ error: message }, { status });
-  }
+export async function POST() {
+  return NextResponse.json(
+    {
+      error:
+        "This endpoint has been retired. Course completion is now graded through /api/courses/[courseId]/final-exam.",
+    },
+    { status: 410 }
+  );
 }

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import CourseTabs from "@/components/CourseTabs";
 import AppBrand from "@/components/AppBrand";
+import CourseReviews, { type CourseReviewItem } from "@/components/courses/CourseReviews";
 
 interface Course {
   id: string;
@@ -28,6 +29,18 @@ interface ModuleRow {
   title: string;
   order_index: number;
   lessons: LessonRow[];
+}
+
+interface CourseReviewRow {
+  id: string;
+  rating: number;
+  meets_expectation: boolean;
+  liked_tags: string[] | null;
+  comment: string | null;
+  created_at: string;
+  student_id: string;
+  student_name: string;
+  student_avatar_url: string | null;
 }
 
 const categoryColors: Record<string, string> = {
@@ -178,6 +191,35 @@ export default async function CourseDetailPage({
     isEnrolled = Boolean(enrollment);
   }
 
+  // ★ เพิ่มใหม่: ดึงรีวิวของคอร์สนี้ทั้งหมด — ตาราง course_reviews เปิดให้อ่านสาธารณะสำหรับ
+  // คอร์สที่เผยแพร่แล้ว (RLS) เพราะหน้านี้เป็นหน้าสาธารณะ ไม่ต้องล็อกอินก็ดูรีวิวได้
+  const { data: reviewsData, error: reviewsError } = await supabase
+    .from("course_reviews")
+    .select(
+      "id, rating, meets_expectation, liked_tags, comment, created_at, student_id, student_name, student_avatar_url"
+    )
+    .eq("course_id", typedCourse.id)
+    .order("created_at", { ascending: false });
+
+  if (reviewsError) {
+    console.error("Failed to fetch course reviews:", reviewsError.message);
+  }
+
+  const reviews: CourseReviewItem[] = ((reviewsData ?? []) as CourseReviewRow[]).map((r) => ({
+    id: r.id,
+    rating: r.rating,
+    meetsExpectation: r.meets_expectation,
+    likedTags: r.liked_tags ?? [],
+    comment: r.comment,
+    createdAt: r.created_at,
+    studentId: r.student_id,
+    studentName: r.student_name,
+    studentAvatarUrl: r.student_avatar_url,
+  }));
+
+  const reviewCount = reviews.length;
+  const avgRating = reviewCount > 0 ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount : 0;
+
   return (
     <div className="min-h-screen w-full bg-[#F7F8FA]">
       <DetailNavbar />
@@ -223,6 +265,18 @@ export default async function CourseDetailPage({
                 <p className="mt-2 text-[13px] text-[#0F1B3D]/40 font-medium">
                   รหัสคอร์ส: {typedCourse.course_code}
                 </p>
+              )}
+
+              {/* ★ เพิ่มใหม่: badge คะแนนรีวิวเฉลี่ย โชว์เฉพาะตอนมีรีวิวแล้วอย่างน้อย 1 รีวิว */}
+              {reviewCount > 0 && (
+                <div className="mt-3 flex items-center gap-1.5">
+                  <span className="text-[13px] font-extrabold text-[#0F1B3D]">{avgRating.toFixed(1)}</span>
+                  <span className="text-[13px] text-[#FFB020]" aria-hidden="true">
+                    {"★".repeat(Math.round(avgRating))}
+                    {"☆".repeat(5 - Math.round(avgRating))}
+                  </span>
+                  <span className="text-[12px] text-[#0F1B3D]/40 font-medium">({reviewCount} รีวิว)</span>
+                </div>
               )}
 
               <p className="mt-6 text-[28px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
@@ -275,6 +329,18 @@ export default async function CourseDetailPage({
             </div>
           </div>
         </div>
+      </section>
+
+      {/* ★ เพิ่มใหม่: ส่วนรีวิวจากผู้เรียน — สรุปคะแนน + ฟอร์มส่งรีวิว (เฉพาะคนที่ลงทะเบียนแล้ว) + รายการความคิดเห็น */}
+      {/* id="reviews" ไว้ให้หน้าอื่น (เช่นหน้าคอร์สของฉัน) ลิงก์มาเด้งตรงส่วนนี้ได้ด้วย #reviews */}
+      <section id="reviews" className="max-w-7xl mx-auto px-6 lg:px-8 pb-16 scroll-mt-20">
+        <CourseReviews
+          courseId={typedCourse.id}
+          slug={typedCourse.slug}
+          reviews={reviews}
+          canReview={isEnrolled}
+          currentUserId={user?.id ?? null}
+        />
       </section>
     </div>
   );

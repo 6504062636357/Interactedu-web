@@ -11,6 +11,7 @@ import {
 import { approveLesson } from "@/app/dashboard/admin/courses/[courseId]/review/actions";
 import { uploadVideoToR2 } from "@/lib/uploadVideoToR2";
 import VideoSegmenter, { type VideoSegment } from "@/components/teacher/VideoSegmenter";
+import type { BankQuestionCounts } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
 
 interface LessonDraftFormProps {
   courseId: string;
@@ -38,7 +39,6 @@ interface BankQuestionOption {
   questionText: string;
   choices: { text: string; isCorrect: boolean }[];
 }
-
 
 function createEmptyQuestion(timestampSeconds: number | null): QuestionState {
   return {
@@ -126,7 +126,8 @@ export default function LessonDraftForm({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [videoCurrentTime, setVideoCurrentTime] = useState<number>(0);
-
+  const [bankCounts, setBankCounts] = useState<BankQuestionCounts | null>(null);
+  const [bankCountsLoading, setBankCountsLoading] = useState(false);
   useEffect(() => {
     if (!videoPreviewUrl) return;
     return () => URL.revokeObjectURL(videoPreviewUrl);
@@ -251,6 +252,21 @@ export default function LessonDraftForm({
       setBankLoading(false);
     }
   }
+
+  async function loadBankCountsForLesson(): Promise<void> {
+  setBankCountsLoading(true);
+  try {
+    const { getBankQuestionCountsForLesson } = await import(
+      "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions"
+    );
+    const result = await getBankQuestionCountsForLesson(savedLessonId ?? "");
+    setBankCounts(result.counts);
+  } catch {
+    setBankCounts(null);
+  } finally {
+    setBankCountsLoading(false);
+  }
+}
 
   function confirmPinModal(): void {
     if (pinModalMode === "custom") {
@@ -989,13 +1005,14 @@ export default function LessonDraftForm({
             key={mode}
             type="button"
             onClick={() => {
-              setPinModalMode(mode);
-              if (mode === "bank_manual" && !savedLessonId) {
-                setBankOptions([]);
-                return;
-              }
-              if (mode === "bank_manual" && bankOptions.length === 0) void loadBankQuestionsForLesson();
-            }}
+            setPinModalMode(mode);
+            if (mode === "bank_manual" && !savedLessonId) {
+              setBankOptions([]);
+              return;
+            }
+            if (mode === "bank_manual" && bankOptions.length === 0) void loadBankQuestionsForLesson();
+            if (mode === "bank_random" && savedLessonId && bankCounts === null) void loadBankCountsForLesson();
+          }}
             className={`flex-1 rounded-lg px-3 py-2 text-[12.5px] font-bold transition-colors ${
               pinModalMode === mode
                 ? "bg-white text-[#0F1B3D] shadow-sm"
@@ -1085,22 +1102,54 @@ export default function LessonDraftForm({
 
       {/* --- แท็บ: สุ่มจากคลัง --- */}
       {pinModalMode === "bank_random" && (
-        <div className="mb-5">
-          <label className="mb-1.5 block text-[13px] font-semibold text-[#0F1B3D]/70">ระดับความยาก</label>
-          <select
-            value={randomDifficulty}
-            onChange={(e) => setRandomDifficulty(e.target.value as "easy" | "medium" | "hard")}
-            className="w-full rounded-lg border border-[#0F1B3D]/10 bg-[#F7F8FA] px-3.5 py-2.5 text-[13.5px] text-[#0F1B3D] outline-none focus:border-[#0F1B3D]/30 focus:bg-white"
-          >
-            <option value="easy">ง่าย</option>
-            <option value="medium">ปานกลาง</option>
-            <option value="hard">ยาก</option>
-          </select>
+  <div className="mb-5">
+    <label className="mb-1.5 block text-[13px] font-semibold text-[#0F1B3D]/70">ระดับความยาก</label>
+    <select
+      value={randomDifficulty}
+      onChange={(e) => setRandomDifficulty(e.target.value as "easy" | "medium" | "hard")}
+      className="w-full rounded-lg border border-[#0F1B3D]/10 bg-[#F7F8FA] px-3.5 py-2.5 text-[13.5px] text-[#0F1B3D] outline-none focus:border-[#0F1B3D]/30 focus:bg-white"
+    >
+      <option value="easy">ง่าย</option>
+      <option value="medium">ปานกลาง</option>
+      <option value="hard">ยาก</option>
+    </select>
+
+    {!savedLessonId ? (
+      <p className="mt-2 rounded-lg bg-[#F7F8FA] px-3 py-2.5 text-[12px] text-[#0F1B3D]/40">
+        กรุณาบันทึกฉบับร่างครั้งแรกก่อน ระบบถึงจะเช็คจำนวนคำถามในคลังให้ได้
+      </p>
+    ) : bankCountsLoading ? (
+      <p className="mt-2 rounded-lg bg-[#F7F8FA] px-3 py-2.5 text-[12px] text-[#0F1B3D]/40">กำลังตรวจสอบคลังข้อสอบ...</p>
+    ) : bankCounts ? (
+      (() => {
+        const label = randomDifficulty === "easy" ? "ง่าย" : randomDifficulty === "medium" ? "ปานกลาง" : "ยาก";
+        const available = bankCounts[randomDifficulty];
+        const alreadyPinned = randomMarkers.filter((m) => m.difficulty === randomDifficulty).length;
+        const needed = alreadyPinned + 1; // รวมข้อที่กำลังจะปักนี้ด้วย
+        const missing = needed - available;
+
+        if (missing > 0) {
+          return (
+            <p className="mt-2 rounded-lg bg-[#FF5A3C]/[0.08] px-3 py-2.5 text-[12px] font-semibold text-[#EB4A2D]">
+              ⚠ คลังข้อสอบระดับ{label}ของบทนี้ยังไม่พอสำหรับจุดที่ปักหมุดไว้ — ตอนนี้มีคำถามพร้อมใช้ {available} ข้อ
+              แต่บทนี้ปักหมุดสุ่มคำถามระดับ{label}ไว้ทั้งหมด {needed} จุดแล้ว (นับรวมจุดที่กำลังเพิ่มนี้ด้วย)
+              ขาดอีก {missing} ข้อ กรุณาเพิ่มคำถามในคลังข้อสอบระดับ{label}ให้ครบก่อนส่งตรวจ
+            </p>
+          );
+        }
+        return (
           <p className="mt-2 rounded-lg bg-[#7C5CFF]/[0.06] px-3 py-2.5 text-[12px] text-[#7C5CFF]">
-            ระบบจะสุ่ม 1 ข้อจากคลัง (Pop-up Quiz • บทนี้) ให้ผู้เรียนแต่ละคนอัตโนมัติ
+            ระบบจะสุ่ม 1 ข้อจากคลัง (Pop-up Quiz • บทนี้) ให้ผู้เรียนแต่ละคนอัตโนมัติ — มีคำถามระดับ{label}พร้อมใช้ {available} ข้อ
           </p>
-        </div>
-      )}
+        );
+      })()
+    ) : (
+      <p className="mt-2 rounded-lg bg-[#7C5CFF]/[0.06] px-3 py-2.5 text-[12px] text-[#7C5CFF]">
+        ระบบจะสุ่ม 1 ข้อจากคลัง (Pop-up Quiz • บทนี้) ให้ผู้เรียนแต่ละคนอัตโนมัติ
+      </p>
+    )}
+  </div>
+)}
 
       {/* ===== ปุ่มยืนยัน / ยกเลิก ===== */}
       <div className="flex justify-end gap-2">

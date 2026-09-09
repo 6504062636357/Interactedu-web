@@ -77,6 +77,80 @@ interface SaveLessonDraftResult {
   error?: string;
 }
 
+export interface BankQuestionCounts {
+  easy: number;
+  medium: number;
+  hard: number;
+}
+
+const MAX_RETRIES = 1; // รวมความพยายามครั้งแรกเป็นสูงสุด 3 ครั้ง
+const RETRY_DELAYS_MS = [500];
+
+interface PostgrestLikeError {
+  code?: string;
+  message?: string;
+}
+
+// 57014 = statement timeout, 08xxx = connection failure ตระกูลต่างๆ
+// 42501 = RLS reject — ปกติไม่ควร retry เพราะแปลว่าไม่มีสิทธิ์จริง แต่ในระบบนี้พิสูจน์แล้วว่า
+// เกิดจาก auth.uid() resolve พลาดชั่วคราวตอน Supabase โหลดสูง (ดูบทวิเคราะห์ log ช่วง 10:01-10:02)
+// ไม่ใช่สิทธิ์ผิดจริง จึงใส่ไว้ในรายการที่ retry ได้ด้วย
+function isRetryableError(error: PostgrestLikeError | null | undefined): boolean {
+  if (!error) return false;
+  const retryableCodes = new Set(["57014", "08000", "08003", "08006", "42501"]);
+  if (error.code && retryableCodes.has(error.code)) return true;
+  const msg = (error.message ?? "").toLowerCase();
+  return msg.includes("timeout") || msg.includes("timed out") || msg.includes("fetch failed");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ลบแบบ retry ได้ — ลบซ้ำไม่มีผลข้างเคียง (ลบของที่ไม่มีอยู่แล้ว = no-op)
+// จึงไม่ต้องเช็ค idempotency แบบ insert
+async function deleteWithRetry(
+  run: () => PromiseLike<{ error: { code?: string; message?: string } | null }>
+): Promise<string | null> {
+  let lastError: PostgrestLikeError | null | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const { error } = await run();
+    if (!error) return null;
+    lastError = error;
+    console.error(`deleteWithRetry: attempt ${attempt + 1} failed:`, error.message);
+    if (attempt === MAX_RETRIES || !isRetryableError(error)) break;
+    await sleep(RETRY_DELAYS_MS[attempt] ?? 2000);
+  }
+  return lastError?.message ?? "ลบข้อมูลไม่สำเร็จ";
+}
+
+async function insertMarkersWithRetry(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  draftId: string,
+  markerRows: { lesson_draft_id: string; lesson_id: string; timestamp_seconds: number; random_difficulty: string; order_index: number }[]
+): Promise<string | null> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const { error } = await supabase.from("video_quiz_markers").insert(markerRows);
+    if (!error) return null;
+
+    console.error(`insertMarkersWithRetry: attempt ${attempt + 1} failed:`, error.message);
+
+    const { count } = await supabase
+      .from("video_quiz_markers")
+      .select("id", { count: "exact", head: true })
+      .eq("lesson_draft_id", draftId)
+      .in("order_index", markerRows.map((r) => r.order_index));
+
+    if ((count ?? 0) === markerRows.length) return null;
+
+    if (attempt === MAX_RETRIES || !isRetryableError(error)) {
+      return "บันทึกหมุดควิซแบบสุ่มไม่สำเร็จ";
+    }
+    await sleep(RETRY_DELAYS_MS[attempt] ?? 2000);
+  }
+  return "บันทึกหมุดควิซแบบสุ่มไม่สำเร็จ";
+}
+
 function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
   segments?: DraftVideoSegmentInput[];
   error?: string;
@@ -112,6 +186,15 @@ function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
   };
 }
 
+// ความยาววิดีโอทั้งบทเรียนหาได้จาก end เวลาที่มากที่สุดในบรรดา segment ที่ส่งมา
+// เพราะ segment สุดท้ายมักจะจบที่ความยาวเต็มของวิดีโอเสมอ (ทั้งจากโหมด AI/manual/timed)
+// ใช้ค่านี้แทนการรับ duration จาก client ตรงๆ เพื่อไม่ต้องแก้ schema หรือฟอร์มฝั่ง client
+function computeVideoDurationSeconds(segments: DraftVideoSegmentInput[]): number {
+  if (segments.length === 0) return 0;
+  const maxEnd = Math.max(...segments.map((segment) => segment.end));
+  return Math.round(maxEnd);
+}
+
 async function replaceVideoSegments(
   supabase: Awaited<ReturnType<typeof createClient>>,
   draftId: string,
@@ -140,7 +223,7 @@ async function replaceVideoSegments(
   return error ? "บันทึกช่วงวิดีโอไม่สำเร็จ กรุณาตรวจว่าได้อัปเดตฐานข้อมูลแล้ว" : null;
 }
 
-// ★ เดิมโค้ดวนลูป insert คำถามทีละข้อ + insert choices ทีละข้อ (for...await) ทำให้ถ้ามี
+//เดิมโค้ดวนลูป insert คำถามทีละข้อ + insert choices ทีละข้อ (for...await) ทำให้ถ้ามี
 // หลายคำถามต้องรอ network round-trip หลายรอบสะสมกัน (หลักวินาที) ตอนนี้รวมเป็น batch insert
 // ครั้งเดียว: insert คำถามทั้งหมดพร้อมกันก่อน (ได้ id กลับมาตามลำดับที่ insert) แล้วค่อย insert
 // choices ของทุกคำถามรวมเป็นก้อนเดียวอีกที — ลด round-trip จาก 2n เหลือ 2 ครั้งคงที่
@@ -164,20 +247,48 @@ async function batchInsertQuestions(
     source_type: q.sourceType ?? "custom",
     source_question_id: q.sourceQuestionId ?? null,
   }));
+  const orderIndexes = questionRows.map((r) => r.order_index);
 
-  const { data: insertedQuestions, error: questionsError } = await supabase
-    .from("quiz_questions")
-    .insert(questionRows)
-    .select("id");
+  let insertedQuestions: { id: string; order_index: number }[] | null = null;
 
-  if (questionsError || !insertedQuestions || insertedQuestions.length !== questionRows.length) {
-    console.error("Failed to batch save questions:", questionsError?.message);
-    return "บันทึกคำถามไม่สำเร็จ กรุณาลองใหม่";
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const { data, error } = await supabase
+      .from("quiz_questions")
+      .insert(questionRows)
+      .select("id, order_index");
+
+    if (!error && data && data.length === questionRows.length) {
+      insertedQuestions = data;
+      break;
+    }
+
+    console.error(`batchInsertQuestions (questions): attempt ${attempt + 1} failed:`, error?.message);
+
+    // ★ กัน insert ซ้ำ: เช็คว่ารอบก่อนแอบสำเร็จจริงไหม (insert commit แล้วแต่ response หาย)
+    const { data: existing } = await supabase
+      .from("quiz_questions")
+      .select("id, order_index")
+      .eq("lesson_draft_id", draftId)
+      .in("order_index", orderIndexes);
+
+    if (existing && existing.length === questionRows.length) {
+      insertedQuestions = existing;
+      break;
+    }
+
+    if (attempt === MAX_RETRIES || !isRetryableError(error)) {
+      return "บันทึกคำถามไม่สำเร็จ กรุณาลองใหม่";
+    }
+    await sleep(RETRY_DELAYS_MS[attempt] ?? 2000);
   }
 
-  // Postgres คืนแถวตามลำดับที่ insert ให้ตอน insert หลายแถวในคำสั่งเดียว จับคู่ตามลำดับได้ปลอดภัย
-  const choiceRows = validQuestions.flatMap(({ q }, i) => {
-    const questionId = insertedQuestions[i].id;
+  if (!insertedQuestions) return "บันทึกคำถามไม่สำเร็จ กรุณาลองใหม่";
+
+  const idByOrderIndex = new Map(insertedQuestions.map((row) => [row.order_index, row.id]));
+
+  const choiceRows = validQuestions.flatMap(({ q, originalIndex }) => {
+    const questionId = idByOrderIndex.get(originalIndex);
+    if (!questionId) return [];
     return q.choices
       .filter((c) => c.text.trim())
       .map((c, cIndex) => ({
@@ -188,15 +299,29 @@ async function batchInsertQuestions(
       }));
   });
 
-  if (choiceRows.length > 0) {
-    const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
-    if (choicesError) {
-      console.error("Failed to batch save choices:", choicesError.message);
+  if (choiceRows.length === 0) return null;
+
+  const questionIds = [...new Set(choiceRows.map((r) => r.question_id))];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const { error } = await supabase.from("quiz_choices").insert(choiceRows);
+    if (!error) return null;
+
+    console.error(`batchInsertQuestions (choices): attempt ${attempt + 1} failed:`, error.message);
+
+    const { count } = await supabase
+      .from("quiz_choices")
+      .select("id", { count: "exact", head: true })
+      .in("question_id", questionIds);
+
+    if ((count ?? 0) >= choiceRows.length) return null;
+
+    if (attempt === MAX_RETRIES || !isRetryableError(error)) {
       return "บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่";
     }
+    await sleep(RETRY_DELAYS_MS[attempt] ?? 2000);
   }
-
-  return null;
+  return "บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่";
 }
 
 export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<SaveLessonDraftResult> {
@@ -211,6 +336,11 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   if (!input.title.trim()) return { error: "กรุณาใส่ชื่อบทเรียน" };
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
+
+  // ★ เพิ่มใหม่: หาความยาววิดีโอรวมของบทเรียนจาก segment ที่เพิ่งตรวจสอบผ่าน
+  // แล้วบันทึกลง lessons.video_duration_seconds — คอลัมน์นี้มีอยู่แล้วในฐานข้อมูล (default 0)
+  // แต่ก่อนหน้านี้ไม่มีจุดไหนเซ็ตค่าให้เลย หน้าคอร์ส (/courses/[slug]) เลยคำนวณรวมได้ 0 เสมอ
+  const videoDurationSeconds = computeVideoDurationSeconds(preparedSegments.segments);
 
   // 1. หา order_index ถัดไปใน module
   const { data: lastLesson } = await supabase
@@ -231,6 +361,7 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
       course_id: input.courseId,
       title: input.title,
       video_url: input.videoUrl,
+      video_duration_seconds: videoDurationSeconds,
       order_index: nextOrderIndex,
     })
     .select("id")
@@ -267,10 +398,10 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   if (questionsError) return { error: questionsError };
 
   // 5. สร้าง marker แบบสุ่มจากคลัง (bank_random) — ไม่มีเนื้อหาคำถาม ผูกแค่เงื่อนไข
-  if (input.randomMarkers.length > 0) {
+      if (input.randomMarkers.length > 0) {
     const markerRows = input.randomMarkers.map((m, idx) => ({
-      lesson_draft_id: draft.id,
-      lesson_id: lesson.id,
+      lesson_draft_id: draft.id,   
+      lesson_id: lesson.id,        
       timestamp_seconds: m.timestampSeconds,
       random_difficulty: m.difficulty,
       order_index: idx,
@@ -426,9 +557,18 @@ export async function updateLessonDraft(input: {
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
+  const videoDurationSeconds = computeVideoDurationSeconds(preparedSegments.segments);
+
   // 1-3. อัปเดต lesson / draft / สถานะคอร์ส พร้อมกัน — ไม่มีอันไหนต้องรอผลอันอื่นก่อน
   const [{ error: lessonError }, { error: draftError }, { error: courseStatusError }] = await Promise.all([
-    supabase.from("lessons").update({ title: input.title, video_url: input.videoUrl }).eq("id", input.lessonId),
+    supabase
+      .from("lessons")
+      .update({
+        title: input.title,
+        video_url: input.videoUrl,
+        video_duration_seconds: videoDurationSeconds,
+      })
+      .eq("id", input.lessonId),
     supabase
       .from("lesson_drafts")
       .update({
@@ -438,7 +578,6 @@ export async function updateLessonDraft(input: {
       })
       .eq("id", input.draftId)
       .eq("teacher_id", user.id),
-    // เมื่อเปิดรายการที่ส่งตรวจแล้วกลับมาแก้ ให้ถอนคอร์สออกจากคิวจนกว่าจะส่งใหม่
     supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId),
   ]);
 
@@ -454,26 +593,44 @@ export async function updateLessonDraft(input: {
   );
   if (segmentError) return { error: segmentError };
 
-  // 3. ลบเฉพาะควิซในวิดีโอ ส่วนคำถามท้ายคอร์สจัดการจากหน้าบททดสอบโดยเฉพาะ
-  const { error: deleteError } = await supabase
+  // ★ แก้ตามแผน A: จำ id คำถามเก่าไว้ก่อน แล้วค่อย insert คำถามใหม่ "ก่อน" ลบของเก่า
+  // เดิมลบก่อนแล้วค่อย insert — ถ้า insert พังกลางทาง (timeout/RLS ชั่วคราว) draft จะเหลือ
+  // คำถาม 0 ข้อ ตอนนี้สลับลำดับ: ถ้า insert ใหม่พัง ของเก่ายังอยู่ครบ ไม่มีอะไรหาย
+  // (อย่างแย่สุดถ้าลบของเก่าไม่สำเร็จหลัง insert ใหม่แล้ว จะเหลือคำถามซ้ำซ้อนชั่วคราว
+  // ซึ่งกู้คืนได้ง่ายกว่าคำถามหายไปเลย)
+  const { data: oldQuestions, error: oldQuestionsFetchError } = await supabase
     .from("quiz_questions")
-    .delete()
+    .select("id")
     .eq("lesson_draft_id", input.draftId)
     .not("video_timestamp_seconds", "is", null);
 
-  if (deleteError) return { error: "ลบคำถามเก่าไม่สำเร็จ" };
+  if (oldQuestionsFetchError) return { error: "ตรวจสอบคำถามเดิมไม่สำเร็จ กรุณาลองใหม่" };
 
-  // batch insert ครั้งเดียว แทนการวนลูป insert คำถาม/ตัวเลือกทีละข้อ
+  const oldQuestionIds = (oldQuestions ?? []).map((q) => q.id);
+
   const questionsError = await batchInsertQuestions(supabase, input.draftId, input.questions);
   if (questionsError) return { error: questionsError };
 
-  const { error: deleteMarkersError } = await supabase
-    .from("video_quiz_markers")
-    .delete()
-    .eq("lesson_draft_id", input.draftId);
-  if (deleteMarkersError) return { error: "ลบหมุดควิซแบบสุ่มเก่าไม่สำเร็จ" };
+  if (oldQuestionIds.length > 0) {
+  const deleteErr = await deleteWithRetry(() =>
+    supabase.from("quiz_questions").delete().in("id", oldQuestionIds)
+  );
+  if (deleteErr) {
+    return { error: "บันทึกคำถามใหม่สำเร็จ แต่ลบคำถามเก่าไม่สำเร็จ กรุณากดบันทึกอีกครั้งเพื่อล้างข้อมูลซ้ำ" };
+  }
+}
 
-  if (input.randomMarkers.length > 0) {
+  // ★ เดียวกับด้านบน: insert หมุดควิซแบบสุ่มใหม่ก่อน ค่อยลบของเก่าทีหลัง
+  const { data: oldMarkers, error: oldMarkersFetchError } = await supabase
+    .from("video_quiz_markers")
+    .select("id")
+    .eq("lesson_draft_id", input.draftId);
+
+  if (oldMarkersFetchError) return { error: "ตรวจสอบหมุดควิซเดิมไม่สำเร็จ กรุณาลองใหม่" };
+
+  const oldMarkerIds = (oldMarkers ?? []).map((m) => m.id);
+
+    if (input.randomMarkers.length > 0) {
     const markerRows = input.randomMarkers.map((m, idx) => ({
       lesson_draft_id: input.draftId,
       lesson_id: input.lessonId,
@@ -485,16 +642,20 @@ export async function updateLessonDraft(input: {
     if (markersError) return { error: "บันทึกหมุดควิซแบบสุ่มไม่สำเร็จ" };
   }
 
+  if (oldMarkerIds.length > 0) {
+    const { error: deleteMarkersError } = await supabase.from("video_quiz_markers").delete().in("id", oldMarkerIds);
+    if (deleteMarkersError) {
+      console.error("Failed to delete old markers:", deleteMarkersError.message);
+      return { error: "บันทึกหมุดควิซใหม่สำเร็จ แต่ลบหมุดเก่าไม่สำเร็จ กรุณากดบันทึกอีกครั้งเพื่อล้างข้อมูลซ้ำ" };
+    }
+  }
+
   return { draftId: input.draftId, lessonId: input.lessonId };
 }
 
 export async function submitDraftForReview(draftId: string, courseId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
 
   const submittedAt = new Date().toISOString();
@@ -507,14 +668,21 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
     .maybeSingle();
 
   if (error || !submittedDraft) {
-    console.error("Failed to submit draft:", error?.message ?? "no rows updated");
     return { error: error?.message ?? "ไม่พบฉบับร่าง หรือไม่มีสิทธิ์ส่งตรวจสอบ" };
   }
 
-  // หมายเหตุ: ไม่อัปเดตสถานะคอร์สเป็น "pending" ที่นี่อีกต่อไป — การส่ง 1 บทเรียนไม่ควรทำให้
-  // ทั้งคอร์สกลายเป็น "รอตรวจสอบ" ทั้งที่บทอื่นอาจยังไม่เสร็จ คอร์สจะถูกส่งตรวจจริงเมื่อครูกด
-  // "ส่งคอร์สเข้าตรวจ" ที่หน้ารายละเอียดคอร์ส (ต้องครบทุกบทเรียน + บททดสอบท้ายคอร์สก่อน)
-  // ดู submitCourseForReview ใน app/dashboard/teacher/courses/actions.ts
+  // ★ สมมาตรกับ rejectLesson: ถ้าคอร์สนี้ published อยู่แล้ว (เคยผ่านตรวจมาก่อน)
+  // การส่งบทเรียนที่แก้ใหม่เข้าตรวจต้องดึงคอร์สกลับเข้าคิว pending ด้วย
+  // ไม่งั้นจะไม่โผล่ที่หน้าแอดมิน ?status=pending เลย (courseId มีอยู่แล้วจาก parameter)
+  const { data: course } = await supabase
+    .from("courses")
+    .select("status")
+    .eq("id", courseId)
+    .maybeSingle();
+
+  if (course?.status === "published") {
+    await supabase.from("courses").update({ status: "pending" }).eq("id", courseId);
+  }
 
   revalidatePath(`/dashboard/teacher/courses/${courseId}`);
   revalidatePath("/dashboard/teacher/courses");
@@ -559,4 +727,32 @@ export async function getBankQuestionsForLesson(
         .map((c: { choice_text: string; is_correct: boolean }) => ({ text: c.choice_text, isCorrect: c.is_correct })),
     })),
   };
+}
+
+export async function getBankQuestionCountsForLesson(
+  lessonId: string
+): Promise<{ counts: BankQuestionCounts; error?: string }> {
+  const emptyCounts: BankQuestionCounts = { easy: 0, medium: 0, hard: 0 };
+  if (!lessonId) return { counts: emptyCounts };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { counts: emptyCounts, error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  const { data, error } = await supabase
+    .from("question_bank")
+    .select("difficulty, question_bank_topic_tags(lesson_id)")
+    .eq("usage_type", "popup");
+
+  if (error) return { counts: emptyCounts, error: error.message };
+
+  const counts = { ...emptyCounts };
+  for (const q of data ?? []) {
+    const tags = (q as { question_bank_topic_tags?: { lesson_id: string | null }[] }).question_bank_topic_tags ?? [];
+    if (!tags.some((tag) => tag.lesson_id === lessonId)) continue;
+    const difficulty = (q as { difficulty: "easy" | "medium" | "hard" }).difficulty;
+    if (difficulty in counts) counts[difficulty] += 1;
+  }
+
+  return { counts };
 }

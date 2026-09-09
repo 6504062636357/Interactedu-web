@@ -114,6 +114,26 @@ a {
   .text-balance {
     text-wrap: balance;
   }
+
+  /* ★ เพิ่มใหม่: ก้อนสีลอยตัวเบาๆ สำหรับพื้นหลังหน้าแรก — ใช้กับวงกลม blur ที่มีอยู่แล้ว
+     ให้มันขยับตัวช้าๆ แทนที่จะอยู่นิ่ง ให้ความรู้สึกทันสมัยแบบหน้า landing page ทั่วไป */
+  .animate-blob-slow {
+    animation: blob-float 16s ease-in-out infinite;
+  }
+
+  .animate-blob-slower {
+    animation: blob-float 22s ease-in-out infinite reverse;
+  }
+
+  .animate-blob-slowest {
+    animation: blob-float 26s ease-in-out infinite;
+  }
+
+  /* พื้นผิวจุดจาง ๆ ใช้แต่งพื้นหลังส่วน hero ให้มีมิติขึ้นแบบไม่แย่งซีนเนื้อหา */
+  .bg-dot-grid {
+    background-image: radial-gradient(rgba(15, 27, 61, 0.14) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
 }
 
 @keyframes marquee {
@@ -130,6 +150,13 @@ a {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ★ เพิ่มใหม่: ก้อนสี blur ลอยไปมาเบาๆ รอบจุดเดิม ใช้กับพื้นหลังตกแต่งหน้าแรก */
+@keyframes blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(4%, -5%) scale(1.08); }
+  66% { transform: translate(-4%, 4%) scale(0.94); }
 }
 
 .app-canvas {

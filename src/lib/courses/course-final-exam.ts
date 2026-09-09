@@ -25,6 +25,9 @@ interface LessonRow {
   id: string;
   title: string;
   order_index: number;
+  // [งานข้อ 05] ต้องรู้ว่า SCO ของบทนี้เป็น SCORM 1.2 หรือ 2004 ก่อนเขียนคะแนนกลับเข้า cmi_data
+  // เพราะ shape ของ CMI ต่างกัน (cmi.core.score.* สำหรับ 1.2 vs cmi.score.* สำหรับ 2004)
+  scorm_version: string | null;
 }
 
 interface DraftRow {
@@ -91,7 +94,7 @@ async function loadCourseExamData(
 
   const { data: lessonsData, error: lessonsError } = await supabase
     .from("lessons")
-    .select("id, title, order_index")
+    .select("id, title, order_index, scorm_version")
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
   if (lessonsError) throw new Error(lessonsError.message);
@@ -288,21 +291,26 @@ export async function gradeCourseFinalExam(
   const passPercentage = Number(data.course.certificate_pass_percentage ?? DEFAULT_PASS_PERCENTAGE);
   const passed = scorePercentage >= passPercentage;
 
-  if (data.usingQuestionBank) {
-    // คำถามชุดนี้มาจาก question_bank -> log คำตอบลง quiz_attempts/quiz_attempt_questions
-    // (question_id ในตารางนี้ FK ผูกกับ question_bank โดยตรง ไม่ชนกับ video_quiz_attempts ที่ผูกกับ quiz_questions)
-    const { data: quizAttempt, error: quizAttemptError } = await supabase
-      .from("quiz_attempts")
-      .insert({
-        enrollment_id: data.enrollment.id,
-        submitted_at: attemptedAt,
-        score: scorePercentage,
-        passed,
-      })
-      .select("id")
-      .single();
-    if (quizAttemptError) throw new Error(quizAttemptError.message);
+  // [งานข้อ 03] เขียน quiz_attempts เสมอทั้งสอง path — นี่คือแหล่งความจริงเดียวของ
+  // "ผลสอบปลายคอร์ส" ไม่ผูกกับบทเรียนไหนอีกต่อไป (ก่อนหน้านี้ยัดใส่ scorm_tracking ของ
+  // "บทเรียนสุดท้ายตามลำดับอาเรย์" ซึ่งพังถ้าครูเพิ่มบทใหม่ทีหลัง หรือ throw ถ้า enrollment
+  // ไม่เคยมีแถว scorm_tracking ของบทนั้นมาก่อน — ทั้งสองปัญหาหายไปเพราะ quiz_attempts
+  // ผูกกับ enrollment_id ตรงๆ ไม่ต้องอิงบทเรียนใดบทเรียนหนึ่งเลย)
+  const { data: quizAttempt, error: quizAttemptError } = await supabase
+    .from("quiz_attempts")
+    .insert({
+      enrollment_id: data.enrollment.id,
+      submitted_at: attemptedAt,
+      score: scorePercentage,
+      passed,
+    })
+    .select("id")
+    .single();
+  if (quizAttemptError) throw new Error(quizAttemptError.message);
 
+  if (data.usingQuestionBank) {
+    // คำถามชุดนี้มาจาก question_bank -> log คำตอบรายข้อลง quiz_attempt_questions
+    // (question_id ในตารางนี้ FK ผูกกับ question_bank โดยตรง ไม่ชนกับ video_quiz_attempts ที่ผูกกับ quiz_questions)
     const attemptQuestionRows = data.questions.map((question) => ({
       attempt_id: quizAttempt.id,
       question_id: question.id,
@@ -315,7 +323,10 @@ export async function gradeCourseFinalExam(
       .insert(attemptQuestionRows);
     if (answerSaveError) throw new Error(answerSaveError.message);
   } else {
-    // ทางเดิม: ไม่มี examConfig = คำถามยังมาจาก quiz_questions (คอร์สเก่าที่ยังไม่ตั้งค่า) -> พฤติกรรมเดิมเป๊ะ
+    // ทางเดิม: ไม่มี examConfig = คำถามยังมาจาก quiz_questions (คอร์สเก่าที่ยังไม่ตั้งค่า)
+    // quiz_attempt_questions.question_id มี FK ผูกกับ question_bank เท่านั้น จะยัด id จาก
+    // quiz_questions ลงไปตรงๆ ไม่ได้ (FK จะพัง) รายละเอียดรายข้อของทางนี้เลยยังคงไปที่
+    // video_quiz_attempts เหมือนเดิมทุกอย่าง เปลี่ยนแค่ตอนนี้มี quiz_attempts (header) คู่กันด้วย
     const attemptRows = data.questions.map((question) => ({
       student_id: userId,
       lesson_id: resolveLessonId(question, data.lessonIdByDraft),
@@ -330,27 +341,70 @@ export async function gradeCourseFinalExam(
     if (answerSaveError) throw new Error(answerSaveError.message);
   }
 
-  const attemptLesson = data.lessons[data.lessons.length - 1];
-  const { data: tracking, error: trackingError } = await supabase
-    .from("scorm_tracking")
-    .update({
-      lesson_status: passed ? "passed" : "completed",
-      score_raw: scorePercentage,
-      quiz_passed: passed,
-      quiz_score_recorded: true,
-      course_final_exam_recorded: true,
-      quiz_attempted_at: attemptedAt,
-      last_accessed: attemptedAt,
-    })
-    .eq("enrollment_id", data.enrollment.id)
-    .eq("lesson_id", attemptLesson.id)
-    .select("id")
-    .single();
-  if (trackingError) throw new Error(trackingError.message);
+  // scorm_tracking ไม่ถูกแตะเรื่อง completion/lesson_status จากฟังก์ชันนี้ — field พวกนั้นยังคง
+  // เป็นของ "จบบทเรียนหรือยัง" (video_completed) ที่มาจาก SCORM commit flow เท่านั้น
+  // certificate service อ่าน completion จาก scorm_tracking และอ่านคะแนนจาก quiz_attempts
+  // (แถวที่เพิ่งสร้างข้างบน) แยกกันเหมือนเดิม — สิ่งเดียวที่ฟังก์ชันนี้เขียนกลับเข้า scorm_tracking
+  // คือ cmi_data.score [งานข้อ 05] ด้านล่าง เพื่อให้ผลสอบที่ตรวจแล้วมีอยู่จริงใน CMI data model
+  // มาตรฐาน ไม่ใช่แค่เก็บใน quiz_attempts ซึ่งเป็นตาราง custom ของแอปเราเอง — พอผู้เรียนเปิด SCO
+  // ของบทไหนก็ตามในคอร์สนี้อีกครั้ง LMSGetValue("cmi.core.score.raw") จะได้คะแนนสอบปลายคอร์สกลับ
+  // มาจริง เหมือนตอนที่ LMS จริงผลักคะแนนที่ครูแก้ไขให้กลับเข้า SCO
+  //
+  // เขียนเข้าไปทุกบทเรียนของคอร์ส (ไม่ใช่บทใดบทหนึ่ง) เพราะข้อสอบนี้เป็นคะแนนระดับคอร์ส ไม่ผูกกับ
+  // บทเรียนใดบทเรียนหนึ่งอยู่แล้ว (เหตุผลเดียวกับที่ #03 เลิกยัดมันใส่ "บทสุดท้าย") — เขียนแค่ฟิลด์
+  // score เท่านั้น ไม่แตะ lesson_status/entry/suspend_data/location/interactions/objectives ที่มี
+  // อยู่แล้วใน cmi_data ของแต่ละแถว (merge เฉพาะ score ไม่ overwrite ทั้งก้อน)
+  //
+  // เป็นการเสริม data model ให้ครบ ไม่ใช่ผลตัดสินสอบ (คะแนนจริงบันทึกลง quiz_attempts สำเร็จไปแล้ว
+  // ก่อนหน้านี้) ถ้าขั้นตอนนี้พลาดจึงแค่ log ไว้ ไม่ทำให้การตรวจข้อสอบทั้งหมดกลายเป็น error
+  try {
+    const { data: trackingRows, error: trackingFetchError } = await supabase
+      .from("scorm_tracking")
+      .select("id, lesson_id, cmi_data")
+      .eq("enrollment_id", data.enrollment.id)
+      .in("lesson_id", data.lessons.map((lesson) => lesson.id));
+    if (trackingFetchError) throw new Error(trackingFetchError.message);
+
+    const scormVersionByLesson = new Map(data.lessons.map((lesson) => [lesson.id, lesson.scorm_version]));
+    const scoreValue = { raw: scorePercentage, min: 0, max: 100 };
+
+    for (const row of trackingRows ?? []) {
+      const existingCmi = (
+        row.cmi_data && typeof row.cmi_data === "object" ? row.cmi_data : {}
+      ) as Record<string, unknown>;
+      const is2004 = scormVersionByLesson.get(row.lesson_id) === "2004";
+
+      const nextCmi: Record<string, unknown> = is2004
+        ? {
+            ...existingCmi,
+            score: { ...(existingCmi.score as Record<string, unknown> | undefined), ...scoreValue },
+          }
+        : {
+            ...existingCmi,
+            core: {
+              ...(existingCmi.core as Record<string, unknown> | undefined),
+              score: {
+                ...((existingCmi.core as Record<string, unknown> | undefined)?.score as
+                  | Record<string, unknown>
+                  | undefined),
+                ...scoreValue,
+              },
+            },
+          };
+
+      const { error: cmiUpdateError } = await supabase
+        .from("scorm_tracking")
+        .update({ cmi_data: nextCmi })
+        .eq("id", row.id);
+      if (cmiUpdateError) throw new Error(cmiUpdateError.message);
+    }
+  } catch (cmiWriteError) {
+    console.warn("[gradeCourseFinalExam] เขียนคะแนนกลับเข้า cmi_data ไม่สำเร็จ:", cmiWriteError);
+  }
 
   return {
     courseId,
-    attemptId: tracking.id,
+    attemptId: quizAttempt.id,
     totalQuestions: data.questions.length,
     correctAnswers,
     scorePercentage,

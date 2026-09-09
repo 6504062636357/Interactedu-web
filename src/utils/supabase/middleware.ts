@@ -31,8 +31,12 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // ลดจาก 8000 -> 5000: ทดสอบจริงเจอ middleware รวมค้างถึง 42 วิ เพราะ Next.js ยิง
+      // middleware ซ้ำหลายรอบต่อการเปิด 1 หน้า (ดูเหตุผลเต็มในคอมเมนต์ proxy.ts) แต่ละรอบ
+      // เสี่ยงกิน timeout เต็มพร้อมกันถ้า Supabase สะดุดจังหวะเดียวกัน — ลด cap ต่อ 1 fetch ลง
+      // ช่วยลด worst-case รวมได้ตรงๆ โดยยัง generous พอสำหรับ request ปกติที่เห็นจริง (<1.5s)
       global: {
-        fetch: fetchWithTimeout(8000),
+        fetch: fetchWithTimeout(5000),
       },
       cookies: {
         getAll() {
