@@ -57,6 +57,11 @@ export interface LessonAnalytics {
   stoppedStudents: number;
   stopRate: number;
   completionRate: number;
+  // [งานข้อ 11] คะแนนแบบทดสอบระหว่างวิดีโอ (formative) — null/0 แปลว่ายังไม่มีใครตอบเลย
+  // ตั้งใจแยกจาก completionRate/stopRate ข้างบนโดยสิ้นเชิง (คนละตาราง คนละความหมาย ไม่เอามารวม
+  // กับคะแนนสอบปลายคอร์ส/ใบรับรอง)
+  videoQuizAverageScore: number | null;
+  videoQuizAttemptedStudents: number;
 }
 
 interface TeacherAnalyticsClientProps {
@@ -171,6 +176,21 @@ export default function TeacherAnalyticsClient({
             lesson.stoppedStudents > 0 && (courseId === "all" || lesson.courseId === courseId)
         )
         .sort((a, b) => b.stoppedStudents - a.stoppedStudents || b.stopRate - a.stopRate)
+        .slice(0, 6),
+    [courseId, lessons]
+  );
+
+  // [งานข้อ 11] บทเรียนที่มีคนตอบแบบทดสอบระหว่างวิดีโอแล้ว เรียงจากคะแนนเฉลี่ยต่ำสุดก่อน —
+  // ช่วยครูเห็นจุดที่ผู้เรียนเข้าใจน้อยที่สุดชัดที่สุด (ตั้งใจแยกจาก dropoffLessons ข้างบน
+  // ซึ่งเป็นคนละตัวชี้วัด: หยุดดูวิดีโอ ≠ ตอบควิซพลาด)
+  const quizScoreLessons = useMemo(
+    () =>
+      lessons
+        .filter(
+          (lesson) =>
+            lesson.videoQuizAttemptedStudents > 0 && (courseId === "all" || lesson.courseId === courseId)
+        )
+        .sort((a, b) => (a.videoQuizAverageScore ?? 0) - (b.videoQuizAverageScore ?? 0))
         .slice(0, 6),
     [courseId, lessons]
   );
@@ -405,6 +425,59 @@ export default function TeacherAnalyticsClient({
                         <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
                           <span>เริ่มดู {lesson.startedStudents} คน · เรียนจบ {lesson.completedStudents} คน</span>
                           <span className="font-bold text-red-500">หยุด {formatPercent(lesson.stopRate)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* [งานข้อ 11] คะแนนแบบทดสอบระหว่างวิดีโอ — formative แยกต่างหากจากคะแนนสอบปลายคอร์ส/
+              ใบรับรอง (MetricCard "คะแนนเฉลี่ย" ด้านบน) โดยเจตนา ไม่เอามารวมกัน */}
+          <section className="mt-6 overflow-hidden rounded-[24px] border border-slate-200/70 bg-white shadow-[0_8px_30px_rgba(15,27,61,0.045)]">
+            <div className="flex flex-col justify-between gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-end sm:px-6">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Award className="text-[#3157D5]" size={17} />
+                  <h2 className="text-[15px] font-extrabold text-[#0F1B3D]">คะแนนแบบทดสอบระหว่างวิดีโอ</h2>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  formative — ไม่นับรวมกับคะแนนสอบปลายคอร์ส/ใบรับรอง เรียงจากคะแนนเฉลี่ยต่ำสุดก่อน
+                </p>
+              </div>
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
+                <Users size={12} /> เฉพาะบทที่มีคนตอบแล้ว
+              </span>
+            </div>
+
+            {quizScoreLessons.length === 0 ? (
+              <div className="px-5 py-12 text-center">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-[#3157D5]">
+                  <Award size={21} />
+                </div>
+                <p className="mt-4 text-[13px] font-bold text-slate-500">ยังไม่มีผู้เรียนตอบแบบทดสอบระหว่างวิดีโอในบทไหนเลย</p>
+              </div>
+            ) : (
+              <div className="grid divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0">
+                {quizScoreLessons.map((lesson, index) => (
+                  <div key={lesson.lessonId} className="group p-5 transition hover:bg-blue-50/30 sm:p-6">
+                    <div className="flex items-start gap-3.5">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[12px] font-black ${index === 0 ? "bg-[#3157D5] text-white shadow-lg shadow-[#3157D5]/20" : "bg-slate-100 text-slate-500"}`}>{index + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="line-clamp-1 text-[12.5px] font-extrabold text-[#0F1B3D]">{lesson.lessonTitle}</p>
+                            <p className="mt-1 line-clamp-1 text-[10.5px] text-slate-400">{lesson.courseTitle}</p>
+                          </div>
+                          <span className="shrink-0 text-[15px] font-black text-[#3157D5] tabular-nums">{formatPercent(lesson.videoQuizAverageScore)}</span>
+                        </div>
+                        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-blue-100">
+                          <div className="h-full rounded-full bg-[linear-gradient(90deg,#3157D5,#7290F0)]" style={{ width: `${lesson.videoQuizAverageScore ?? 0}%` }} />
+                        </div>
+                        <div className="mt-2 text-[10px] text-slate-400">
+                          ตอบแล้ว {lesson.videoQuizAttemptedStudents} คน จาก {lesson.totalStudents} คน
                         </div>
                       </div>
                     </div>

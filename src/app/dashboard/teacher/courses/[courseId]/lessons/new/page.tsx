@@ -35,16 +35,22 @@ export async function CourseLessonEditorPage({
     .eq("id", courseId)
     .maybeSingle();
 
-  // ★ บั๊กเดิม: ถ้า query ล้มเหลวจริงๆ (เน็ตหลุด/timeout/RLS ผิดพลาดชั่วคราว — ปัญหาที่เจอบ่อยมา
-  // ตลอดทั้ง session นี้) courseError จะไม่เป็น null แต่ course ก็จะเป็น null ไปด้วย โค้ดเดิมเช็คแค่
-  // `if (!course) notFound()` เลยตีความ error ชั่วคราวว่า "ไม่พบคอร์สนี้" แล้วโชว์หน้า 404 แบบถาวร
-  // ทั้งที่คอร์สมีอยู่จริง กด refresh ใหม่บ่อยๆ ก็หายเพราะรอบถัดไป query สำเร็จ — นี่คือสาเหตุที่
-  // หน้านี้ "404 บ่อย" ตามที่รายงานมา ไม่ใช่ปัญหาสิทธิ์หรือ URL ผิด
-  // แก้โดยแยกเคส: มี courseError จริง (query ล้มเหลว ไม่ใช่ "ไม่พบ") ให้โชว์ข้อความแจ้งเตือนพร้อมปุ่ม
-  // "ลองใหม่" แทนการ throw หรือ notFound() ตรงๆ — เพราะโปรเจกต์นี้ยังไม่มี error.tsx boundary ที่ไหน
-  // เลย (เช็คแล้วทั้ง src/app/dashboard/teacher และ src/app root) การ throw ตรงนี้จะไปโชว์หน้า
-  // error กลางๆ ของ Next.js แทน ซึ่งดูแย่กว่าการเรนเดอร์ข้อความที่เข้าใจง่ายเองในหน้านี้
-  // ส่วน notFound() (404 จริง) จะเกิดเฉพาะตอนไม่มี error และคอร์สไม่มีอยู่จริงเท่านั้น
+  // ★ เพิ่มใหม่: ถ้าไม่มี courseError แต่ course ก็ยังเป็น null — อาจเป็นเพราะ auth.uid() resolve
+  // พลาดชั่วคราวตอน Supabase โหลดสูง (RLS กรองแถวออกเงียบๆ โดยไม่คืน error เลย) ก่อนจะฟันธงว่า
+  // "ไม่พบคอร์ส" ให้ลอง query ซ้ำอีกครั้งแบบเงียบๆ ก่อน — ทุกจุดหลังจากนี้ใช้ confirmedCourse แทน
+  let confirmedCourse = course;
+  if (!courseError && !confirmedCourse) {
+    const retryResult = await supabase
+      .from("courses")
+      .select("id, title, created_by")
+      .eq("id", courseId)
+      .maybeSingle();
+    confirmedCourse = retryResult.data;
+    if (retryResult.error) {
+      console.error("[lessons/new] retry course fetch failed:", courseId, retryResult.error.message);
+    }
+  }
+
   if (courseError) {
     console.error("[lessons/new] failed to load course:", courseId, courseError.message);
     return (
@@ -64,8 +70,8 @@ export async function CourseLessonEditorPage({
       </div>
     );
   }
-  if (!course) notFound();
-  if (profile.role === "teacher" && course.created_by !== user.id) redirect(`/dashboard/${workspace}`)
+  if (!confirmedCourse) notFound();
+  if (profile.role === "teacher" && confirmedCourse.created_by !== user.id) redirect(`/dashboard/${workspace}`);
 
   let { data: courseModule } = await supabase
     .from("modules")
@@ -93,7 +99,6 @@ export async function CourseLessonEditorPage({
   if (lessonId) {
     const result = await getLessonDraftForEdit(lessonId);
     if (result.data) initialData = result.data;
-    // ถ้า error (เช่นยังไม่มี draft) ปล่อยให้ initialData เป็น null → ฟอร์มเปิดเป็นโหมดสร้างใหม่ตามปกติ
   }
 
   return (
@@ -101,12 +106,12 @@ export async function CourseLessonEditorPage({
       <main className="max-w-3xl mx-auto">
         <div className="mb-6">
           <Link
-            href={`/dashboard/${workspace}/courses/${course.id}`}
+            href={`/dashboard/${workspace}/courses/${confirmedCourse.id}`}
             className="text-[12.5px] font-semibold text-[#0F1B3D]/40 hover:text-[#0F1B3D] mb-2 inline-block"
-            >
-              ← กลับไปที่คอร์ส
+          >
+            ← กลับไปที่คอร์ส
           </Link>
-          <p className="text-[13px] font-bold text-[#FF5A3C] mb-1">{course.title}</p>
+          <p className="text-[13px] font-bold text-[#FF5A3C] mb-1">{confirmedCourse.title}</p>
           <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
             {initialData ? "แก้ไขบทเรียน" : "เพิ่มบทเรียนใหม่"}
           </h1>
@@ -118,7 +123,7 @@ export async function CourseLessonEditorPage({
         </div>
 
         <LessonDraftForm
-          courseId={course.id}
+          courseId={confirmedCourse.id}
           moduleId={courseModule.id}
           initialData={initialData}
           workspace={workspace}

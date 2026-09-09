@@ -251,6 +251,12 @@ export async function POST(request: NextRequest) {
         scorm_entry_point: entryPoint,
         scorm_version: version,
         scorm_manifest: { organizationTitle, items },
+        // [งานข้อ 06] เส้นทางนี้คือทางเดียวที่อัปโหลดแพ็กเกจของคนอื่น (ไม่เคยเขียนลง
+        // scorm_packages เลย) — ต้องระบุ scorm_source ตรงๆ เพราะคอลัมน์ default เป็น
+        // 'generated' ไว้ (สอดคล้องกับ pipeline lib/scorm/generate.ts ที่ใช้บ่อยกว่า)
+        // api/scorm/tracking อ่านค่านี้เพื่อตัดสินว่าจะเชื่อคะแนนที่ SCO รายงานเองผ่าน
+        // cmi.core.score.raw / cmi.score.raw ได้หรือไม่
+        scorm_source: 'imported',
       })
       .eq('id', lessonId);
 

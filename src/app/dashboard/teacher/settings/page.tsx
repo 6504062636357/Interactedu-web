@@ -9,7 +9,8 @@ const supabase = createClient();
 
 export default function TeacherSettingsPage(): ReactElement {
   const [newStudentNotif, setNewStudentNotif] = useState(true);
-  const [language, setLanguage] = useState<"th" | "en">("th");
+  //const [language, setLanguage] = useState<"th" | "en">("th");
+  const [language] = useState<"th" | "en">("th");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -26,7 +27,7 @@ export default function TeacherSettingsPage(): ReactElement {
         .single();
 
       if (data) {
-        setLanguage((data.language as "th" | "en") ?? "th");
+        //setLanguage((data.language as "th" | "en") ?? "th");
         setNewStudentNotif(data.notify_new_student ?? true);
       }
       setIsLoading(false);
@@ -80,7 +81,7 @@ export default function TeacherSettingsPage(): ReactElement {
         </label>
       </section>
 
-      <section>
+      {/* <section>
         <h2 className="text-[15px] font-bold text-slate-900 mb-4">ภาษาและระบบ</h2>
         <label className="block text-[12.5px] font-semibold text-slate-600 mb-1">ภาษาของ Dashboard</label>
         <select
@@ -91,7 +92,7 @@ export default function TeacherSettingsPage(): ReactElement {
           <option value="th">ไทย</option>
           <option value="en">English</option>
         </select>
-      </section>
+      </section> */}
 
       {message && (
         <p className={`text-[13px] font-medium ${message.type === "success" ? "text-emerald-600" : "text-red-500"}`}>

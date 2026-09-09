@@ -42,11 +42,23 @@ interface TrackingRow {
   lesson_id: string;
   lesson_status: string | null;
   video_completed: boolean | null;
-  score_raw: number | string | null;
-  quiz_score_recorded: boolean | null;
-  course_final_exam_recorded: boolean | null;
-  quiz_attempted_at: string | null;
   last_accessed: string | null;
+}
+
+// [งานข้อ 03] คะแนนสอบปลายคอร์สมาจาก quiz_attempts แล้ว ไม่ใช่ scorm_tracking อีกต่อไป
+interface QuizAttemptRow {
+  enrollment_id: string;
+  score: number | string | null;
+  passed: boolean | null;
+  submitted_at: string | null;
+}
+
+// [งานข้อ 11] คะแนนแบบทดสอบระหว่างวิดีโอ (formative) — ไม่มี enrollment_id ในตารางนี้ (คีย์เป็น
+// student_id ตรงๆ) และตั้งใจแยกจาก quiz_attempts/certificate โดยสิ้นเชิง ไม่เอามารวมกัน
+interface VideoQuizAttemptRow {
+  student_id: string;
+  lesson_id: string;
+  is_correct: boolean | null;
 }
 
 interface EnrollmentMetric {
@@ -97,39 +109,64 @@ function currentTimestamp(): number {
   return Date.now();
 }
 
-function latestTimestamp(rows: TrackingRow[]): string | null {
+// [งานข้อ 11] รวมคะแนนแบบทดสอบระหว่างวิดีโอเป็นค่าเฉลี่ยรายบทเรียน — เฉลี่ยจาก "เปอร์เซ็นต์ถูก
+// ต่อคน" ก่อน ไม่ใช่ pool ผลถูก/ผิดของทุกคนรวมกันตรงๆ (ไม่งั้นคนตอบเยอะจะถ่วงค่าเฉลี่ยเกินสัดส่วน)
+// เป็น formative — ไม่เกี่ยวกับคะแนนสอบปลายคอร์ส/ใบรับรองใน quiz_attempts เลย (แยกกันโดยเจตนา)
+function summarizeVideoQuizByLesson(
+  rows: VideoQuizAttemptRow[]
+): Map<string, { averageScore: number; attemptedStudents: number }> {
+  const byLessonStudent = new Map<string, Map<string, { correct: number; total: number }>>();
+
+  for (const row of rows) {
+    const perStudent = byLessonStudent.get(row.lesson_id) ?? new Map<string, { correct: number; total: number }>();
+    const stat = perStudent.get(row.student_id) ?? { correct: 0, total: 0 };
+    stat.total += 1;
+    if (row.is_correct) stat.correct += 1;
+    perStudent.set(row.student_id, stat);
+    byLessonStudent.set(row.lesson_id, perStudent);
+  }
+
+  const result = new Map<string, { averageScore: number; attemptedStudents: number }>();
+  for (const [lessonId, perStudent] of byLessonStudent) {
+    const studentPercentages = [...perStudent.values()].map((stat) => percentage(stat.correct, stat.total));
+    result.set(lessonId, {
+      averageScore: average(studentPercentages),
+      attemptedStudents: perStudent.size,
+    });
+  }
+  return result;
+}
+
+// รับทั้ง tracking rows (last_accessed) และ quiz attempt rows (submitted_at) เพราะ "กิจกรรม
+// ล่าสุด" ของผู้เรียนอาจเป็นการดูวิดีโอ หรือการสอบปลายคอร์ส [งานข้อ 03: submitted_at ย้ายมาจาก
+// quiz_attempted_at เดิมใน scorm_tracking]
+function latestTimestamp(trackingRows: TrackingRow[], attemptRows: QuizAttemptRow[]): string | null {
   let latest: string | null = null;
   let latestTime = 0;
 
-  for (const row of rows) {
-    const timestamp = row.last_accessed ?? row.quiz_attempted_at;
-    if (!timestamp) continue;
+  const consider = (timestamp: string | null) => {
+    if (!timestamp) return;
     const time = new Date(timestamp).getTime();
     if (Number.isFinite(time) && time > latestTime) {
       latest = timestamp;
       latestTime = time;
     }
-  }
+  };
+
+  for (const row of trackingRows) consider(row.last_accessed);
+  for (const row of attemptRows) consider(row.submitted_at);
 
   return latest;
 }
 
-function latestScore(rows: TrackingRow[]): number | null {
-  const latest = rows
-    .filter(
-      (row) =>
-        row.score_raw !== null &&
-        (row.course_final_exam_recorded === true || row.quiz_score_recorded === true)
-    )
-    .sort((a, b) => {
-      const dateDiff =
-        new Date(b.quiz_attempted_at ?? 0).getTime() - new Date(a.quiz_attempted_at ?? 0).getTime();
-      if (dateDiff !== 0) return dateDiff;
-      return Number(b.course_final_exam_recorded) - Number(a.course_final_exam_recorded);
-    })[0];
+// [งานข้อ 03] คะแนนสอบล่าสุดของผู้เรียนคนนี้ อ่านจาก quiz_attempts แทน scorm_tracking.score_raw
+function latestExamScore(attempts: QuizAttemptRow[]): number | null {
+  const latest = [...attempts]
+    .filter((row) => row.score !== null)
+    .sort((a, b) => new Date(b.submitted_at ?? 0).getTime() - new Date(a.submitted_at ?? 0).getTime())[0];
 
   if (!latest) return null;
-  const score = Number(latest.score_raw);
+  const score = Number(latest.score);
   return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score * 10) / 10)) : null;
 }
 
@@ -229,44 +266,53 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
   const enrollments = enrollmentData;
   const modules = (modulesResult.data ?? []) as unknown as ModuleRow[];
   const enrollmentIds = enrollments.map((enrollment) => enrollment.id);
-  const trackingWithScores = enrollmentIds.length
-    ? await supabase
-        .from("scorm_tracking")
-        .select(
-          "enrollment_id, lesson_id, lesson_status, video_completed, score_raw, quiz_score_recorded, course_final_exam_recorded, quiz_attempted_at, last_accessed"
-        )
-        .in("enrollment_id", enrollmentIds)
-    : { data: [] as TrackingRow[], error: null };
+  // [งานข้อ 11] video_quiz_attempts คีย์เป็น lesson_id ตรงๆ (ไม่มี enrollment_id ในตารางนี้)
+  // ต้องรวบรวม lesson id ของทุกคอร์สที่ครูคนนี้เป็นเจ้าของจาก modules ที่ query มาแล้วข้างบน
+  const allLessonIds = modules.flatMap((moduleRow) => (moduleRow.lessons ?? []).map((lesson) => lesson.id));
 
-  let trackingData = (trackingWithScores.data ?? []) as TrackingRow[];
-  let trackingError = trackingWithScores.error;
-  let scoreColumnsUnavailable = false;
+  // completion tracking (scorm_tracking), คะแนนสอบปลายคอร์ส (quiz_attempts) และคะแนนแบบทดสอบ
+  // ระหว่างวิดีโอ (video_quiz_attempts — งานข้อ 11) แยกกันคนละตาราง
+  // [งานข้อ 03] — เดิม scorm_tracking มีคอลัมน์คะแนนด้วย ตอนนี้เหลือแค่คอลัมน์พื้นฐานที่มีมา
+  // ตั้งแต่แรก จึงไม่ต้องมี legacy-schema fallback สำหรับ scorm_tracking อีกต่อไป
+  const [trackingResult, attemptsResult, videoQuizResult] = await Promise.all([
+    enrollmentIds.length
+      ? supabase
+          .from("scorm_tracking")
+          .select("enrollment_id, lesson_id, lesson_status, video_completed, last_accessed")
+          .in("enrollment_id", enrollmentIds)
+      : Promise.resolve({ data: [] as TrackingRow[], error: null }),
+    enrollmentIds.length
+      ? supabase
+          .from("quiz_attempts")
+          .select("enrollment_id, score, passed, submitted_at")
+          .in("enrollment_id", enrollmentIds)
+          .not("submitted_at", "is", null)
+      : Promise.resolve({ data: [] as QuizAttemptRow[], error: null }),
+    allLessonIds.length
+      ? supabase
+          .from("video_quiz_attempts")
+          .select("student_id, lesson_id, is_correct")
+          .in("lesson_id", allLessonIds)
+      : Promise.resolve({ data: [] as VideoQuizAttemptRow[], error: null }),
+  ]);
 
-  // Older databases may not yet have the score metadata columns.
-  if (trackingError && enrollmentIds.length > 0) {
-    const legacyTrackingResult = await supabase
-      .from("scorm_tracking")
-      .select("enrollment_id, lesson_id, lesson_status, video_completed, score_raw, last_accessed")
-      .in("enrollment_id", enrollmentIds);
-
-    if (legacyTrackingResult.error) {
-      trackingError = legacyTrackingResult.error;
-      trackingData = [];
-    } else {
-      trackingError = null;
-      scoreColumnsUnavailable = true;
-      trackingData = (legacyTrackingResult.data ?? []).map((row) => ({
-        ...row,
-        quiz_score_recorded: row.score_raw !== null,
-        course_final_exam_recorded: false,
-        quiz_attempted_at: null,
-      })) as TrackingRow[];
-    }
+  const trackingRows = (trackingResult.data ?? []) as TrackingRow[];
+  const trackingError = trackingResult.error;
+  const attemptRows = (attemptsResult.data ?? []) as QuizAttemptRow[];
+  const attemptsError = attemptsResult.error;
+  // ถ้าโหลดคะแนนสอบไม่สำเร็จ (เช่น migration ของ quiz_attempts ยังไปไม่ถึงเครื่องนี้) ให้หน้ายัง
+  // ใช้งานได้ แค่ไม่มีคะแนนโชว์ แทนที่จะพังทั้งหน้า — เตือนผ่าน usesLegacySchema ด้านล่าง
+  const quizAttemptsUnavailable = Boolean(attemptsError);
+  // [งานข้อ 11] โหลดพลาดก็แค่ไม่มีการ์ดคะแนนแบบทดสอบระหว่างวิดีโอโชว์ ไม่ทำให้หน้าใช้งานไม่ได้
+  const videoQuizRows = (videoQuizResult.data ?? []) as VideoQuizAttemptRow[];
+  if (videoQuizResult.error) {
+    console.error("[teacher/analytics] video_quiz_attempts query failed:", videoQuizResult.error.message);
   }
+  const videoQuizByLesson = summarizeVideoQuizByLesson(videoQuizRows);
 
-  const trackingRows = trackingData;
   const lessonsByCourse = new Map<string, LessonRow[]>();
   const trackingByEnrollment = new Map<string, TrackingRow[]>();
+  const attemptsByEnrollment = new Map<string, QuizAttemptRow[]>();
   const coursePriceById = new Map(courses.map((course) => [course.id, safeMoney(course.price)]));
 
   for (const moduleRow of modules) {
@@ -281,6 +327,12 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
     trackingByEnrollment.set(row.enrollment_id, rows);
   }
 
+  for (const row of attemptRows) {
+    const rows = attemptsByEnrollment.get(row.enrollment_id) ?? [];
+    rows.push(row);
+    attemptsByEnrollment.set(row.enrollment_id, rows);
+  }
+
   const now = currentTimestamp();
   const activeThreshold = now - ACTIVE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const dropoutThreshold = now - DROPOFF_GRACE_HOURS * 60 * 60 * 1000;
@@ -289,12 +341,13 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
   for (const enrollment of enrollments) {
     const lessons = lessonsByCourse.get(enrollment.course_id) ?? [];
     const tracking = trackingByEnrollment.get(enrollment.id) ?? [];
+    const attempts = attemptsByEnrollment.get(enrollment.id) ?? [];
     const trackingByLesson = new Map(tracking.map((row) => [row.lesson_id, row]));
     const completedLessons = lessons.filter((lesson) =>
       isLessonCompleted(trackingByLesson.get(lesson.id))
     ).length;
     const progress = lessons.length > 0 ? Math.min(100, Math.round((completedLessons / lessons.length) * 100)) : 0;
-    const latestActivity = latestTimestamp(tracking);
+    const latestActivity = latestTimestamp(tracking, attempts);
     const latestActivityTime = latestActivity ? new Date(latestActivity).getTime() : 0;
     const storedRevenue = safeMoney(enrollment.paid_amount);
     const fallbackRevenue = enrollment.payment_slip_url ? coursePriceById.get(enrollment.course_id) ?? 0 : 0;
@@ -303,7 +356,7 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
       studentId: enrollment.student_id,
       progress,
       completed: lessons.length > 0 && progress === 100,
-      score: latestScore(tracking),
+      score: latestExamScore(attempts),
       active: latestActivityTime >= activeThreshold,
       revenue: storedRevenue || fallbackRevenue,
     });
@@ -349,6 +402,10 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
         return Number.isFinite(lastAccessed) && lastAccessed < dropoutThreshold;
       }).length;
 
+      // [งานข้อ 11] คะแนนแบบทดสอบระหว่างวิดีโอ — formative แยกจาก completedStudents/stopRate
+      // ข้างบนโดยสิ้นเชิง (คนละตาราง คนละความหมาย) ไม่มีข้อมูลก็แค่ null/0 ไม่กระทบตัวชี้วัดอื่น
+      const videoQuizSummary = videoQuizByLesson.get(lesson.id) ?? null;
+
       return {
         lessonId: lesson.id,
         lessonTitle: lesson.title,
@@ -360,13 +417,15 @@ export default async function TeacherAnalyticsPage(): Promise<ReactElement> {
         stoppedStudents,
         stopRate: percentage(stoppedStudents, lessonRows.length),
         completionRate: percentage(completedStudents, courseEnrollments.length),
+        videoQuizAverageScore: videoQuizSummary ? videoQuizSummary.averageScore : null,
+        videoQuizAttemptedStudents: videoQuizSummary ? videoQuizSummary.attemptedStudents : 0,
       };
     });
   });
 
   const summary = buildSummary([...enrollmentMetrics.values()]);
   const hasQueryError = Boolean(enrollmentError || modulesResult.error || trackingError);
-  const usesLegacySchema = revenueSnapshotUnavailable || scoreColumnsUnavailable;
+  const usesLegacySchema = revenueSnapshotUnavailable || quizAttemptsUnavailable;
 
   return (
     <TeacherAnalyticsClient

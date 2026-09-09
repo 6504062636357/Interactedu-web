@@ -31,13 +31,17 @@ interface CourseRow {
 }
 
 interface TrackingRow {
-  id: string;
   lesson_id: string;
-  score_raw: number | string | null;
   video_completed: boolean;
-  quiz_score_recorded: boolean;
-  course_final_exam_recorded: boolean;
-  quiz_attempted_at: string | null;
+}
+
+// [งานข้อ 03] คะแนน/ผ่านสอบ มาจาก quiz_attempts แยกจาก scorm_tracking แล้ว —
+// scorm_tracking เหลือแค่ใช้ตัดสิน "จบบททุกบทหรือยัง" (video_completed)
+interface QuizAttemptRow {
+  id: string;
+  score: number | string | null;
+  passed: boolean | null;
+  submitted_at: string | null;
 }
 
 function asCertificateRecord(value: unknown): CertificateRecord {
@@ -165,24 +169,34 @@ export async function ensureCertificateForCourse({
   const lessonIds = (lessons ?? []).map((lesson) => lesson.id as string);
   if (lessonIds.length === 0) throw new Error("Course has no lessons");
 
-  const { data: trackingData, error: trackingError } = await supabase
-    .from("scorm_tracking")
-    .select("id, lesson_id, score_raw, video_completed, quiz_score_recorded, course_final_exam_recorded, quiz_attempted_at")
-    .eq("enrollment_id", enrollment.id)
-    .in("lesson_id", lessonIds);
+  // completion (จบทุกบทหรือยัง) มาจาก scorm_tracking เหมือนเดิม — คะแนน/ผ่านสอบ มาจาก
+  // quiz_attempts แยกกัน คนละ query [งานข้อ 03]
+  const [{ data: trackingData, error: trackingError }, { data: attemptsData, error: attemptsError }] =
+    await Promise.all([
+      supabase
+        .from("scorm_tracking")
+        .select("lesson_id, video_completed")
+        .eq("enrollment_id", enrollment.id)
+        .in("lesson_id", lessonIds),
+      supabase
+        .from("quiz_attempts")
+        .select("id, score, passed, submitted_at")
+        .eq("enrollment_id", enrollment.id)
+        .not("submitted_at", "is", null),
+    ]);
   if (trackingError) throw new Error(trackingError.message);
+  if (attemptsError) throw new Error(attemptsError.message);
 
   const tracking = (trackingData ?? []) as TrackingRow[];
   const completedLessonIds = new Set(tracking.filter((row) => row.video_completed).map((row) => row.lesson_id));
-  const scoredRows = tracking.filter(
-    (row) => row.quiz_score_recorded && row.course_final_exam_recorded && row.score_raw !== null
-  );
+
+  const scoredRows = ((attemptsData ?? []) as QuizAttemptRow[]).filter((row) => row.score !== null);
   const trustedAttempt = attemptId
     ? scoredRows.find((row) => row.id === attemptId)
     : [...scoredRows].sort((a, b) =>
-        (b.quiz_attempted_at ?? "").localeCompare(a.quiz_attempted_at ?? "")
+        (b.submitted_at ?? "").localeCompare(a.submitted_at ?? "")
       )[0];
-  const scorePercentage = trustedAttempt ? Number(trustedAttempt.score_raw) : 0;
+  const scorePercentage = trustedAttempt ? Number(trustedAttempt.score) : 0;
 
   if (completedLessonIds.size < lessonIds.length || scoredRows.length === 0) {
     return {

@@ -12,19 +12,11 @@ interface PageProps {
   params: Promise<{ courseId: string }>;
 }
 
-interface QuizChoiceRow {
-  choice_text: string;
-  is_correct: boolean;
-  order_index: number;
-}
-
 interface QuizQuestionRow {
   id: string;
   question_text: string;
   video_timestamp_seconds: number | null;
-  explanation: string | null;
   order_index: number;
-  quiz_choices: QuizChoiceRow[];
 }
 
 interface LessonDraftRow {
@@ -102,8 +94,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
        lesson_drafts (
          id, status, created_at, video_url, content_html,
          quiz_questions (
-           id, question_text, video_timestamp_seconds, explanation, order_index,
-           quiz_choices ( choice_text, is_correct, order_index )
+           id, question_text, video_timestamp_seconds, order_index
          )
        )`
     )

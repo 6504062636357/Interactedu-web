@@ -22,6 +22,10 @@ interface ScormMenuItem {
 interface ScormManifest {
   organizationTitle: string;
   items: ScormMenuItem[];
+  // [งานข้อ 09] เกณฑ์ผ่าน (courses.certificate_pass_percentage) ที่ generator ฝังไว้ตอนสร้าง —
+  // มีเฉพาะแพ็กเกจ 'generated' เท่านั้น (ดู lib/scorm/generate.ts buildManifestJson) แพ็กเกจ
+  // imported ไม่มีฟิลด์นี้ในตัว manifest JSON ที่เราเก็บ — undefined ถ้าไม่มี
+  masteryScore?: number;
 }
 
 interface CourseMaterial {
@@ -49,9 +53,30 @@ interface ScormApiLike {
   STATE_INITIALIZED: unknown;
   LMSFinish?: (value: string) => unknown;
   Terminate?: (value: string) => unknown;
+  loadFromJSON?: (json: Record<string, unknown>) => void;
 }
 
 type ScormWindow = Window & { API?: ScormApiLike; API_1484_11?: ScormApiLike };
+
+// สถานะ CMI เดิมของผู้เรียนคนนี้ในบทเรียนนี้ ดึงมาจาก GET /api/scorm/tracking
+// เอาไปใส่กลับเข้า API ผ่าน loadFromJSON ก่อนที่ SCO จะเรียก LMSInitialize
+interface PriorScormState {
+  hasPriorAttempt: boolean;
+  lessonStatus: string;
+  scoreRaw: string;
+  suspendData: string;
+  lessonLocation: string;
+  completedScos: string[];
+  // ก้อน CMI เต็ม (lesson_location, session_time, interactions, objectives ฯลฯ)
+  // ที่เก็บไว้ตอน commit ครั้งล่าสุด — null ถ้ายังไม่เคยมี หรือแถวเก่าก่อนงานข้อ 02
+  cmiData: Record<string, unknown> | null;
+  // [งานข้อ 08] ตัวตนผู้เรียน + โหมดการเรียน — เซิร์ฟเวอร์เป็นคนตัดสิน credit/lessonMode ให้
+  // (ดูตรรกะที่ api/scorm/tracking GET) เพราะรู้ role/enrollment จริง ฝั่ง client แค่ป้อนต่อให้ SCO
+  studentId: string;
+  studentName: string;
+  credit: 'credit' | 'no-credit';
+  lessonMode: 'normal' | 'browse';
+}
 
 // เดินทุกกิ่งของเมนู แปลงเป็น flat list ตามลำดับ ไว้ใช้ทำปุ่มก่อนหน้า/ถัดไป
 function flattenPlayableItems(items: ScormMenuItem[]): ScormMenuItem[] {
@@ -71,6 +96,10 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [scormVersion, setScormVersion] = useState<'1.2' | '2004' | null>(null);
+  // [งานข้อ 07] 'generated' = แพ็กเกจของแพลตฟอร์มเอง, 'imported' = อัปโหลด .zip ของคนอื่น
+  // ใช้กันไม่ให้ heuristic เดาชนิด SCO จากชื่อไฟล์ (ที่ผูกกับ convention ของ generator เราเอง)
+  // ไปตีความเนื้อหาจริงของแพ็กเกจภายนอกผิด (เช่นโฟลเดอร์ quizzes/ ของเขาเอง)
+  const [scormSource, setScormSource] = useState<'generated' | 'imported' | null>(null);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [manifest, setManifest] = useState<ScormManifest | null>(null);
   const [courseTitle, setCourseTitle] = useState<string | null>(null);
@@ -88,6 +117,10 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   // ความคืบหน้าราย SCO ของเลสสันปัจจุบัน
   const [completedScos, setCompletedScos] = useState<string[]>([]);
+
+  // true เมื่อ window.API/API_1484_11 ถูกตั้งค่าและโหลด CMI เดิมเสร็จแล้ว
+  // ใช้กัน iframe ไม่ให้ขึ้นก่อน เพราะ SCO จะหา window.API ตอน load แค่ครั้งเดียว
+  const [apiReady, setApiReady] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -111,6 +144,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
         setCourseTitle(data.courseTitle ?? null);
         setLessonTitle(data.lessonTitle ?? null);
         setScormVersion(data.scormVersion === '2004' ? '2004' : '1.2');
+        setScormSource(data.scormSource === 'imported' ? 'imported' : 'generated');
       } catch (err) {
         console.error('SCORM Init Failed', err);
         setLoadError(err instanceof Error ? err.message : 'โหลดเนื้อหาไม่สำเร็จ');
@@ -119,24 +153,28 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     loadInfo();
   }, [lessonId]);
 
-  // --- Effect ที่ 2: สร้าง API instance ใหม่ทุกครั้งที่สลับ SCO ---
+  // --- Effect ที่ 2: โหลด CMI เดิมของผู้เรียนกลับเข้า API ก่อน แล้วค่อยสร้าง instance ใหม่ทุกครั้งที่สลับ SCO ---
+  // ลำดับสำคัญ: ต้องได้ CMI เดิม -> ใส่เข้า API ผ่าน loadFromJSON -> ตั้ง window.API -> ค่อยให้ iframe ขึ้น (ผูกกับ apiReady)
+  // ถ้า iframe ขึ้นก่อน SCO จะหา window.API ไม่เจอตอน load (findAPI ทำครั้งเดียว ไม่ retry)
   useEffect(() => {
     if (!scormVersion || !currentPath) return;
 
-    const settings = { autocommit: true, autocommitSeconds: 15, logLevel: 2 };
-    const is2004 = scormVersion === '2004';
-    let apiInstance: ScormApiLike;
+    let cancelled = false;
+    let apiInstance: ScormApiLike | null = null;
     const scormWindow = window as ScormWindow;
+    const is2004 = scormVersion === '2004';
 
-    if (is2004) {
-      apiInstance = new Scorm2004API(settings) as unknown as ScormApiLike;
-      setupCommitHook(apiInstance, true);
-      scormWindow.API_1484_11 = apiInstance;
-    } else {
-      apiInstance = new Scorm12API(settings) as unknown as ScormApiLike;
-      setupCommitHook(apiInstance, false);
-      scormWindow.API = apiInstance;
-    }
+    setApiReady(false);
+
+    // [บั๊กที่เจอตอนไล่หา objectives.0.score.raw ค้าง "0"] มีจุดยิง ScormAPI.commit() หลายจุด
+    // แข่งกันอยู่ (autocommit ของ scorm-again เองทุก 15 วิ, interval เซฟตำแหน่งของเราเองทุก 10 วิ,
+    // เหตุการณ์ pause/ended/beforeunload, และตอนตอบควิซ) แต่ละจุด "LMSCommit" ยิง fetch() ของตัวเอง
+    // แบบ fire-and-forget ไม่รอกัน ไม่มีคิว — ถ้า Supabase สะดุดจังหวะไหน (Free-tier เจอบ่อย) แล้ว
+    // request เก่าที่แคปสภาพ CMI ไว้ตอนยังไม่ตอบ ดันตอบกลับมาเสร็จ "หลัง" request ใหม่ที่มีคำตอบแล้ว —
+    // เพราะฝั่งเซิร์ฟเวอร์ (api/scorm/tracking) แทนที่ cmi_data ทั้งก้อนแบบ last-write-wins ไม่มีเช็ค
+    // ลำดับ ค่าที่เพิ่งตอบถูกจะโดนข้อมูลเก่าทับกลับ ทั้งที่ setValue/commit ฝั่ง client ทำถูกต้องแล้ว —
+    // แก้โดยเรียง fetch() ให้เป็นคิว (ยิงทีละอันตามลำดับที่ LMSCommit เกิดจริง) กันไม่ให้สลับกันเสร็จ
+    let commitQueue: Promise<unknown> = Promise.resolve();
 
     function setupCommitHook(scormInstance: ScormApiLike, isScorm2004: boolean) {
       scormInstance.on('LMSCommit', () => {
@@ -150,51 +188,270 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
         const suspendData = scormInstance.cmi.suspend_data;
 
-        const scoType = currentPath?.includes('quiz') ? 'quiz' : 'lesson';
+        // เก็บ cmi ทั้งก้อน ไม่ใช่แค่ 3 ฟิลด์ข้างบน — scorm-again เขียน lesson_location,
+        // session_time, cmi.interactions.*, cmi.objectives.* ไว้ในนี้ด้วย ของพวกนี้หายหมด
+        // ทุกครั้งที่ปิดหน้า ถ้าไม่ส่งขึ้นมาเก็บ (สำคัญกับแพ็กเกจ SCORM ภายนอกที่ใช้ฟิลด์พวกนี้จริง)
+        let cmiData: Record<string, unknown> | null = null;
+        try {
+          cmiData = JSON.parse(JSON.stringify(scormInstance.cmi)) as Record<string, unknown>;
+        } catch (err) {
+          // ไม่ให้การ serialize ล้มเหลวไปพัง flow การบันทึกคะแนน/ความคืบหน้าหลัก
+          console.warn('[SCORM] serialize cmi ทั้งก้อนไม่สำเร็จ ข้าม cmi_data รอบนี้', err);
+        }
+
+        // [งานข้อ 07] เดา scoType จาก path ได้เฉพาะแพ็กเกจ 'generated' เท่านั้น (ผูกกับ convention
+        // ตั้งชื่อไฟล์ quiz.html ของ generator เราเอง) — แพ็กเกจ imported เดาแบบนี้ไม่ได้ ถ้ามี
+        // โฟลเดอร์ชื่อ quiz/quizzes เป็นเนื้อหาจริงของเขา SCO นั้นจะโดนบังคับให้ต้องได้สถานะ
+        // 'passed' ถึงจะนับว่าจบ ซึ่งเนื้อหาทั่วไปไม่มีวันรายงานค่านี้ — ความคืบหน้าจะค้างตลอดกาล
+        const scoType = scormSource !== 'imported' && currentPath?.includes('quiz') ? 'quiz' : 'lesson';
         const thisCompleted = scoType === 'quiz' ? lessonStatus === 'passed' : lessonStatus === 'completed';
 
-        fetch('/api/scorm/tracking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lessonId,
-            courseId,
-            lessonStatus: lessonStatus || 'incomplete',
-            scoreRaw: scoreRaw || 0,
-            suspendData: suspendData || '',
-            scoType,
-            scoIdentifier: currentPath,
-          }),
-        }).then(() => {
-          // อัปเดต progress ใน state ทันที ไม่ต้องรอ reload หน้า — เก็บเป็นรายการ SCO ที่จบ ไม่ใช่ boolean เดี่ยว
-          if (thisCompleted && currentPath) {
-            setCompletedScos((prev) => (prev.includes(currentPath) ? prev : [...prev, currentPath]));
-          }
-          // ถ้าเลสสันนี้เพิ่งจบ ให้รีเฟรชสถานะในลิสต์บทเรียนทั้งคอร์สด้วย (ติ๊กถูกที่ sidebar ล่างสุด)
-          if (thisCompleted && scoType === 'lesson') {
-            setCourseLessons((prev) =>
-              prev.map((l) => (l.id === lessonId ? { ...l, completed: true } : l))
-            );
-          }
-        });
+        // ต่อคิวไว้กับตัวก่อนหน้าเสมอ (ไม่ว่าตัวก่อนหน้าจะสำเร็จหรือ error ก็ยิงตัวถัดไปต่อได้ — แค่
+        // ต้อง "รอให้ตัวก่อนหน้าจบก่อน" ไม่ใช่ยิงพร้อมกันหลายตัว) กันปัญหาที่ commit เก่ากว่าเสร็จช้ากว่า
+        // ทำให้ cmi_data ล่าสุดโดนทับด้วยของเก่า (ดูคอมเมนต์เต็มด้านบน setupCommitHook)
+        commitQueue = commitQueue
+          .catch(() => undefined)
+          .then(() =>
+            fetch('/api/scorm/tracking', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lessonId,
+                courseId,
+                lessonStatus: lessonStatus || 'incomplete',
+                scoreRaw: scoreRaw || 0,
+                suspendData: suspendData || '',
+                scoType,
+                scoIdentifier: currentPath,
+                // ไม่ส่ง key นี้เลยถ้า serialize ไม่สำเร็จ ฝั่ง server จะได้ไม่เอาไปเขียนทับของเดิมด้วยค่าเปล่า
+                ...(cmiData ? { cmiData } : {}),
+              }),
+            }).then(() => {
+              // อัปเดต progress ใน state ทันที ไม่ต้องรอ reload หน้า — เก็บเป็นรายการ SCO ที่จบ ไม่ใช่ boolean เดี่ยว
+              if (thisCompleted && currentPath) {
+                setCompletedScos((prev) => (prev.includes(currentPath) ? prev : [...prev, currentPath]));
+              }
+              // ถ้าเลสสันนี้เพิ่งจบ ให้รีเฟรชสถานะในลิสต์บทเรียนทั้งคอร์สด้วย (ติ๊กถูกที่ sidebar ล่างสุด)
+              if (thisCompleted && scoType === 'lesson') {
+                setCourseLessons((prev) =>
+                  prev.map((l) => (l.id === lessonId ? { ...l, completed: true } : l))
+                );
+              }
+            })
+          );
       });
     }
 
-    return () => {
+    // แปลงสถานะกลางๆ ที่ได้จาก GET /api/scorm/tracking ให้เป็นชื่อ element ตามเวอร์ชันที่ใช้จริง
+    // ใช้เป็น fallback เท่านั้น — ถ้ามี cmiData เต็มก้อน (งานข้อ 02) ให้ใช้อันนั้นแทน เพราะ
+    // ตัวนี้สร้างจากแค่ 3 ฟิลด์ ไม่มี lesson_location/session_time/interactions/objectives
+    function buildCmiJson(prior: PriorScormState): Record<string, unknown> {
+      const entry = prior.hasPriorAttempt ? 'resume' : 'ab-initio';
+
+      if (is2004) {
+        const completed = prior.lessonStatus === 'completed' || prior.lessonStatus === 'passed';
+        const json: Record<string, unknown> = {
+          entry,
+          completion_status: completed ? 'completed' : 'incomplete',
+          success_status:
+            prior.lessonStatus === 'passed' ? 'passed' : prior.lessonStatus === 'failed' ? 'failed' : 'unknown',
+        };
+        // [บั๊กที่เจอตอนไล่ตรวจข้อ 20] อย่าใส่ location ถ้า entry ไม่ใช่ resume — location เก่า
+        // (เช่นค้างจาก extractLessonLocationFromCmi ฝั่ง tracking/route.ts) ต้องมีความหมายก็ต่อ
+        // เมื่อเราจะ resume จริงเท่านั้น ไม่งั้น generate.ts จะเจอ location > 0 ทั้งที่ entry
+        // เป็น ab-initio (ตอนนี้ generate.ts เช็ค entry ประกอบแล้ว แต่กันไว้อีกชั้นให้ CMI เอง
+        // สอดคล้องในตัว ไม่ต้องพึ่ง generate.ts อย่างเดียว)
+        if (entry === 'resume' && prior.lessonLocation) json.location = prior.lessonLocation;
+        if (prior.suspendData) json.suspend_data = prior.suspendData;
+        if (prior.scoreRaw) json.score = { raw: prior.scoreRaw };
+        return json;
+      }
+
+      const core: Record<string, unknown> = {
+        entry,
+        lesson_status: prior.lessonStatus,
+      };
+      if (entry === 'resume' && prior.lessonLocation) core.lesson_location = prior.lessonLocation;
+      if (prior.scoreRaw) core.score = { raw: prior.scoreRaw };
+
+      const json: Record<string, unknown> = { core };
+      if (prior.suspendData) json.suspend_data = prior.suspendData;
+      return json;
+    }
+
+    // [งานข้อ 08] ตัวตน + โหมดการเรียน — LMS ที่ conform ต้องป้อน student_id/student_name ให้ SCO
+    // เสมอ และ credit/lesson_mode ต้องเป็น 'no-credit'/'browse' เวลาที่ครั้งนี้ไม่ถูกนับคะแนนจริง
+    // (เซิร์ฟเวอร์ตัดสินมาแล้วจาก GET /api/scorm/tracking — ดูเหตุผลที่นั่น) ไม่ปล่อยเป็นค่า
+    // default ของไลบรารี (ปกติเป็นค่าว่าง/คงที่ 'normal'+'credit' เสมอไม่ว่ากรณีไหน)
+    function buildIdentityAndModeCmi(
+      identity: Pick<PriorScormState, 'studentId' | 'studentName' | 'credit' | 'lessonMode'> | null
+    ): Record<string, unknown> {
+      // ไม่มีข้อมูลตัวตนเลย (เช่น GET ล้มเหลว) — ปลอดภัยกว่าที่จะสมมติว่าไม่นับคะแนน แทนที่จะเดาว่านับ
+      const credit = identity?.credit ?? 'no-credit';
+      const lessonMode = identity?.lessonMode ?? 'browse';
+
+      if (is2004) {
+        const json: Record<string, unknown> = { credit, mode: lessonMode };
+        if (identity?.studentId) json.learner_id = identity.studentId;
+        if (identity?.studentName) json.learner_name = identity.studentName;
+        return json;
+      }
+
+      const core: Record<string, unknown> = { credit, lesson_mode: lessonMode };
+      if (identity?.studentId) core.student_id = identity.studentId;
+      if (identity?.studentName) core.student_name = identity.studentName;
+      return { core };
+    }
+
+    // [งานข้อ 09] ส่งเกณฑ์ผ่านให้ SCO ตัดสินตัวเองผ่าน cmi.student_data.mastery_score (SCORM 1.2)
+    // — มีเฉพาะแพ็กเกจ 'generated' ที่ generator ฝัง masteryScore ไว้ในตัว manifest JSON เท่านั้น
+    // (แพ็กเกจ imported ไม่มีค่านี้ในสิ่งที่เราเก็บ — เราไม่รู้เกณฑ์ที่เจ้าของแพ็กเกจตั้งใจไว้จริง
+    // เขามี <adlcp:masteryscore> ของเขาเองในไฟล์ manifest.xml อยู่แล้วถ้าต้องการ ไม่ควรเดา/ยัดค่าทับ)
+    // ไม่มี concept นี้ใน SCORM 2004 runtime API แบบเดียวกัน จึงทำเฉพาะ 1.2
+    function buildMasteryScoreCmi(): Record<string, unknown> {
+      if (is2004 || typeof manifest?.masteryScore !== 'number') return {};
+      return { student_data: { mastery_score: manifest.masteryScore } };
+    }
+
+    (async () => {
+      // 1) ดึงสถานะเดิมของผู้เรียนก่อน — ถ้าล้มเหลวก็ยังเปิดบทเรียนได้ แค่เริ่มใหม่จากศูนย์
+      let prior: PriorScormState | null = null;
       try {
-        if (scormWindow.API === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
-          apiInstance.LMSFinish?.('');
+        const res = await fetch(
+          `/api/scorm/tracking?lessonId=${encodeURIComponent(lessonId)}&courseId=${encodeURIComponent(courseId)}`
+        );
+        if (res.ok) prior = (await res.json()) as PriorScormState;
+      } catch (err) {
+        console.warn('[SCORM] โหลดสถานะเดิมไม่สำเร็จ เริ่มใหม่จากศูนย์', err);
+      }
+
+      // ผู้ใช้สลับ SCO/เลสสันไปแล้วระหว่างรอ fetch — ทิ้งผลลัพธ์นี้ ปล่อยให้ effect รอบใหม่ทำงานแทน
+      if (cancelled) return;
+
+      // 2) สร้าง API instance
+      const settings = { autocommit: true, autocommitSeconds: 15, logLevel: 2 };
+      apiInstance = is2004
+        ? (new Scorm2004API(settings) as unknown as ScormApiLike)
+        : (new Scorm12API(settings) as unknown as ScormApiLike);
+
+      setupCommitHook(apiInstance, is2004);
+
+      // 3) ใส่สถานะเดิมกลับเข้าไป ก่อนที่ SCO จะเรียก LMSInitialize
+      // ถ้ามี cmi_data เต็มก้อนจากงานข้อ 02 (commit ล่าสุดเคยเก็บไว้) ใช้อันนั้นตรงๆ เลย
+      // ได้ทั้ง lesson_location/session_time/interactions/objectives กลับมาครบ ไม่ใช่แค่ 3 ฟิลด์
+      // ถ้าไม่มี (แถวเก่าก่อนงานข้อ 02 หรือยังไม่เคย commit เลย) ค่อย fallback ไปสร้างจาก buildCmiJson
+      // [งานข้อ 08] ต้องป้อน identity/mode เสมอ แม้ GET /api/scorm/tracking ล้มเหลวจนไม่มี prior
+      // เลยก็ตาม (buildIdentityAndModeCmi(null) จะ fallback เป็น no-credit/browse ให้เอง)
+      const identityAndModeJson = buildIdentityAndModeCmi(prior);
+      // [งานข้อ 09] เกณฑ์ผ่าน — ไม่ขึ้นกับ prior เลย (มาจาก manifest ของเลสสัน ไม่ใช่จากผู้เรียน)
+      const masteryScoreJson = buildMasteryScoreCmi();
+
+      if (prior) {
+        const hasFullCmiSnapshot =
+          prior.cmiData && typeof prior.cmiData === 'object' && Object.keys(prior.cmiData).length > 0;
+        const baseCmiJson = hasFullCmiSnapshot ? (prior.cmiData as Record<string, unknown>) : buildCmiJson(prior);
+
+        // [บั๊กที่เจอตอนไล่ตรวจข้อ 20] entry ที่ติดมาใน cmi_data snapshot ของรอบก่อน (กรณี
+        // hasFullCmiSnapshot) เป็นค่าที่ค้างจาก "รอบก่อน" เฉยๆ — อาจเป็น "resume" ทั้งที่ตอนนี้
+        // hasPriorAttempt กลายเป็น false แล้วจริง (เช่น suspend_data/lesson_status ถูกล้าง
+        // ระหว่างนั้น) ต้องคำนวณ entry สดจาก prior.hasPriorAttempt เสมอ ไม่เชื่อค่าที่ติดมากับ
+        // snapshot — และถ้า entry จริงคือ ab-initio ต้องกัน lesson_location/location เก่าไม่ให้
+        // หลุดเข้า CMI ไปด้วย ไม่งั้น generate.ts (เช็ค cmi.core.entry ประกอบ resumeSeconds แล้ว)
+        // จะยังไม่มีอะไรให้ resume แต่ location เก่าที่หลุดเข้ามาจะทำให้พฤติกรรมค้างผิดจุดอื่นแทน
+        const freshEntry = prior.hasPriorAttempt ? 'resume' : 'ab-initio';
+
+        // identity/mode/mastery_score ต้องชนะค่าที่อาจติดมากับ cmi_data เต็มก้อนของรอบก่อน (เช่น
+        // snapshot เก่าก่อนงานข้อ 08/09 ที่ไม่มีฟิลด์พวกนี้ หรือค่าของรอบก่อนที่ไม่ตรงกับตอนนี้แล้ว)
+        //
+        // หมายเหตุ: ตั้ง key เป็น `undefined` ตรงๆ ในนี้ไม่ปลอดภัย — loadFromJSON ของ scorm-again
+        // อาจวน Object.keys() แล้ว setValue(key, undefined) ทำให้ได้ค่า string "undefined" ติด
+        // ไปแทนที่จะเป็นค่าว่าง จึงต้อง delete key ออกจริงๆ หลังประกอบ object เสร็จแทน
+        const mergedCmiJson: Record<string, unknown> = is2004
+          ? {
+              ...baseCmiJson,
+              ...identityAndModeJson,
+              entry: freshEntry,
+            }
+          : {
+              ...baseCmiJson,
+              core: {
+                ...(baseCmiJson.core as Record<string, unknown> | undefined),
+                ...(identityAndModeJson.core as Record<string, unknown>),
+                entry: freshEntry,
+              },
+              student_data: {
+                ...(baseCmiJson.student_data as Record<string, unknown> | undefined),
+                ...(masteryScoreJson.student_data as Record<string, unknown> | undefined),
+              },
+            };
+
+        // ไม่ resume จริง (entry สดคือ ab-initio) -> ลบ location/lesson_location เก่าที่อาจติดมา
+        // กับ baseCmiJson ทิ้งจริงๆ ด้วย delete ไม่ใช่แค่ตั้งเป็น undefined (ดูหมายเหตุด้านบน)
+        if (freshEntry !== 'resume') {
+          if (is2004) {
+            delete mergedCmiJson.location;
+          } else {
+            const core = mergedCmiJson.core as Record<string, unknown> | undefined;
+            if (core) delete core.lesson_location;
+          }
+        }
+
+        try {
+          apiInstance.loadFromJSON?.(mergedCmiJson);
+        } catch (err) {
+          console.error('[SCORM] loadFromJSON ไม่สำเร็จ เริ่มใหม่จากศูนย์แทน', err);
+        }
+      } else {
+        // ไม่มีสถานะเดิมเลย (fetch ล้มเหลว) — อย่างน้อยยังต้องป้อน identity/mode/mastery_score
+        // พื้นฐานให้ SCO
+        try {
+          apiInstance.loadFromJSON?.({ ...identityAndModeJson, ...masteryScoreJson });
+        } catch (err) {
+          console.error('[SCORM] loadFromJSON (identity เท่านั้น) ไม่สำเร็จ', err);
+        }
+      }
+
+      // 4) ตั้ง window.API/API_1484_11 แล้วค่อยปล่อยให้ iframe ขึ้น (ผ่าน apiReady)
+      // ต้องเช็ค cancelled อีกรอบตรงนี้ — ไม่ใช่แค่ตอนหลัง fetch (บรรทัด ~307) เพราะระหว่างที่
+      // await fetch อยู่ effect รอบนี้อาจถูก cleanup ไปแล้ว (deps เปลี่ยนเร็ว, React StrictMode
+      // เรียก effect ซ้อนตอน dev) ถ้าไม่เช็คตรงนี้ instance เก่าที่ยังไม่ทัน terminate จะเข้ามา
+      // ทับ window.API ของ instance ใหม่ที่ถูกต้องอยู่แล้ว — ผลคือ loadFromJSON ที่เพิ่งใส่ resume
+      // state ไปหายไปเงียบๆ เพราะ instance ที่ค้างอยู่บน window.API กลายเป็นตัวที่ไม่มีการ resume
+      if (cancelled) {
+        try {
+          if (apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
+            if (is2004) apiInstance.Terminate?.('');
+            else apiInstance.LMSFinish?.('');
+          }
+        } catch {}
+        return;
+      }
+
+      if (is2004) scormWindow.API_1484_11 = apiInstance;
+      else scormWindow.API = apiInstance;
+
+      setApiReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      setApiReady(false);
+      const instance = apiInstance;
+      if (!instance) return;
+      try {
+        if (scormWindow.API === instance && instance.currentState === instance.STATE_INITIALIZED) {
+          instance.LMSFinish?.('');
         }
       } catch {}
       try {
-        if (scormWindow.API_1484_11 === apiInstance && apiInstance.currentState === apiInstance.STATE_INITIALIZED) {
-          apiInstance.Terminate?.('');
+        if (scormWindow.API_1484_11 === instance && instance.currentState === instance.STATE_INITIALIZED) {
+          instance.Terminate?.('');
         }
       } catch {}
       delete scormWindow.API;
       delete scormWindow.API_1484_11;
     };
-  }, [currentPath, scormVersion, courseId, lessonId]);
+  }, [currentPath, scormVersion, scormSource, manifest, courseId, lessonId]);
 
   // --- Effect ที่ 3: ดึงเอกสารประกอบ ---
   useEffect(() => {
@@ -243,17 +500,28 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   // แนบ completed จริงเข้ากับแต่ละ SCO ของเลสสันปัจจุบัน
   const flatItems = useMemo(() => {
-    // แบบทดสอบหลังเรียนถูกย้ายไปรวมเป็นข้อสอบระดับคอร์สแล้ว จึงซ่อน SCO quiz รุ่นเดิม
-    const items = flattenPlayableItems(manifest?.items ?? []).filter(
-      (item) => (item.type ?? item.kind ?? (item.identifier.includes('QUIZ') ? 'quiz' : 'lesson')) !== 'quiz'
-    );
+    // [งานข้อ 07] ตัวกรอง "ซ่อน SCO ควิซรุ่นเดิม" ใช้ได้เฉพาะแพ็กเกจ 'generated' เท่านั้น —
+    // เดิมทดสอบท้ายบทของ generator เราเองถูกย้ายไปรวมเป็นข้อสอบระดับคอร์สแล้ว (งานข้อ 03/04)
+    // จึงต้องซ่อน SCO ควิซเดิมนั้นทิ้ง แต่แพ็กเกจ 'imported' ไม่มี concept นี้เลย — ถ้าเผลอเดาจาก
+    // ชื่อไฟล์/identifier (เช่นมีโฟลเดอร์ quizzes/ เป็นเนื้อหาจริงของเขา) จะไปซ่อนเนื้อหาจริงทิ้งผิดๆ
+    const rawItems = flattenPlayableItems(manifest?.items ?? []);
+    const items =
+      scormSource === 'imported'
+        ? rawItems
+        : rawItems.filter(
+            (item) => (item.type ?? item.kind ?? (item.identifier.includes('QUIZ') ? 'quiz' : 'lesson')) !== 'quiz'
+          );
     return items.map((item) => ({
       ...item,
-      // รองรับทั้ง manifest รุ่นใหม่ (type) และรุ่นเดิม (kind)
-      type: item.type ?? item.kind ?? (item.identifier.includes('QUIZ') ? 'quiz' : 'lesson'),
+      // รองรับทั้ง manifest รุ่นใหม่ (type) และรุ่นเดิม (kind) — ส่วนการเดาจาก identifier
+      // (fallback สุดท้าย) ใช้ได้เฉพาะ 'generated' เท่านั้น ด้วยเหตุผลเดียวกับตัวกรองข้างบน
+      type:
+        item.type ??
+        item.kind ??
+        (scormSource !== 'imported' && item.identifier.includes('QUIZ') ? 'quiz' : 'lesson'),
       completed: item.href ? completedScos.includes(item.href) : false,
     }));
-  }, [manifest, completedScos]);
+  }, [manifest, completedScos, scormSource]);
 
   const currentIndex = flatItems.findIndex((i) => i.href === currentPath);
   const currentItem = currentIndex >= 0 ? flatItems[currentIndex] : null;
@@ -614,8 +882,8 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
           <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/[0.08] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] sm:rounded-2xl">
             {loadError ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[#0D172A] px-6 text-center text-sm"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">!</span><p className="font-bold text-red-300">โหลดเนื้อหาไม่สำเร็จ</p><p className="text-xs text-slate-500">{loadError}</p></div>
-            ) : currentPath ? (
-              <iframe ref={iframeRef} key={currentPath} src={`/api/scorm/${courseId}/${lessonId}/${currentPath}`} className="absolute inset-0 h-full w-full border-0 bg-white" title={currentItem?.title ?? displayLessonTitle ?? 'บทเรียน'} allowFullScreen />
+            ) : currentPath && apiReady ? (
+              <iframe ref={iframeRef} key={`${currentPath}:${apiReady}`} src={`/api/scorm/${courseId}/${lessonId}/${currentPath}`} className="absolute inset-0 h-full w-full border-0 bg-white" title={currentItem?.title ?? displayLessonTitle ?? 'บทเรียน'} allowFullScreen />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[#0D172A] text-sm text-slate-400"><span className="h-7 w-7 animate-spin rounded-full border-2 border-white/10 border-t-[#FF795F]" />กำลังโหลดเนื้อหาบทเรียน...</div>
             )}

@@ -67,16 +67,37 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#FF5A3C]">Question Bank</p>
-          <h1 className="mt-1 text-[26px] font-extrabold tracking-[-0.02em] text-[#0F1B3D]">คลังข้อสอบ</h1>
-          <p className="mt-1 text-sm text-[#0F1B3D]/50">สร้าง จัดหมวดหมู่ และแบ่งปันคำถามข้อสอบ</p>
+      {/* ★ แก้ UI: เพิ่มไอคอน + เส้นแบ่งใต้หัวข้อ ให้ดูเป็นส่วนหัวของหน้าที่จริงจังขึ้น
+          (ตรรกะ/ข้อมูลเดิมทั้งหมด แก้แค่หน้าตา) */}
+      <div className="mb-8 flex flex-col gap-5 border-b border-[#0F1B3D]/[0.06] pb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3.5">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FF5A3C]/10">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF5A3C" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5v14.5L12 17l-4.5 2.5V5A1.5 1.5 0 0 1 9 3.5Z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#FF5A3C]">Question Bank</p>
+            <h1 className="mt-0.5 text-[24px] font-extrabold tracking-[-0.02em] text-[#0F1B3D] sm:text-[26px]">คลังข้อสอบ</h1>
+            <p className="mt-1 text-[13.5px] text-[#0F1B3D]/50">สร้าง จัดหมวดหมู่ และแบ่งปันคำถามข้อสอบ</p>
+          </div>
         </div>
-        <Link href="/dashboard/teacher/question-bank/new" className="shrink-0 rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-extrabold text-white">+ เพิ่มคำถาม</Link>
+        <Link
+          href="/dashboard/teacher/question-bank/new"
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-extrabold text-white shadow-[0_8px_20px_-8px_rgba(255,90,60,0.6)] transition-all hover:-translate-y-0.5 hover:bg-[#EB4A2D]"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          เพิ่มคำถาม
+        </Link>
       </div>
 
-      {error && <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">โหลดคลังข้อสอบไม่สำเร็จ: {error.message}</p>}
+      {error && (
+        <p className="mb-5 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-[13px] font-medium text-red-700">
+          โหลดคลังข้อสอบไม่สำเร็จ: {error.message}
+        </p>
+      )}
       <QuestionBankList questions={questions} />
     </div>
   );
