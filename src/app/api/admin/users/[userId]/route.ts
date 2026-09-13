@@ -61,6 +61,30 @@ export async function PATCH(
   if (university === undefined) return NextResponse.json({ error: "ชื่อมหาวิทยาลัยต้องไม่เกิน 200 ตัวอักษร" }, { status: 400 });
   if (faculty === undefined) return NextResponse.json({ error: "ชื่อคณะต้องไม่เกิน 200 ตัวอักษร" }, { status: 400 });
 
+  const hasServerKey = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY);
+  if (!hasServerKey) {
+    if (userId !== actor.id) {
+      return NextResponse.json({ error: "ยังไม่สามารถแก้ไขบัญชีอื่นได้ กรุณาตั้งค่า Supabase server key" }, { status: 503 });
+    }
+
+    // การแก้ไขโปรไฟล์ตนเองใช้สิทธิ์ของบัญชีที่เข้าสู่ระบบได้
+    const { data: updatedProfile, error: profileUpdateError } = await supabase
+      .from("profiles")
+      .update({ full_name: fullName, phone, university, faculty })
+      .eq("id", actor.id)
+      .select("id, full_name, phone, university, faculty")
+      .single();
+
+    if (profileUpdateError) {
+      console.error("[admin user PATCH] self profile update", profileUpdateError.message);
+      return NextResponse.json({ error: "บันทึกโปรไฟล์ไม่สำเร็จ กรุณาตรวจสิทธิ์อัปเดตโปรไฟล์ในฐานข้อมูล" }, { status: 500 });
+    }
+
+    const { error: authUpdateError } = await supabase.auth.updateUser({ data: { full_name: fullName } });
+    if (authUpdateError) console.error("[admin user PATCH] self auth metadata update", authUpdateError.message);
+    return NextResponse.json({ profile: updatedProfile });
+  }
+
   const admin = createAdminClient();
   const [{ data: previousProfile, error: profileReadError }, { data: authData, error: authReadError }] =
     await Promise.all([
