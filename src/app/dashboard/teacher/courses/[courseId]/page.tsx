@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
+import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import SubmitCourseButton from "@/components/teacher/SubmitCourseButton";
 import DeleteLessonButton from "@/components/teacher/DeleteLessonButton";
 import { checkCourseReadiness } from "../actions";
@@ -193,30 +194,9 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
           </div>
         )}
 
-        {certificateSettings ? (
-          <div className="mb-8">
-            <CertificateSettingsForm
-              courseId={course.id}
-              courseTitle={course.title}
-              initialEnabled={certificateSettings.certificate_enabled}
-              initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
-              initialTitle={certificateSettings.certificate_title}
-              initialDescription={certificateSettings.certificate_description}
-              initialLogoPath={certificateSettings.certificate_logo_path}
-              initialIssuerName={certificateSettings.certificate_issuer_name}
-              initialSignatoryName={certificateSettings.certificate_signatory_name}
-              initialSignatoryTitle={certificateSettings.certificate_signatory_title}
-            />
-          </div>
-        ) : (
-          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-            <p className="text-[13px] font-bold text-amber-800">การตั้งค่าใบประกาศยังไม่พร้อม</p>
-            <p className="mt-1 text-[12px] text-amber-700">
-              คุณยังจัดการบทเรียนและแบบทดสอบได้ตามปกติ ส่วนนี้จะพร้อมหลังอัปเดตฐานข้อมูล
-            </p>
-          </div>
-        )}
-
+        <CourseManagementTabs tabs={[
+          { id: "lessons", label: `บทเรียน (${lessonsWithDetails.length})`, description: "เพิ่มและแก้ไขเนื้อหา", content: (
+            <>
         {lessonsError && (
           <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-[13px] font-medium text-red-700">
             โหลดรายละเอียดบทเรียนไม่สำเร็จ กรุณารีเฟรชหน้าอีกครั้ง
@@ -324,6 +304,30 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
             </Link>
           </div>
         )}
+            </>
+          ) },
+          { id: "certificate", label: "ใบประกาศ", description: "ตั้งค่าและดูตัวอย่าง", content: certificateSettings ? (
+            <CertificateSettingsForm
+              courseId={course.id}
+              courseTitle={course.title}
+              initialEnabled={certificateSettings.certificate_enabled}
+              initialPassPercentage={Number(certificateSettings.certificate_pass_percentage)}
+              initialTitle={certificateSettings.certificate_title}
+              initialDescription={certificateSettings.certificate_description}
+              initialLogoPath={certificateSettings.certificate_logo_path}
+              initialIssuerName={certificateSettings.certificate_issuer_name}
+              initialSignatoryName={certificateSettings.certificate_signatory_name}
+              initialSignatoryTitle={certificateSettings.certificate_signatory_title}
+            />
+          ) : (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+              <p className="text-[13px] font-bold text-amber-800">การตั้งค่าใบประกาศยังไม่พร้อม</p>
+              <p className="mt-1 text-[12px] text-amber-700">
+                คุณยังจัดการบทเรียนและแบบทดสอบได้ตามปกติ ส่วนนี้จะพร้อมหลังอัปเดตฐานข้อมูล
+              </p>
+            </div>
+          ) },
+        ]} />
       </main>
     </div>
   );

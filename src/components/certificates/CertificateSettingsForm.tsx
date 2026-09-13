@@ -1,8 +1,8 @@
 "use client";
 
-import { Award, ImagePlus, Loader2, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { Award, Download, ImagePlus, Loader2, Maximize2, Save, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Image from "next/image";
-import { useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
 
 interface CertificateSettingsFormProps {
   courseId: string;
@@ -39,6 +39,8 @@ export default function CertificateSettingsForm({
   initialSignatoryTitle = null,
 }: CertificateSettingsFormProps): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewDialogRef = useRef<HTMLDialogElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const [enabled, setEnabled] = useState(initialEnabled);
   const [passPercentage, setPassPercentage] = useState(String(initialPassPercentage));
   const [title, setTitle] = useState(initialTitle ?? "");
@@ -53,10 +55,19 @@ export default function CertificateSettingsForm({
   const [removingLogo, setRemovingLogo] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewAction, setPreviewAction] = useState<"view" | "download" | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const logoUrl = logoPath
     ? `/api/courses/${courseId}/certificate-logo?v=${logoVersion}`
     : null;
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   function resetFeedback(): void {
     setError(null);
@@ -152,6 +163,55 @@ export default function CertificateSettingsForm({
       setError(removeError instanceof Error ? removeError.message : "ลบโลโก้ไม่สำเร็จ");
     } finally {
       setRemovingLogo(false);
+    }
+  }
+
+  async function createPreview(action: "view" | "download"): Promise<void> {
+    if (previewAction) return;
+    setPreviewError(null);
+    const numericPassPercentage = Number(passPercentage);
+    if (!Number.isFinite(numericPassPercentage) || numericPassPercentage < 0 || numericPassPercentage > 100) {
+      setPreviewError("คะแนนผ่านต้องอยู่ระหว่าง 0 ถึง 100");
+      return;
+    }
+
+    setPreviewAction(action);
+    try {
+      const response = await fetch(`/api/courses/${courseId}/certificate-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passPercentage: numericPassPercentage,
+          title,
+          description,
+          issuerName,
+          signatoryName,
+          signatoryTitle,
+        }),
+      });
+      if (!response.ok) {
+        const data = (await response.json()) as ApiResponse;
+        throw new Error(data.error || "สร้างตัวอย่างใบประกาศไม่สำเร็จ");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      if (action === "view") {
+        if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = url;
+        setPreviewUrl(url);
+        previewDialogRef.current?.showModal();
+      } else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `certificate-preview-${courseId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+    } catch (previewFailure) {
+      setPreviewError(previewFailure instanceof Error ? previewFailure.message : "สร้างตัวอย่างใบประกาศไม่สำเร็จ");
+    } finally {
+      setPreviewAction(null);
     }
   }
 
@@ -408,11 +468,59 @@ export default function CertificateSettingsForm({
               </div>
             </div>
           </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={previewAction !== null}
+              onClick={() => createPreview("view")}
+              className="inline-flex items-center gap-2 rounded-full bg-[#0F1B3D] px-4 py-2.5 text-[11.5px] font-bold text-white transition hover:bg-[#182852] disabled:opacity-50"
+            >
+              {previewAction === "view" ? <Loader2 size={15} className="animate-spin" /> : <Maximize2 size={15} />}
+              {previewAction === "view" ? "กำลังสร้างตัวอย่าง..." : "ดูตัวอย่างเต็มจอ"}
+            </button>
+            <button
+              type="button"
+              disabled={previewAction !== null}
+              onClick={() => createPreview("download")}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-[11.5px] font-bold text-[#0F1B3D] transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              {previewAction === "download" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              {previewAction === "download" ? "กำลังสร้าง PDF..." : "ดาวน์โหลด PDF ตัวอย่าง"}
+            </button>
+          </div>
+          {previewError && <p className="mt-3 text-[11.5px] font-semibold text-red-600" role="alert">{previewError}</p>}
           <p className="mt-3 text-[10.5px] leading-5 text-slate-400">
             ตัวอย่างใช้ข้อมูลจำลอง การจัดวางใน PDF จริงจะปรับขนาดข้อความอัตโนมัติให้เหมาะกับเนื้อหา
           </p>
         </div>
       </div>
+      <dialog
+        ref={previewDialogRef}
+        aria-label="ตัวอย่างใบประกาศเต็มจอ"
+        onClose={() => {
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = null;
+          setPreviewUrl(null);
+        }}
+        className="m-auto h-dvh w-screen max-h-none max-w-none border-0 bg-slate-950 p-3 text-white backdrop:bg-slate-950/80 sm:p-5"
+      >
+        <div className="flex h-full flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-bold">ตัวอย่างใบประกาศ PDF</span>
+            <div className="flex items-center gap-2">
+              {previewUrl && (
+                <a href={previewUrl} download={`certificate-preview-${courseId}.pdf`} className="inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-xs font-semibold hover:bg-white/10">
+                  <Download size={14} /> ดาวน์โหลด PDF
+                </a>
+              )}
+              <button type="button" onClick={() => previewDialogRef.current?.close()} className="inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2 text-xs font-semibold hover:bg-white/10">
+                <X size={14} /> ปิด
+              </button>
+            </div>
+          </div>
+          {previewUrl && <iframe src={previewUrl} title="ตัวอย่างใบประกาศ PDF" className="min-h-0 w-full flex-1 rounded-lg bg-white" />}
+        </div>
+      </dialog>
     </section>
   );
 }

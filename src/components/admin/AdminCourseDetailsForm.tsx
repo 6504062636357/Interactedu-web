@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent, type ReactElement } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import CourseOverview, { type CourseOverviewDetails } from "./CourseOverview";
 
 interface AdminCourseDetailsFormProps {
   courseId: string;
@@ -29,6 +30,14 @@ export default function AdminCourseDetailsForm({
 }: AdminCourseDetailsFormProps): ReactElement {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [savedDetails, setSavedDetails] = useState<CourseOverviewDetails>({
+    title: initialTitle,
+    courseCode: initialCourseCode,
+    category: initialCategory,
+    description: initialDescription,
+    price: initialPrice,
+    coverImageUrl: initialCoverImageUrl,
+  });
   const [title, setTitle] = useState(initialTitle);
   const [courseCode, setCourseCode] = useState(initialCourseCode ?? "");
   const [category, setCategory] = useState(initialCategory ?? "");
@@ -41,6 +50,29 @@ export default function AdminCourseDetailsForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (coverPreview?.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
+    };
+  }, [coverPreview]);
+
+  function toggleEditing() {
+    if (editing) {
+      setTitle(savedDetails.title);
+      setCourseCode(savedDetails.courseCode ?? "");
+      setCategory(savedDetails.category ?? "");
+      setDescription(savedDetails.description ?? "");
+      setIsFree(savedDetails.price === 0);
+      setPrice(String(savedDetails.price));
+      setCoverImageUrl(savedDetails.coverImageUrl);
+      setCoverFile(null);
+      setCoverPreview(savedDetails.coverImageUrl);
+    }
+    setEditing(!editing);
+    setError(null);
+    setSuccess(null);
+  }
 
   function handleCoverChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -95,11 +127,37 @@ export default function AdminCourseDetailsForm({
           coverImageUrl: nextCoverUrl,
         }),
       });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "บันทึกข้อมูลคอร์สไม่สำเร็จ");
+      const result = (await response.json()) as {
+        error?: string;
+        course?: {
+          title: string;
+          course_code: string;
+          category: string;
+          description: string | null;
+          price: number;
+          cover_image_url: string | null;
+        };
+      };
+      if (!response.ok || !result.course) throw new Error(result.error ?? "บันทึกข้อมูลคอร์สไม่สำเร็จ");
 
-      setCoverImageUrl(nextCoverUrl);
+      const updated = result.course;
+      setSavedDetails({
+        title: updated.title,
+        courseCode: updated.course_code,
+        category: updated.category,
+        description: updated.description,
+        price: Number(updated.price),
+        coverImageUrl: updated.cover_image_url,
+      });
+      setTitle(updated.title);
+      setCourseCode(updated.course_code);
+      setCategory(updated.category);
+      setDescription(updated.description ?? "");
+      setPrice(String(updated.price));
+      setIsFree(Number(updated.price) === 0);
+      setCoverImageUrl(updated.cover_image_url);
       setCoverFile(null);
+      setCoverPreview(updated.cover_image_url);
       setSuccess("บันทึกข้อมูลคอร์สแล้ว");
       setEditing(false);
       router.refresh();
@@ -119,11 +177,7 @@ export default function AdminCourseDetailsForm({
         </div>
         <button
           type="button"
-          onClick={() => {
-            setEditing((value) => !value);
-            setError(null);
-            setSuccess(null);
-          }}
+          onClick={toggleEditing}
           className="shrink-0 rounded-full border border-slate-200 px-4 py-2 text-xs font-bold text-[#3157D5] hover:bg-slate-50"
         >
           {editing ? "ยกเลิก" : "แก้ไขข้อมูล"}
@@ -132,6 +186,12 @@ export default function AdminCourseDetailsForm({
 
       {success && <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p>}
       {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+
+      {!editing && (
+        <div className="mt-5 border-t border-slate-100 pt-5">
+          <CourseOverview {...savedDetails} />
+        </div>
+      )}
 
       {editing && (
         <form onSubmit={handleSubmit} className="mt-5 space-y-4 border-t border-slate-100 pt-5">

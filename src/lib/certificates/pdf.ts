@@ -26,6 +26,7 @@ interface CertificatePdfInput {
   signatoryTitle?: string | null;
   logoBytes?: Uint8Array | null;
   logoFormat?: "png" | "jpg" | null;
+  isPreview?: boolean;
 }
 
 interface FontRun {
@@ -181,6 +182,9 @@ export async function generateCertificatePdf(input: CertificatePdfInput): Promis
   page.drawRectangle({ x: 34, y: 34, width: width - 68, height: height - 68, borderColor: orange, borderWidth: 1 });
   page.drawCircle({ x: 72, y: height - 72, size: 24, color: navy });
   page.drawCircle({ x: width - 72, y: 72, size: 24, color: orange });
+  if (input.isPreview) {
+    page.drawText("SAMPLE", { x: width - 129, y: height - 71, size: 12, font: bold, color: orange });
+  }
 
   if (input.logoBytes && input.logoFormat) {
     try {

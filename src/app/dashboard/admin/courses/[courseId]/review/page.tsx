@@ -1,8 +1,11 @@
 import type { ReactElement } from "react";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import CourseReviewAccordion from "@/components/CourseReviewAccordion";
+import CourseOverview from "@/components/admin/CourseOverview";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
+import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import CourseApproveActions from "@/components/CourseApproveActions";
 interface QuizChoiceRow {
   choice_text: string;
@@ -48,6 +51,11 @@ interface CourseWithLessons {
   id: string;
   title: string;
   status: string;
+  course_code: string | null;
+  category: string | null;
+  description: string | null;
+  price: number;
+  cover_image_url: string | null;
   lessons: LessonRow[];
 }
 
@@ -169,7 +177,7 @@ export default async function AdminCourseReviewPage({
       .from("courses")
       .select(
         `
-        id, title, status,
+        id, title, status, course_code, category, description, price, cover_image_url,
         lessons (
           id, title, order_index, video_url,
           lesson_drafts (
@@ -236,29 +244,46 @@ export default async function AdminCourseReviewPage({
 
   return (
     <div className="min-h-screen w-full bg-[#F7F8FA] py-12 px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        <p className="text-[13px] font-bold text-[#FF5A3C] mb-2">รีวิวคอร์ส</p>
-        <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] mb-2">
-          {course.title}
-        </h1>
-        <p className="text-[13px] text-[#0F1B3D]/50 mb-8">
-          {lessonsWithDraft.length} บทเรียน — สถานะคอร์ส: {course.status}
-        </p>
-
-        <div className="mb-6 flex flex-wrap gap-2">
-          <a href={`/dashboard/admin/courses/${course.id}`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">จัดการเนื้อหา</a>
-          <a href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">ตรวจบททดสอบท้ายคอร์ส</a>
+      <div className="mx-auto max-w-4xl">
+        <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-2 text-[13px] font-bold text-[#FF5A3C]">รีวิวคอร์ส</p>
+            <h1 className="mb-2 text-[24px] font-extrabold tracking-[-0.02em] text-[#0F1B3D]">
+              {course.title}
+            </h1>
+            <p className="text-[13px] text-[#0F1B3D]/50">
+              {lessonsWithDraft.length} บทเรียน — สถานะคอร์ส: {course.status}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/dashboard/admin/courses/${course.id}`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">จัดการเนื้อหา</Link>
+            <Link href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2 text-[12.5px] font-bold text-[#0F1B3D]">ตรวจบททดสอบท้ายคอร์ส</Link>
+          </div>
         </div>
 
-        <div className="mb-6">
-          <CourseApproveActions
-            courseId={course.id}
-            courseStatus={course.status}
-          />
-        </div>
+        <CourseApproveActions
+          courseId={course.id}
+          courseStatus={course.status}
+        />
 
-        {certificateSettings ? (
-          <div className="mb-8">
+        <CourseManagementTabs ariaLabel="ส่วนที่ต้องการตรวจสอบในคอร์ส" tabs={[
+          { id: "lessons", label: `บทเรียน (${lessonsWithDraft.length})`, description: "วิดีโอ เนื้อหา และคำถาม", content: (
+            <CourseReviewAccordion courseId={course.id} lessons={lessonsWithDraft} />
+          ) },
+          { id: "details", label: "ข้อมูลคอร์ส", description: "รายละเอียดที่ส่งตรวจ", content: (
+            <section className="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
+              <h2 className="mb-5 text-base font-extrabold text-[#0F1B3D]">ข้อมูลคอร์สที่ส่งตรวจ</h2>
+              <CourseOverview
+                title={course.title}
+                courseCode={course.course_code}
+                category={course.category}
+                description={course.description}
+                price={Number(course.price)}
+                coverImageUrl={course.cover_image_url}
+              />
+            </section>
+          ) },
+          { id: "certificate", label: "ใบประกาศ", description: "ตั้งค่าและดูตัวอย่าง", content: certificateSettings ? (
             <CertificateSettingsForm
               courseId={course.id}
               courseTitle={course.title}
@@ -271,17 +296,12 @@ export default async function AdminCourseReviewPage({
               initialSignatoryName={certificateSettings.certificate_signatory_name}
               initialSignatoryTitle={certificateSettings.certificate_signatory_title}
             />
-          </div>
-        ) : (
-          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[12.5px] text-amber-800">
-            ยังโหลดการตั้งค่าใบประกาศไม่ได้ แต่สามารถตรวจและอนุมัติเนื้อหาคอร์สต่อได้ตามปกติ
-          </div>
-        )}
-
-        <CourseReviewAccordion
-          courseId={course.id}
-          lessons={lessonsWithDraft}
-        />
+          ) : (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[12.5px] text-amber-800">
+              ยังโหลดการตั้งค่าใบประกาศไม่ได้ แต่สามารถตรวจและอนุมัติเนื้อหาคอร์สต่อได้ตามปกติ
+            </div>
+          ) },
+        ]} />
       </div>
     </div>
   );

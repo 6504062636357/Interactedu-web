@@ -2,7 +2,9 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AdminCourseDetailsForm from "@/components/admin/AdminCourseDetailsForm";
+import AdminLessonOverview, { type AdminLesson } from "@/components/admin/AdminLessonOverview";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
+import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import { createClient } from "@/utils/supabase/server";
 
 interface CertificateSettings {
@@ -26,13 +28,23 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
       .eq("id", courseId)
       .maybeSingle(),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage, certificate_title, certificate_description, certificate_logo_path, certificate_issuer_name, certificate_signatory_name, certificate_signatory_title").eq("id", courseId).maybeSingle(),
-    supabase.from("lessons").select("id, title, order_index, lesson_drafts(id, status, created_at)").eq("course_id", courseId).order("order_index", { ascending: true }),
+    supabase.from("lessons").select(`
+      id, title, order_index, video_url, is_scorm, scorm_version,
+      lesson_drafts (
+        id, status, created_at, video_url, content_html,
+        quiz_questions (
+          id, question_text, video_timestamp_seconds, order_index, explanation,
+          quiz_choices (choice_text, is_correct, order_index)
+        ),
+        video_quiz_markers (id, timestamp_seconds, random_difficulty, order_index)
+      )
+    `).eq("course_id", courseId).order("order_index", { ascending: true }),
   ]);
   if (!courseRes.data) notFound();
 
   const course = courseRes.data;
   const certificate = certificateRes.data as CertificateSettings | null;
-  const lessons = lessonsRes.data ?? [];
+  const lessons = (lessonsRes.data ?? []) as unknown as AdminLesson[];
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -51,27 +63,37 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         </div>
       </div>
 
-      <AdminCourseDetailsForm
-        courseId={course.id}
-        initialTitle={course.title}
-        initialCourseCode={course.course_code}
-        initialCategory={course.category}
-        initialDescription={course.description}
-        initialPrice={Number(course.price)}
-        initialCoverImageUrl={course.cover_image_url}
-      />
-
-      {certificate ? <div className="mb-7"><CertificateSettingsForm courseId={course.id} courseTitle={course.title} initialEnabled={certificate.certificate_enabled} initialPassPercentage={Number(certificate.certificate_pass_percentage)} initialTitle={certificate.certificate_title} initialDescription={certificate.certificate_description} initialLogoPath={certificate.certificate_logo_path} initialIssuerName={certificate.certificate_issuer_name} initialSignatoryName={certificate.certificate_signatory_name} initialSignatoryTitle={certificate.certificate_signatory_title} /></div> : <div className="mb-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>}
-
-      <section className="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-        <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-extrabold text-[#0F1B3D]">บทเรียน</h2><p className="text-xs text-slate-400">{lessons.length} บทเรียน</p></div></div>
-        {lessonsRes.error && <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{lessonsRes.error.message}</p>}
-        {lessons.length ? <div className="space-y-3">{lessons.map((lesson, index) => {
-          const drafts = (lesson.lesson_drafts as { id: string; status: string; created_at: string }[] | null) ?? [];
-          const latest = [...drafts].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-          return <div key={lesson.id} className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 px-4 py-3"><div className="min-w-0"><p className="truncate text-[13.5px] font-bold text-[#0F1B3D]">{index + 1}. {lesson.title}</p><p className="mt-0.5 text-[11.5px] text-slate-400">{latest?.status ?? "ยังไม่มีฉบับร่าง"}</p></div><Link href={`/dashboard/admin/courses/${course.id}/lessons/new?lessonId=${lesson.id}`} className="shrink-0 rounded-full border border-slate-200 px-4 py-2 text-xs font-bold text-[#0F1B3D]">แก้ไข</Link></div>;
-        })}</div> : <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-400">ยังไม่มีบทเรียน</div>}
-      </section>
+      <CourseManagementTabs tabs={[
+        { id: "lessons", label: `บทเรียน (${lessons.length})`, description: "เนื้อหาและคำถาม", content: (
+          <section className="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
+            <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-extrabold text-[#0F1B3D]">บทเรียน</h2><p className="text-xs text-slate-400">{lessons.length} บทเรียน</p></div></div>
+            {lessonsRes.error && <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{lessonsRes.error.message}</p>}
+            {lessons.length ? (
+              <div className="space-y-4">
+                {lessons.map((lesson, index) => (
+                  <AdminLessonOverview key={lesson.id} courseId={course.id} lesson={lesson} index={index} />
+                ))}
+              </div>
+            ) : <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-400">ยังไม่มีบทเรียน</div>}
+          </section>
+        ) },
+        { id: "details", label: "ข้อมูลคอร์ส", description: "ชื่อ หมวด ราคา และรูปปก", content: (
+          <AdminCourseDetailsForm
+            courseId={course.id}
+            initialTitle={course.title}
+            initialCourseCode={course.course_code}
+            initialCategory={course.category}
+            initialDescription={course.description}
+            initialPrice={Number(course.price)}
+            initialCoverImageUrl={course.cover_image_url}
+          />
+        ) },
+        { id: "certificate", label: "ใบประกาศ", description: "ตั้งค่าและดูตัวอย่าง", content: certificate ? (
+          <CertificateSettingsForm courseId={course.id} courseTitle={course.title} initialEnabled={certificate.certificate_enabled} initialPassPercentage={Number(certificate.certificate_pass_percentage)} initialTitle={certificate.certificate_title} initialDescription={certificate.certificate_description} initialLogoPath={certificate.certificate_logo_path} initialIssuerName={certificate.certificate_issuer_name} initialSignatoryName={certificate.certificate_signatory_name} initialSignatoryTitle={certificate.certificate_signatory_title} />
+        ) : (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>
+        ) },
+      ]} />
     </div>
   );
 }
