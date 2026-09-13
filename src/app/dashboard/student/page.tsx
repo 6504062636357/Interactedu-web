@@ -46,8 +46,14 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle()
+    : { data: null };
   const displayFirstName =
-    ((user?.user_metadata?.full_name as string | undefined) ?? user?.email?.split("@")[0] ?? "ผู้ใช้").split(
+    (profile?.full_name?.trim() ||
+      (user?.user_metadata?.full_name as string | undefined) ||
+      user?.email?.split("@")[0] ||
+      "ผู้ใช้").split(
       " "
     )[0];
 

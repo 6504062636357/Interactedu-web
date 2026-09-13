@@ -8,11 +8,17 @@ export default async function StudentLayout({ children }: { children: ReactNode 
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("full_name, avatar_url").eq("id", user.id).maybeSingle()
+    : { data: null };
   const displayName =
-    (user?.user_metadata?.full_name as string | undefined) ?? user?.email?.split("@")[0] ?? "ผู้ใช้";
+    profile?.full_name?.trim() ||
+    (user?.user_metadata?.full_name as string | undefined) ||
+    user?.email?.split("@")[0] ||
+    "ผู้ใช้";
 
   return (
-    <DashboardShell displayName={displayName} role="student" sidebar={<DashboardSidebar />}>
+    <DashboardShell displayName={displayName} avatarUrl={profile?.avatar_url} role="student" sidebar={<DashboardSidebar />}>
       {children}
     </DashboardShell>
   );

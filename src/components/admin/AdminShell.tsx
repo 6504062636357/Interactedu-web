@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { Menu, Settings, UserRound, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import LogoutButton from "@/components/LogoutButton";
 import NotificationBell from "@/components/NotificationBell";
+import ProfileDropdown from "@/components/ProfileDropdown";
 import AppBrand from "@/components/AppBrand";
 
 type AdminShellProps = {
   children: ReactNode;
   displayName: string;
+  avatarUrl?: string | null;
   pendingCourses: number;
 };
 
@@ -70,7 +73,15 @@ function CertificateIcon(): ReactElement {
   );
 }
 
-export default function AdminShell({ children, displayName, pendingCourses }: AdminShellProps): ReactElement {
+function ProfileIcon(): ReactElement {
+  return <UserRound size={18} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+function SettingsIcon(): ReactElement {
+  return <Settings size={18} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export default function AdminShell({ children, displayName, avatarUrl, pendingCourses }: AdminShellProps): ReactElement {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -109,6 +120,18 @@ export default function AdminShell({ children, displayName, pendingCourses }: Ad
       match: (path) => path.startsWith("/dashboard/admin/certificates"),
       icon: <CertificateIcon />,
     },
+    {
+      label: "โปรไฟล์ของฉัน",
+      href: "/dashboard/admin/profile",
+      match: (path) => path === "/dashboard/admin/profile",
+      icon: <ProfileIcon />,
+    },
+    {
+      label: "การตั้งค่า",
+      href: "/dashboard/admin/settings",
+      match: (path) => path === "/dashboard/admin/settings",
+      icon: <SettingsIcon />,
+    },
   ];
 
   const nav = (
@@ -144,32 +167,62 @@ export default function AdminShell({ children, displayName, pendingCourses }: Ad
     </nav>
   );
 
+  const accountPanel = (
+    <div className="rounded-[20px] bg-[linear-gradient(145deg,#0F1B3D,#1B326B)] p-4 text-white shadow-[0_14px_30px_rgba(15,27,61,0.16)]">
+      <div className="mb-3 flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-[13px] font-extrabold text-white">
+          {displayName.charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[13px] font-bold text-white">{displayName}</p>
+          <p className="text-[11px] text-white/65">ผู้ดูแลระบบ</p>
+        </div>
+      </div>
+      <div className="border-t border-white/10 pt-2">
+        <LogoutButton />
+      </div>
+    </div>
+  );
+
   return (
     <div className="app-canvas min-h-screen text-[#0F1B3D]">
-      <div className="fixed right-[4.5rem] top-3 z-50 lg:right-8 lg:top-6">
-        <NotificationBell />
-      </div>
-      <header className="app-topbar sticky top-0 z-40 lg:hidden">
-        <div className="flex h-16 items-center justify-between px-5">
-          <AppBrand href="/dashboard/admin" compact />
-          <div className="flex items-center gap-2">
+      <header className="app-topbar sticky top-0 z-40 lg:ml-72">
+        <div className="mx-auto flex h-[74px] max-w-[1400px] items-center justify-between gap-3 px-4 sm:px-7 lg:px-9">
+          <div className="min-w-0">
+            <div className="w-9 overflow-hidden sm:w-auto lg:hidden">
+              <AppBrand href="/dashboard/admin" compact />
+            </div>
+            <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-500 lg:inline-flex">
+              พื้นที่ผู้ดูแลระบบ
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+            <p className="mr-1 hidden text-right lg:block">
+              <span className="block text-[10px] font-medium text-slate-400">ยินดีต้อนรับ</span>
+              <span className="block max-w-40 truncate text-[12px] font-bold text-[#0F1B3D]">{displayName}</span>
+            </p>
             <button
               type="button"
               onClick={() => setMenuOpen((open) => !open)}
-              className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm lg:hidden"
               aria-expanded={menuOpen}
-              aria-label="เปิดเมนูผู้ดูแลระบบ"
+              aria-controls="admin-mobile-menu"
+              aria-label={menuOpen ? "ปิดเมนูผู้ดูแลระบบ" : "เปิดเมนูผู้ดูแลระบบ"}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
+              {menuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             </button>
+            <NotificationBell />
+            <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="admin" />
           </div>
         </div>
-        {menuOpen && <div className="border-t border-slate-100 px-4 py-4">{nav}</div>}
+        {menuOpen && (
+          <div id="admin-mobile-menu" className="max-h-[calc(100dvh-74px)] overflow-y-auto border-t border-slate-100 px-4 py-4 lg:hidden">
+            {nav}
+          </div>
+        )}
       </header>
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-slate-200/70 bg-white/90 px-5 py-6 shadow-[10px_0_40px_rgba(15,27,61,0.035)] backdrop-blur-xl lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col overflow-y-auto border-r border-slate-200/70 bg-white/90 px-5 py-6 shadow-[10px_0_40px_rgba(15,27,61,0.035)] backdrop-blur-xl lg:flex">
         <div className="mb-9 px-1">
           <AppBrand href="/dashboard/admin" subtitle="Admin workspace" />
         </div>
@@ -177,18 +230,7 @@ export default function AdminShell({ children, displayName, pendingCourses }: Ad
         <p className="mb-2 px-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-slate-400">การจัดการ</p>
         {nav}
 
-        <div className="mt-auto rounded-[20px] bg-[linear-gradient(145deg,#0F1B3D,#1B326B)] p-4 text-white shadow-[0_14px_30px_rgba(15,27,61,0.16)]">
-          <div className="mb-3 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-[13px] font-extrabold text-white">
-              {displayName.charAt(0).toUpperCase()}
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-[13px] font-bold text-white">{displayName}</p>
-              <p className="text-[10.5px] text-white/50">ผู้ดูแลระบบ</p>
-            </div>
-          </div>
-          <LogoutButton />
-        </div>
+        <div className="mt-auto">{accountPanel}</div>
       </aside>
 
       <main className="admin-workspace min-w-0 lg:pl-72">

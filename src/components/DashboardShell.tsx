@@ -9,6 +9,7 @@ interface DashboardShellProps {
   children: ReactNode;
   sidebar: ReactNode;
   displayName: string;
+  avatarUrl?: string | null;
   role: DashboardRole;
 }
 
@@ -21,6 +22,7 @@ export default function DashboardShell({
   children,
   sidebar,
   displayName,
+  avatarUrl,
   role,
 }: DashboardShellProps): ReactElement {
   return (
@@ -40,7 +42,7 @@ export default function DashboardShell({
               <span className="block max-w-40 truncate text-[12px] font-bold text-[#0F1B3D]">{displayName}</span>
             </p>
             <NotificationBell />
-            <ProfileDropdown displayName={displayName} role={role} />
+            <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role={role} />
           </div>
         </div>
       </header>

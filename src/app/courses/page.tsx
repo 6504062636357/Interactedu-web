@@ -12,7 +12,7 @@ const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
 
-function Navbar({ displayName }: { displayName: string | null }): ReactElement {
+function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatarUrl: string | null }): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
@@ -43,7 +43,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
 
           <div className="flex items-center gap-2">
             {displayName ? (
-              <ProfileDropdown displayName={displayName} role="student" />
+              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" />
             ) : (
               <>
                 <Link
@@ -122,6 +122,10 @@ export default async function CoursesPage({
     data: { user },
   } = await supabase.auth.getUser();
 
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("avatar_url").eq("id", user.id).maybeSingle()
+    : { data: null };
+
   const displayName = user
     ? (user.user_metadata?.full_name as string | undefined) ?? user.email?.split("@")[0] ?? "ผู้ใช้"
     : null;
@@ -169,7 +173,7 @@ export default async function CoursesPage({
 
   return (
     <div className="min-h-screen w-full bg-white">
-      <Navbar displayName={displayName} />
+      <Navbar displayName={displayName} avatarUrl={profile?.avatar_url ?? null} />
       <ExplorerHero />
       <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} initialFreeOnly={initialFreeOnly} />
       <Footer />

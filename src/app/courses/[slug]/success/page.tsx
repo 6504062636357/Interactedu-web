@@ -69,7 +69,7 @@ export default async function EnrollSuccessPage({
   // หา role ของ user ไปให้ ProfileDropdown (แก้ TS error: Property 'role' is missing)
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, avatar_url")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -103,7 +103,7 @@ export default async function EnrollSuccessPage({
         <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex h-[74px] items-center justify-between">
             <AppBrand compact />
-            <ProfileDropdown displayName={displayName} role={role} />
+            <ProfileDropdown displayName={displayName} avatarUrl={profile?.avatar_url} role={role} />
           </div>
         </div>
       </header>

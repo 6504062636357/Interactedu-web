@@ -2,12 +2,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import ChangePasswordForm from "@/components/ChangePasswordForm";
 
 const supabase = createClient();
 
 export default function StudentSettingsPage(): ReactElement {
+  const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -22,10 +24,14 @@ export default function StudentSettingsPage(): ReactElement {
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setIsLoading(false); return; }
+      if (!user) {
+        setMessage({ type: "error", text: "กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์" });
+        setIsLoading(false);
+        return;
+      }
       setEmail(user.email ?? "");
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
         .select("full_name, avatar_url, pdpa_consent_at, language")
         .eq("id", user.id)
@@ -36,6 +42,8 @@ export default function StudentSettingsPage(): ReactElement {
         setAvatarUrl(data.avatar_url ?? "");
         setPdpaConsent(!!data.pdpa_consent_at);
         setLanguage((data.language as "th" | "en") ?? "th");
+      } else {
+        setMessage({ type: "error", text: error?.message ?? "ไม่พบข้อมูลโปรไฟล์ กรุณาติดต่อผู้ดูแลระบบ" });
       }
       setIsLoading(false);
     }
@@ -81,24 +89,48 @@ export default function StudentSettingsPage(): ReactElement {
   }
 
   async function handleSave() {
+    if (isUploading) return;
+    const name = fullName.trim();
+    if (!name) {
+      setMessage({ type: "error", text: "กรุณากรอกชื่อ-นามสกุล" });
+      return;
+    }
     setIsSaving(true);
     setMessage(null);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setIsSaving(false); return; }
+    if (!user) {
+      setMessage({ type: "error", text: "กรุณาเข้าสู่ระบบก่อนแก้ไขโปรไฟล์" });
+      setIsSaving(false);
+      return;
+    }
 
-    const { error } = await supabase
+    const { data: savedProfile, error } = await supabase
       .from("profiles")
       .update({
-        full_name: fullName,
+        full_name: name,
         avatar_url: avatarUrl,
         language,
         pdpa_consent_at: pdpaConsent ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", user.id);
+      .eq("id", user.id)
+      .select("id, full_name")
+      .maybeSingle();
 
+    if (error || !savedProfile) {
+      setMessage({ type: "error", text: error?.message ?? "บันทึกไม่สำเร็จ: ไม่พบโปรไฟล์ที่แก้ไขได้ กรุณาติดต่อผู้ดูแลระบบ" });
+      setIsSaving(false);
+      return;
+    }
+
+    const { error: authError } = await supabase.auth.updateUser({
+      data: { full_name: savedProfile.full_name },
+    });
+    setMessage(authError
+      ? { type: "error", text: "บันทึกโปรไฟล์แล้ว แต่ปรับชื่อในบัญชีไม่สำเร็จ: " + authError.message }
+      : { type: "success", text: "บันทึกเรียบร้อยแล้ว" });
+    router.refresh();
     setIsSaving(false);
-    setMessage(error ? { type: "error", text: error.message } : { type: "success", text: "บันทึกเรียบร้อยแล้ว" });
   }
 
   if (isLoading) return <p className="text-[13.5px] text-slate-400 py-8 text-center">กำลังโหลด...</p>;
@@ -207,7 +239,7 @@ export default function StudentSettingsPage(): ReactElement {
 
       <button
         onClick={handleSave}
-        disabled={isSaving}
+        disabled={isSaving || isUploading}
         className="bg-blue-950 hover:bg-blue-900 disabled:opacity-50 text-white text-[13.5px] font-semibold px-5 py-2.5 rounded-lg transition-colors"
       >
         {isSaving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}

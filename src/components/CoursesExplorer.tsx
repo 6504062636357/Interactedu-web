@@ -41,7 +41,12 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
     (course.category && CATEGORY_COLORS[course.category as Category]) ?? "bg-[#0F1B3D] text-white";
 
   return (
-    <div className="group bg-white rounded-3xl border border-[#0F1B3D]/[0.06] shadow-[0_1px_2px_rgba(15,27,61,0.04)] hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)] hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col">
+    <div className="group relative flex cursor-pointer flex-col overflow-hidden rounded-3xl border border-[#0F1B3D]/[0.06] bg-white shadow-[0_1px_2px_rgba(15,27,61,0.04)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)] focus-within:ring-2 focus-within:ring-[#3157D5]">
+      <Link
+        href={`/courses/${course.slug}`}
+        aria-label={`ดูรายละเอียดคอร์ส ${course.title}`}
+        className="absolute inset-0 z-10"
+      />
       <div className="relative h-40 bg-gradient-to-br from-[#0F1B3D]/[0.04] to-[#0F1B3D]/[0.09] overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -54,7 +59,7 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
             {course.category}
           </span>
         )}
-        <div className="absolute top-2 right-2 bg-white/90 rounded-full">
+        <div className="absolute top-2 right-2 z-20 bg-white/90 rounded-full">
           <FavoriteHeartButton courseId={course.id} />
         </div>
       </div>
@@ -71,7 +76,7 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
           </span>
           <Link
             href={isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
-            className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
+            className="relative z-20 text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
             {isEnrolled ? "เข้าเรียนต่อ" : "ลงทะเบียน"}
           </Link>

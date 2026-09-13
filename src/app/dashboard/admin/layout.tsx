@@ -14,7 +14,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   const [profileRes, pendingRes] = await Promise.all([
-    supabase.from("profiles").select("role, full_name").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("role, full_name, avatar_url").eq("id", user.id).maybeSingle(),
     supabase.from("courses").select("id", { count: "exact", head: true }).eq("status", "pending"),
   ]);
 
@@ -27,7 +27,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     "Admin";
 
   return (
-    <AdminShell displayName={displayName} pendingCourses={pendingRes.count ?? 0}>
+    <AdminShell displayName={displayName} avatarUrl={profileRes.data.avatar_url} pendingCourses={pendingRes.count ?? 0}>
       {children}
     </AdminShell>
   );

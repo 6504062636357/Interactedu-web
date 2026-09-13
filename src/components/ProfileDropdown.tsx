@@ -11,6 +11,7 @@ type UserRole = "student" | "teacher" | "admin";
 interface ProfileDropdownProps {
   displayName: string;
   role: UserRole;
+  avatarUrl?: string | null;
 }
 
 interface MenuItem {
@@ -98,10 +99,8 @@ function getMenuItems(role: UserRole): MenuItem[] {
 
   if (role === "admin") {
     return [
-      { label: "โปรไฟล์", href: "/profile", icon: <IconUser /> },
-      { label: "แดชบอร์ดแอดมิน", href: "/dashboard/admin", icon: <IconPlay /> },
-      { label: "บทเรียนรอตรวจสอบ", href: "/admin/review", icon: <IconAward /> },
-      { label: "การตั้งค่า", href: "/settings", icon: <IconSettings /> },
+      { label: "โปรไฟล์", href: "/dashboard/admin/profile", icon: <IconUser /> },
+      { label: "การตั้งค่า", href: "/dashboard/admin/settings", icon: <IconSettings /> },
     ];
   }
 
@@ -116,7 +115,20 @@ function getMenuItems(role: UserRole): MenuItem[] {
   ];
 }
 
-export default function ProfileDropdown({ displayName, role }: ProfileDropdownProps): ReactElement {
+function ProfileAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl?: string | null }): ReactElement {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[linear-gradient(135deg,#FF5A3C,#FF826B)] text-[13px] font-extrabold text-white shadow-sm">
+      {avatarUrl && !imageFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={avatarUrl} alt="" className="h-full w-full object-cover" onError={() => setImageFailed(true)} />
+      ) : displayName.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+export default function ProfileDropdown({ displayName, role, avatarUrl }: ProfileDropdownProps): ReactElement {
   const [open, setOpen] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -132,11 +144,11 @@ export default function ProfileDropdown({ displayName, role }: ProfileDropdownPr
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-    const handleLogout = async (): Promise<void> => {
+  const handleLogout = async (): Promise<void> => {
     await supabase.auth.signOut({ scope: "local" });
     setOpen(false);
+    router.push(role === "admin" ? "/login" : "/");
     router.refresh();
-    router.push("/");
   };
 
   return (
@@ -148,9 +160,7 @@ export default function ProfileDropdown({ displayName, role }: ProfileDropdownPr
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#FF5A3C,#FF826B)] text-[13px] font-extrabold text-white shadow-sm">
-          {displayName.charAt(0).toUpperCase()}
-        </span>
+        <ProfileAvatar key={avatarUrl ?? "no-avatar"} displayName={displayName} avatarUrl={avatarUrl} />
         <span className="hidden max-w-36 truncate sm:inline">{displayName}</span>
         <svg
           width="13"
