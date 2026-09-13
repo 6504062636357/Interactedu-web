@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 import AppBrand from "@/components/AppBrand";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
+import { BookOpen, BrainCircuit, BriefcaseBusiness, Calculator, Code2, Compass, Languages, Laptop, Megaphone, Palette, type LucideIcon } from "lucide-react";
 interface Course {
   id: string;
   title: string;
@@ -31,15 +32,6 @@ const tagColors: Record<string, string> = {
   Design: "bg-[#0F1B3D] text-white",
   "Data Science": "bg-[#3157D5] text-white",
   Marketing: "bg-[#FFCB47] text-[#0F1B3D]",
-};
-
-// ข้อความสีของแท็บหมวดหมู่ (ใช้กับการ์ด "เลือกเส้นทางของคุณ" ให้ดูเป็นระบบเดียวกับแท็บคอร์ส
-// แทนการสุ่มไล่สีรุ้งทีละใบ)
-const tagTextColors: Record<string, string> = {
-  Development: "text-[#FF5A3C]",
-  Design: "text-[#0F1B3D]",
-  "Data Science": "text-[#3157D5]",
-  Marketing: "text-[#B9860A]",
 };
 
 // [แก้บั๊ก: ความยาวคอร์สค้าง 0] รวมความยาวคอร์สจาก video_duration_seconds ของบทเรียนจริงๆ แบบสด
@@ -112,15 +104,6 @@ const marqueeTags: string[] = [
 // สลับสีจุดคั่นระหว่างคำ ให้แถบดูมีสีสันขึ้นกว่าเดิม (เดิมใช้สีส้มอย่างเดียวทั้งแถบ)
 const marqueeDotColors = ["#FF5A3C", "#FFCB47", "#3157D5"];
 
-// สีไอคอนของแท็บหมวดหมู่ (hex ตรงตัว) ใช้ทำพื้นหลังจางๆ ของไอคอนในการ์ด "เลือกเส้นทางของคุณ"
-// ให้มีสีสันขึ้นนิดนึงแทนที่จะเป็นการ์ดขาวล้วน
-const categoryAccentHex: Record<string, string> = {
-  Development: "#FF5A3C",
-  Design: "#0F1B3D",
-  "Data Science": "#3157D5",
-  Marketing: "#E0A400",
-};
-
 const avatarStack: { initial: string; bg: string }[] = [
   { initial: "A", bg: "#FF5A3C" },
   { initial: "K", bg: "#3157D5" },
@@ -128,7 +111,7 @@ const avatarStack: { initial: string; bg: string }[] = [
   { initial: "P", bg: "#0F1B3D" },
 ];
 
-function Navbar({ displayName }: { displayName: string | null }): ReactElement {
+function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatarUrl: string | null }): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
@@ -150,7 +133,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
           <div className="flex items-center gap-2">
             {displayName ? (
               // role เป็น "student" เสมอตรงนี้ เพราะ teacher/admin ถูก redirect ออกไปแล้วก่อนถึงจุดนี้
-              <ProfileDropdown displayName={displayName} role="student" />
+              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" />
             ) : (
               <>
                 <Link
@@ -341,47 +324,61 @@ interface PathCourse {
   description: string | null;
 }
 
+type PathVisual = { icon: LucideIcon; accent: string; surface: string };
+
+const pathVisuals: Array<PathVisual & { keywords: string[] }> = [
+  { keywords: ["วิทยาการข้อมูล", "ปัญญาประดิษฐ์", "machine learning", "data", " ai ", "analytics"], icon: BrainCircuit, accent: "#52319F", surface: "#D9CAFA" },
+  { keywords: ["เขียนโปรแกรม", "ซอฟต์แวร์", "development", "programming", "software", "react", "mobile app", "web"], icon: Code2, accent: "#244DAA", surface: "#CDDDFE" },
+  { keywords: ["เทคโนโลยี", "technology"], icon: Laptop, accent: "#244DAA", surface: "#CDDDFE" },
+  { keywords: ["ออกแบบ", "design", "ui/ux", "ศิลปะ"], icon: Palette, accent: "#9C2C62", surface: "#F3C9DF" },
+  { keywords: ["การตลาด", "marketing"], icon: Megaphone, accent: "#A64723", surface: "#F9D0B8" },
+  { keywords: ["บัญชี", "การเงิน", "ประกัน", "finance", "account"], icon: Calculator, accent: "#09684E", surface: "#C4E8D7" },
+  { keywords: ["ภาษา", "english", "language"], icon: Languages, accent: "#865000", surface: "#F5D48D" },
+  { keywords: ["พัฒนาตนเอง", "ภาวะผู้นำ", "leadership", "self development"], icon: Compass, accent: "#A6372C", surface: "#F4C4BC" },
+  { keywords: ["ธุรกิจ", "บริหาร", "business", "management"], icon: BriefcaseBusiness, accent: "#15546D", surface: "#C9E3EC" },
+];
+
+function getPathVisual(course: PathCourse): PathVisual {
+  const category = ` ${course.category ?? ""} `.toLowerCase();
+  const title = ` ${course.title} `.toLowerCase();
+  return pathVisuals.find(({ keywords }) => keywords.some((keyword) => category.includes(keyword)))
+    ?? pathVisuals.find(({ keywords }) => keywords.some((keyword) => title.includes(keyword)))
+    ?? { icon: BookOpen, accent: "#244DAA", surface: "#D5E0F2" };
+}
+
+function oneCoursePerCategory(courses: PathCourse[]): PathCourse[] {
+  const seen = new Set<string>();
+  return courses.filter((course) => {
+    const category = course.category?.trim().toLocaleLowerCase() || "uncategorized";
+    if (seen.has(category)) return false;
+    seen.add(category);
+    return true;
+  });
+}
+
 function PathCard({ course }: { course: PathCourse }): ReactElement {
-  const accent = tagTextColors[course.category ?? ""] ?? "text-[#0F1B3D]";
-  const accentHex = categoryAccentHex[course.category ?? ""] ?? "#0F1B3D";
+  const { icon: Icon, accent, surface } = getPathVisual(course);
   return (
     <Link
       href={`/courses/${course.slug}`}
-      className="group flex min-h-[224px] flex-col justify-between rounded-2xl border border-[#0F1B3D]/[0.06] bg-white p-6 shadow-[0_1px_2px_rgba(15,27,61,0.04)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)]"
+      className="group flex min-h-[300px] w-full flex-col overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.07] bg-white shadow-[0_1px_2px_rgba(15,27,61,0.04)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)] sm:w-[calc((100%-1.25rem)/2)] lg:w-[calc((100%-3.75rem)/4)]"
     >
-      <div>
-        {/* ไอคอนสีตามหมวดหมู่ พื้นหลังจางๆ — เพิ่มความมีสีสันให้การ์ดแทนที่จะเป็นขาวล้วน */}
-        <span
-          className="inline-flex items-center justify-center w-10 h-10 rounded-xl mb-4"
-          style={{ backgroundColor: `${accentHex}17` }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke={accentHex} strokeWidth="1.8" strokeLinejoin="round" />
-            <path
-              d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5"
-              stroke={accentHex}
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.55"
-            />
-          </svg>
+      <div className="relative flex h-24 shrink-0 items-center overflow-hidden px-6" style={{ backgroundColor: surface }}>
+        <span aria-hidden="true" className="absolute -right-5 -top-12 h-32 w-32 rounded-full border-[18px] opacity-25" style={{ borderColor: accent }} />
+        <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm" style={{ color: accent }}>
+          <Icon size={25} strokeWidth={1.8} aria-hidden="true" />
         </span>
-        <p className={`text-[12px] font-bold uppercase tracking-[0.06em] ${accent}`}>
+      </div>
+      <div className="flex flex-1 flex-col px-6 pb-5 pt-4">
+        <p className="text-[12px] font-bold leading-5 tracking-[0.02em]" style={{ color: accent }}>
           {course.category ?? "คอร์สแนะนำ"}
         </p>
-        <h3 className="mt-2 text-[16.5px] font-bold leading-snug text-[#0F1B3D] line-clamp-2">{course.title}</h3>
-        <p className="mt-2 text-[13px] leading-relaxed text-[#0F1B3D]/50 line-clamp-2">
+        <h3 className="mt-2 line-clamp-2 text-[16.5px] font-bold leading-snug text-[#0F1B3D]">{course.title}</h3>
+        <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-[#0F1B3D]/50">
           {course.description?.trim() || "เริ่มต้นเรียนรู้ทักษะใหม่ไปกับคอร์สนี้ได้เลยวันนี้"}
         </p>
+        <span className="mt-auto pt-5 text-[13px] font-semibold text-[#3157D5] transition-colors group-hover:text-[#0F1B3D]">ดูรายละเอียด</span>
       </div>
-
-      <span className="mt-4 flex items-center gap-1.5 text-[13px] font-semibold text-[#0F1B3D]/40 transition-colors group-hover:text-[#0F1B3D]">
-        ดูรายละเอียด
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="transition-transform group-hover:translate-x-0.5">
-          <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </span>
     </Link>
   );
 }
@@ -401,7 +398,7 @@ function CareerPaths({ courses }: { courses: PathCourse[] }): ReactElement | nul
         </h2>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="flex flex-wrap justify-center gap-5">
         {courses.map((course) => (
           <PathCard key={course.id} course={course} />
         ))}
@@ -573,8 +570,10 @@ export default async function Page(): Promise<ReactElement> {
   } = await supabase.auth.getUser();
 
   // ถ้า login แล้วเป็นครู/แอดมิน ให้เด้งไปหน้าของตัวเองแทน ไม่โชว์หน้านี้
+  let avatarUrl: string | null = null;
   if (user) {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    const { data: profile } = await supabase.from("profiles").select("role, avatar_url").eq("id", user.id).maybeSingle();
+    avatarUrl = profile?.avatar_url ?? null;
 
     if (profile?.role === "teacher") redirect("/dashboard/teacher")
     if (profile?.role === "admin") redirect("/dashboard/admin");
@@ -644,14 +643,13 @@ export default async function Page(): Promise<ReactElement> {
     };
   });
 
-  // ดึงคอร์สที่เผยแพร่แล้วมาใส่ในการ์ด "เลือกเส้นทางของคุณ" — เอาชื่อ/คำอธิบาย/หมวดหมู่
-  // จริงจากฐานข้อมูล ไม่ได้ผูก career-path มั่วๆ ที่ไม่ตรงกับคอร์สจริง ลิงก์ตรงไปหน้าคอร์สนั้นเลย
+  // เรียงล่าสุดก่อน แล้วเลือกคอร์สตัวแทนเพียงหนึ่งใบต่อหมวดหมู่
   const { data: pathCoursesData, error: pathCoursesError } = await supabase
     .from("courses")
     .select("id, title, slug, category, description")
     .eq("status", "published")
     .order("created_at", { ascending: false })
-    .limit(8);
+    .limit(48);
 
   if (pathCoursesError) {
     console.error("Failed to fetch career path courses:", pathCoursesError.message);
@@ -659,9 +657,9 @@ export default async function Page(): Promise<ReactElement> {
 
   return (
     <div className="min-h-screen w-full app-canvas">
-      <Navbar displayName={displayName} />
+      <Navbar displayName={displayName} avatarUrl={avatarUrl} />
       <Hero />
-      <CareerPaths courses={pathCoursesData ?? []} />
+      <CareerPaths courses={oneCoursePerCategory(pathCoursesData ?? [])} />
       <CourseCatalog courses={coursesWithRatings} />
       <CtaBanner />
       <Footer />

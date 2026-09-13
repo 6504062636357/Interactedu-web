@@ -9,6 +9,7 @@ interface AdminUserProfileFormProps {
   initialPhone: string | null;
   initialUniversity: string | null;
   initialFaculty: string | null;
+  selfProfile?: boolean;
 }
 
 const inputClass =
@@ -21,6 +22,7 @@ export default function AdminUserProfileForm({
   initialPhone,
   initialUniversity,
   initialFaculty,
+  selfProfile = false,
 }: AdminUserProfileFormProps): ReactElement {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -47,7 +49,7 @@ export default function AdminUserProfileForm({
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ");
 
-      setSuccess("บันทึกข้อมูลผู้ใช้แล้ว");
+      setSuccess(selfProfile ? "บันทึกโปรไฟล์ของคุณแล้ว" : "บันทึกข้อมูลผู้ใช้แล้ว");
       setEditing(false);
       router.refresh();
     } catch (submitError) {
@@ -61,8 +63,8 @@ export default function AdminUserProfileForm({
     <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-extrabold text-[#0F1B3D]">ข้อมูลโปรไฟล์</h2>
-          <p className="mt-0.5 text-xs text-slate-400">ชื่อ เบอร์โทร มหาวิทยาลัย และคณะ/สาขา</p>
+          <h2 className="text-base font-extrabold text-[#0F1B3D]">{selfProfile ? "ข้อมูลของฉัน" : "ข้อมูลโปรไฟล์"}</h2>
+          <p className="mt-0.5 text-xs text-slate-500">{selfProfile ? "แก้ไขชื่อ เบอร์โทร และข้อมูลสังกัด" : "ชื่อ เบอร์โทร มหาวิทยาลัย และคณะ/สาขา"}</p>
         </div>
         <button
           type="button"
