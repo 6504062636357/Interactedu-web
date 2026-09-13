@@ -7,22 +7,16 @@ import { saveCourseFinalExam, saveCourseExamConfig, previewCourseExamSample, typ
 type EditableQuestion = CourseExamQuestionInput & { key: string };
 
 type Difficulty = "easy" | "medium" | "hard";
-type BuildMode = "custom" | "preset";
-type PresetType = "quick_check" | "standard_final" | "challenging_final";
 type ActiveTab = "random" | "manual";
 type InteractionType = "multiple_choice" | "true_false";
+// ยุบโหมด Preset ออกแล้ว (ของจริงไม่มีคอร์สไหนใช้เลย) เหลือ Custom โหมดเดียว — lessonId เป็น ""
+// ในสเตตของ UI แปลว่า "ทั้งคอร์ส ไม่ระบุบท" (แปลงเป็น null ตอนส่งให้ server action)
 interface CustomConstraintRow {
   key: string;
   lessonId: string;
   difficulty: Difficulty;
   count: number;
 }
-
-const PRESET_LABELS: Record<PresetType, string> = {
-  quick_check: "Quick Check (ง่าย 60% / ปานกลาง 40%)",
-  standard_final: "Standard Final (ง่าย 30% / ปานกลาง 50% / ยาก 20%)",
-  challenging_final: "Challenging Final (ปานกลาง 50% / ยาก 50%)",
-};
 
 function emptyQuestion(): EditableQuestion {
   return {
@@ -51,10 +45,7 @@ export default function CourseExamEditor({
   workspace?: "teacher" | "admin";
   readOnly?: boolean; // ⬅️ ใหม่
   initialExamConfig?: {
-    buildMode: BuildMode;
-    totalQuestions: number;
-    presetType: PresetType | null;
-    customConstraints: { lessonId: string; difficulty: Difficulty; count: number }[] | null;
+    customConstraints: { lessonId: string | null; difficulty: Difficulty; count: number }[] | null;
   } | null;
 }) {
   const router = useRouter();
@@ -68,14 +59,16 @@ export default function CourseExamEditor({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
+  const [isDirty, setIsDirty] = useState(false);
   function updateQuestion(key: string, updates: Partial<EditableQuestion>) {
-    if (readOnly) return; // ⬅️ ใหม่: กันเผื่อ event หลุดมา
+    if (readOnly) return; //กันเผื่อ event หลุดมา
+    setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key ? { ...question, ...updates } : question));
   }
 
   function updateChoice(key: string, choiceIndex: number, text: string) {
-    if (readOnly) return; // ⬅️ ใหม่
+    if (readOnly) return; 
+    setIsDirty(true); 
     setQuestions((current) => current.map((question) => question.key === key ? {
       ...question,
       choices: question.choices.map((choice, index) => index === choiceIndex ? { ...choice, text } : choice),
@@ -83,7 +76,8 @@ export default function CourseExamEditor({
   }
 
   function setCorrectChoice(key: string, choiceIndex: number) {
-    if (readOnly) return; // ⬅️ ใหม่
+    if (readOnly) return;
+    setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key ? {
       ...question,
       choices: question.choices.map((choice, index) => ({ ...choice, isCorrect: index === choiceIndex })),
@@ -92,7 +86,8 @@ export default function CourseExamEditor({
 
    // ===== เพิ่มใหม่: เปลี่ยน interaction_type ของคำถามข้อนั้น =====
   function setInteractionType(key: string, interactionType: InteractionType) {
-    if (readOnly) return; // ⬅️ ใหม่
+    if (readOnly) return;
+    setIsDirty(true);
     setQuestions((current) => current.map((question) => {
       if (question.key !== key) return question;
       if (interactionType === "true_false") {
@@ -143,6 +138,7 @@ export default function CourseExamEditor({
         return;
       }
       setMessage("บันทึกบททดสอบท้ายคอร์สเรียบร้อยแล้ว");
+      setIsDirty(false);
       router.refresh();
     } catch {
       setError("เชื่อมต่อระบบบันทึกข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
@@ -151,12 +147,9 @@ export default function CourseExamEditor({
     }
   }
 
-  const [buildMode, setBuildMode] = useState<BuildMode>(initialExamConfig?.buildMode ?? "preset");
-  const [totalQuestions, setTotalQuestions] = useState(initialExamConfig?.totalQuestions ?? 10);
-  const [presetType, setPresetType] = useState<PresetType>(initialExamConfig?.presetType ?? "standard_final");
   const [customConstraints, setCustomConstraints] = useState<CustomConstraintRow[]>(
     initialExamConfig?.customConstraints?.length
-      ? initialExamConfig.customConstraints.map((c) => ({ ...c, key: crypto.randomUUID() }))
+      ? initialExamConfig.customConstraints.map((c) => ({ ...c, lessonId: c.lessonId ?? "", key: crypto.randomUUID() }))
       : [{ key: crypto.randomUUID(), lessonId: lessons[0]?.id ?? "", difficulty: "easy", count: 1 }]
   );
   const [configSaving, setConfigSaving] = useState(false);
@@ -177,12 +170,11 @@ export default function CourseExamEditor({
     try {
       const result = await saveCourseExamConfig({
         courseId,
-        buildMode,
-        totalQuestions,
-        presetType: buildMode === "preset" ? presetType : null,
-        customConstraints: buildMode === "custom"
-          ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
-          : null,
+        customConstraints: customConstraints.map(({ lessonId, difficulty, count }) => ({
+          lessonId: lessonId || null,
+          difficulty,
+          count,
+        })),
       });
       if (result.error) {
         setConfigError(result.error);
@@ -222,12 +214,11 @@ export default function CourseExamEditor({
     try {
       const result = await previewCourseExamSample({
         courseId,
-        buildMode,
-        totalQuestions,
-        presetType: buildMode === "preset" ? presetType : null,
-        customConstraints: buildMode === "custom"
-          ? customConstraints.map(({ lessonId, difficulty, count }) => ({ lessonId, difficulty, count }))
-          : null,
+        customConstraints: customConstraints.map(({ lessonId, difficulty, count }) => ({
+          lessonId: lessonId || null,
+          difficulty,
+          count,
+        })),
       });
       if (result.error) {
         setPreviewError(result.error);
@@ -239,18 +230,6 @@ export default function CourseExamEditor({
     } finally {
       setPreviewLoading(false);
     }
-  }
-
-  // ★ เพิ่มใหม่: สลับโหมด preset/custom แล้วล้าง error/message เก่าของอีกโหมดทิ้งด้วย
-  // เพราะก่อนหน้านี้ configError/previewError ค้างอยู่ข้ามโหมด ทำให้เห็น error ของ preset
-  // ปนกับ error ของ custom พร้อมกัน ทั้งที่ตอนนี้กำลังดูอยู่แค่โหมดเดียว
-  function handleModeChange(mode: BuildMode) {
-    if (readOnly) return;
-    setBuildMode(mode);
-    setConfigError(null);
-    setConfigMessage(null);
-    setPreviewError(null);
-    setPreviewQuestions(null);
   }
 
   const tabButtonClass = (tab: ActiveTab) =>
@@ -316,36 +295,18 @@ export default function CourseExamEditor({
           <h2 className="text-[14.5px] font-bold text-[#0F1B3D]">ตั้งค่าการสุ่มข้อสอบ</h2>
           <p className="mt-0.5 text-[12.5px] text-[#0F1B3D]/40">กำหนดเงื่อนไขเพื่อสุ่มชุดข้อสอบสำหรับผู้เรียน</p>
 
-          <div className="mt-4 flex gap-2">
-            <button type="button" disabled={readOnly} onClick={() => handleModeChange("preset")} className={`rounded-full px-4 py-2 text-[13px] font-bold disabled:opacity-60 disabled:cursor-not-allowed ${buildMode === "preset" ? "bg-[#0F1B3D] text-white" : "bg-white text-[#0F1B3D]/60 border border-[#0F1B3D]/10"}`}>สุ่มตามระดับความยาก (Preset)</button>
-            <button type="button" disabled={readOnly} onClick={() => handleModeChange("custom")} className={`rounded-full px-4 py-2 text-[13px] font-bold disabled:opacity-60 disabled:cursor-not-allowed ${buildMode === "custom" ? "bg-[#0F1B3D] text-white" : "bg-white text-[#0F1B3D]/60 border border-[#0F1B3D]/10"}`}>กำหนดเงื่อนไขรายบท (Custom)</button>
-          </div>
-
-          <label className="mt-4 block max-w-[200px]">
-            <span className="mb-1.5 block text-[13px] font-semibold text-[#0F1B3D]/70">จำนวนข้อสอบทั้งหมด</span>
-            <input type="number" min={1} value={totalQuestions} disabled={readOnly} onChange={(e) => setTotalQuestions(Number(e.target.value))} className="w-full rounded-lg border border-[#0F1B3D]/10 bg-white px-3.5 py-2 text-sm outline-none focus:border-[#FF5A3C] disabled:opacity-60" />
-          </label>
-
-          {buildMode === "preset" ? (
-            <label className="mt-4 block max-w-md">
-              <span className="mb-1.5 block text-[13px] font-semibold text-[#0F1B3D]/70">แม่แบบ</span>
-              <select value={presetType} disabled={readOnly} onChange={(e) => setPresetType(e.target.value as PresetType)} className="w-full rounded-lg border border-[#0F1B3D]/10 bg-white px-3.5 py-2 text-sm outline-none focus:border-[#FF5A3C] disabled:opacity-60">
-                {(Object.entries(PRESET_LABELS) as [PresetType, string][]).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-          ) : lessons.length === 0 ? (
+          {lessons.length === 0 ? (
             // ★ เพิ่มใหม่: คอร์สยังไม่มีบทเรียนเลย ดร็อปดาวน์เลือกบทเรียนจะว่างเปล่าไม่มีตัวเลือกให้กด
             // เลยไม่แสดง UI กำหนดเงื่อนไขรายบทเลย โชว์ข้อความอธิบายแทนให้เข้าใจง่ายกว่า
             <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-700">
-              คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถกำหนดเงื่อนไขรายบทได้ กรุณาเพิ่มบทเรียนก่อน
+              คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถตั้งค่าข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน
             </p>
           ) : (
             <div className="mt-4 space-y-2.5">
               {customConstraints.map((constraint) => (
                 <div key={constraint.key} className="flex flex-wrap items-center gap-2">
                   <select value={constraint.lessonId} disabled={readOnly} onChange={(e) => updateConstraint(constraint.key, { lessonId: e.target.value })} className="rounded-lg border border-[#0F1B3D]/10 bg-white px-3 py-2 text-[13px] disabled:opacity-60">
+                    <option value="">— ทั้งคอร์ส (ไม่ระบุบท) —</option>
                     {lessons.map((lesson) => <option key={lesson.id} value={lesson.id}>{lesson.title}</option>)}
                   </select>
                   <select value={constraint.difficulty} disabled={readOnly} onChange={(e) => updateConstraint(constraint.key, { difficulty: e.target.value as Difficulty })} className="rounded-lg border border-[#0F1B3D]/10 bg-white px-3 py-2 text-[13px] disabled:opacity-60">
@@ -363,8 +324,8 @@ export default function CourseExamEditor({
               {!readOnly && (
                 <button type="button" onClick={() => setCustomConstraints((c) => [...c, { key: crypto.randomUUID(), lessonId: lessons[0]?.id ?? "", difficulty: "easy", count: 1 }])} className="text-xs font-bold text-[#3157D5]">+ เพิ่มเงื่อนไข</button>
               )}
-              <p className={`text-[12px] font-semibold ${constraintSum === totalQuestions ? "text-emerald-600" : "text-orange-600"}`}>
-                รวม {constraintSum} / {totalQuestions} ข้อ
+              <p className="text-[12px] font-semibold text-[#0F1B3D]/50">
+                รวมทั้งหมด {constraintSum} ข้อ
               </p>
             </div>
           )}
@@ -372,7 +333,6 @@ export default function CourseExamEditor({
           {configError && <p role="alert" className="mt-4 whitespace-pre-line rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{configError}</p>}
           {configMessage && <p aria-live="polite" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-700">{configMessage}</p>}
 
-          {/* ⬅️ ใหม่: ซ่อนปุ่มบันทึกกติกาสุ่มข้อสอบเมื่อ readOnly */}
           {!readOnly && (
             lessons.length === 0 ? (
               <Link href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`} className="mt-4 inline-flex rounded-full bg-[#FF5A3C] px-6 py-2.5 text-[13px] font-extrabold text-white hover:bg-[#EB4A2D]">
@@ -384,6 +344,7 @@ export default function CourseExamEditor({
               </button>
             )
           )}
+
 
           {/* ปุ่มดูตัวอย่างปล่อยให้ admin กดได้ด้วย (read-only โดยธรรมชาติ) */}
           <button type="button" disabled={previewLoading || lessons.length === 0} onClick={handlePreview} className="mt-2.5 ml-2.5 rounded-full border border-[#0F1B3D]/15 bg-white px-6 py-2.5 text-[13px] font-bold text-[#0F1B3D] disabled:cursor-not-allowed disabled:opacity-60">
@@ -494,17 +455,29 @@ export default function CourseExamEditor({
           {/* ⬅️ ใหม่: ซ่อนปุ่มเพิ่มคำถาม/บันทึก ทั้งคู่เมื่อ readOnly */}
           {!readOnly && (
             <>
-              <button type="button" onClick={() => setQuestions((current) => [...current, emptyQuestion()])} className="mt-4 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D]">+ เพิ่มคำถาม</button>
+              <button type="button" onClick={() => { setIsDirty(true); setQuestions((current) => [...current, emptyQuestion()]); }} className="mt-4 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D]">+ เพิ่มคำถาม</button>
               {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{error}</p>}
-              {message && <p aria-live="polite" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-700">{message}</p>}
-              {lessons.length === 0 ? (
-                <Link href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`} className="mt-5 flex w-full justify-center rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white hover:bg-[#EB4A2D]">
-                  + เพิ่มบทเรียนก่อนสร้างข้อสอบ
-                </Link>
+
+              {message && !isDirty ? (
+                <>
+                  <p aria-live="polite" className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-[13px] font-semibold text-emerald-700">{message}</p>
+                  <p className="mt-2 text-[12px] leading-5 text-[#0F1B3D]/40">
+                    อย่าลืมกด &quot;ส่งคอร์สเข้าตรวจ&quot; ที่หน้าหลักของคอร์สเพื่อส่งให้แอดมินอนุมัติ
+                  </p>
+                  <button type="button" onClick={() => setIsDirty(true)} className="mt-5 w-full rounded-full border-2 border-[#0F1B3D]/15 bg-white py-3.5 text-sm font-extrabold text-[#0F1B3D] hover:bg-[#0F1B3D]/[0.03]">
+                    แก้ไขแบบทดสอบ
+                  </button>
+                </>
               ) : (
-                <button type="button" disabled={saving} onClick={save} className="mt-5 w-full rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60">
-                  {saving ? "กำลังบันทึก..." : "บันทึกบททดสอบท้ายคอร์ส"}
-                </button>
+                lessons.length === 0 ? (
+                  <Link href={`/dashboard/${workspace}/courses/${courseId}/lessons/new`} className="mt-5 flex w-full justify-center rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white hover:bg-[#EB4A2D]">
+                    + เพิ่มบทเรียนก่อนสร้างข้อสอบ
+                  </Link>
+                ) : (
+                  <button type="button" disabled={saving} onClick={save} className="mt-5 w-full rounded-full bg-[#FF5A3C] py-3.5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                    {saving ? "กำลังบันทึก..." : "บันทึกบททดสอบท้ายคอร์ส"}
+                  </button>
+                )
               )}
             </>
           )}

@@ -6,6 +6,7 @@ import ProfileDropdown from "@/components/ProfileDropdown";
 import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 import AppBrand from "@/components/AppBrand";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 interface Course {
   id: string;
   title: string;
@@ -13,14 +14,18 @@ interface Course {
   category: string | null;
   price: number;
   cover_image_url: string | null;
-  total_duration_seconds: number;
-  lessons: { count: number }[];
+  // [แก้บั๊ก: ความยาวคอร์สค้าง 0] เดิมอ่านจาก courses.total_duration_seconds ตรงๆ แต่คอลัมน์นี้
+  // ไม่เคยมีโค้ดจุดไหนอัปเดตเลย (ค้าง 0 ทุกคอร์ส) — เปลี่ยนมารวมจาก video_duration_seconds ของ
+  // แต่ละบทเรียนแบบสดๆ แทน (ดูฟังก์ชัน courseTotalDurationSeconds ด้านล่าง)
+  lessons: { video_duration_seconds: number | null }[];
   // คะแนนรีวิวเฉลี่ย/จำนวนรีวิว — คอร์สที่ยังไม่มีรีวิวจะเป็น 0 ทั้งคู่
   avgRating: number;
   reviewCount: number;
+  // ลงทะเบียนแล้วหรือยัง (approved) — ใช้สลับปุ่ม "ลงทะเบียน" เป็น "เข้าเรียนต่อ"
+  isEnrolled: boolean;
 }
 
-// ★ แก้: จำกัดสีให้เหลือแค่ 4 สีหลักของแบรนด์ (นำ/น้ำเงิน/ส้ม/ทอง) ตัดม่วง/เขียวออก
+// จำกัดสีให้เหลือแค่ 4 สีหลักของแบรนด์ (นำ/น้ำเงิน/ส้ม/ทอง)
 const tagColors: Record<string, string> = {
   Development: "bg-[#FF5A3C] text-white",
   Design: "bg-[#0F1B3D] text-white",
@@ -28,9 +33,36 @@ const tagColors: Record<string, string> = {
   Marketing: "bg-[#FFCB47] text-[#0F1B3D]",
 };
 
+// ข้อความสีของแท็บหมวดหมู่ (ใช้กับการ์ด "เลือกเส้นทางของคุณ" ให้ดูเป็นระบบเดียวกับแท็บคอร์ส
+// แทนการสุ่มไล่สีรุ้งทีละใบ)
+const tagTextColors: Record<string, string> = {
+  Development: "text-[#FF5A3C]",
+  Design: "text-[#0F1B3D]",
+  "Data Science": "text-[#3157D5]",
+  Marketing: "text-[#B9860A]",
+};
+
+// [แก้บั๊ก: ความยาวคอร์สค้าง 0] รวมความยาวคอร์สจาก video_duration_seconds ของบทเรียนจริงๆ แบบสด
+// แทนการอ่าน courses.total_duration_seconds ที่ไม่เคยถูกอัปเดต — บทเรียนเก่าที่ video_duration_seconds
+// ยังเป็น null/0 อยู่ (เพราะยังไม่เคยถูก save/approve ใหม่หลังแก้จุดบันทึกค่า) จะถูกนับเป็น 0 ไปก่อน
+// ไม่ได้ทำให้ error แค่ยอดรวมคอร์สนั้นๆ จะดูน้อยกว่าความจริงจนกว่าจะ resave/approve
+function courseTotalDurationSeconds(lessons: { video_duration_seconds: number | null }[]): number {
+  return lessons.reduce((sum, l) => sum + (l.video_duration_seconds ?? 0), 0);
+}
+
 function formatDuration(seconds: number): string {
-  const hours = Math.round(seconds / 3600);
-  return `${hours} ชั่วโมง`;
+  const totalSeconds = Math.round(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} ชม. ${minutes} นาที` : `${hours} ชั่วโมง`;
+  }
+  if (minutes > 0) {
+    return secs > 0 ? `${minutes} นาที ${secs} วินาที` : `${minutes} นาที`;
+  }
+  return `${secs} วินาที`;
 }
 
 function formatPrice(price: number): string {
@@ -49,7 +81,6 @@ function StarIcon({ size = 12, color = "#FFCB47" }: { size?: number; color?: str
 }
 
 // แถวคะแนนรีวิว ใช้ในการ์ดคอร์สหน้าแรก — ไม่มีรีวิวก็โชว์ 0.0 พร้อมดาวจาง ๆ
-// ★ แก้: เอาแถบพื้นหลังสีครีมออกตามที่ขอ เหลือแค่ไอคอนดาว + ตัวเลข ไม่มี chip/พื้นหลังครอบ
 function RatingChip({ avgRating, reviewCount }: { avgRating: number; reviewCount: number }): ReactElement {
   const hasReviews = reviewCount > 0;
   return (
@@ -65,8 +96,8 @@ function RatingChip({ avgRating, reviewCount }: { avgRating: number; reviewCount
 
 const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สทั้งหมด", href: "/courses" },
-  { label: "เกี่ยวกับเรา", href: "#" },
-  { label: "บทความ", href: "#" },
+  { label: "เส้นทางสายอาชีพ", href: "#career-paths" },
+  { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
 
 const marqueeTags: string[] = [
@@ -78,7 +109,18 @@ const marqueeTags: string[] = [
   "AI & MACHINE LEARNING",
 ];
 
-// ★ แก้: ตัดสีม่วง/เขียวออก ใช้แค่ 4 สีหลักของแบรนด์
+// สลับสีจุดคั่นระหว่างคำ ให้แถบดูมีสีสันขึ้นกว่าเดิม (เดิมใช้สีส้มอย่างเดียวทั้งแถบ)
+const marqueeDotColors = ["#FF5A3C", "#FFCB47", "#3157D5"];
+
+// สีไอคอนของแท็บหมวดหมู่ (hex ตรงตัว) ใช้ทำพื้นหลังจางๆ ของไอคอนในการ์ด "เลือกเส้นทางของคุณ"
+// ให้มีสีสันขึ้นนิดนึงแทนที่จะเป็นการ์ดขาวล้วน
+const categoryAccentHex: Record<string, string> = {
+  Development: "#FF5A3C",
+  Design: "#0F1B3D",
+  "Data Science": "#3157D5",
+  Marketing: "#E0A400",
+};
+
 const avatarStack: { initial: string; bg: string }[] = [
   { initial: "A", bg: "#FF5A3C" },
   { initial: "K", bg: "#3157D5" },
@@ -90,7 +132,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="flex h-[74px] items-center justify-between">
+        <div className="flex h-[72px] items-center justify-between">
           <AppBrand compact />
 
           <nav className="hidden md:flex items-center gap-1">
@@ -98,7 +140,7 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
               <Link
                 key={link.label}
                 href={link.href}
-                className="rounded-xl px-4 py-2 text-[13px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
+                className="rounded-lg px-4 py-2 text-[13.5px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
               >
                 {link.label}
               </Link>
@@ -132,15 +174,20 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
   );
 }
 
+// แถบหมวดหมู่เลื่อนอัตโนมัติ — กลับมาใช้แบบเดิม (เอียงเล็กน้อย พื้นหลังเข้ม เลื่อนวนไม่หยุด)
+// เพิ่มสีสันขึ้นจากเดิม: พื้นหลังไล่เฉด + จุดคั่นสลับสีแบรนด์แทนสีส้มสีเดียวทั้งแถบ
 function Marquee(): ReactElement {
   const doubled = [...marqueeTags, ...marqueeTags];
   return (
-    <div className="relative -rotate-1 bg-[#0F1B3D] py-3.5 overflow-hidden shadow-[0_10px_30px_-10px_rgba(15,27,61,0.5)] my-[-6px] z-10">
+    <div className="relative -rotate-1 bg-gradient-to-r from-[#0F1B3D] via-[#1c2c5c] to-[#0F1B3D] py-3.5 overflow-hidden shadow-[0_10px_30px_-10px_rgba(15,27,61,0.5)] my-[-6px] z-10">
       <div className="flex whitespace-nowrap animate-[marquee_28s_linear_infinite] motion-reduce:animate-none">
         {doubled.map((tag, i) => (
-          <span key={`${tag}-${i}`} className="flex items-center text-[12.5px] font-bold tracking-[0.08em] text-white/80 mx-4">
+          <span key={`${tag}-${i}`} className="flex items-center text-[12.5px] font-bold tracking-[0.08em] text-white/85 mx-4">
             {tag}
-            <span className="mx-4 w-1.5 h-1.5 rounded-full bg-[#FF5A3C]" />
+            <span
+              className="mx-4 w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: marqueeDotColors[i % marqueeDotColors.length] }}
+            />
           </span>
         ))}
       </div>
@@ -156,109 +203,82 @@ function Marquee(): ReactElement {
 
 function HeroPreviewCard(): ReactElement {
   return (
-    <div className="relative">
-      <div className="relative rounded-[28px] bg-[#0F1B3D] aspect-[4/3.3] p-6 shadow-[0_35px_70px_-25px_rgba(15,27,61,0.5)] overflow-hidden rotate-1">
-        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-[#FF5A3C]/20 blur-3xl" />
-        <div className="absolute -bottom-14 -left-10 w-48 h-48 rounded-full bg-[#3157D5]/20 blur-3xl" />
+    <div className="relative rounded-2xl bg-[#0F1B3D] p-6 shadow-[0_24px_48px_-24px_rgba(15,27,61,0.45)]">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#FF5A3C]" />
+          <span className="w-2.5 h-2.5 rounded-full bg-[#FFCB47]" />
+          <span className="w-2.5 h-2.5 rounded-full bg-white/25" />
+        </div>
+        <span className="text-[11px] font-semibold text-white/45 tracking-[0.08em]">คอร์สยอดนิยม</span>
+      </div>
 
-        <div className="relative h-full flex flex-col">
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#FF5A3C]" />
-              <span className="w-2.5 h-2.5 rounded-full bg-[#FFCB47]" />
-              <span className="w-2.5 h-2.5 rounded-full bg-white/25" />
-            </div>
-            <span className="text-[11px] font-bold text-white/45 tracking-[0.12em]">คอร์สยอดนิยม</span>
+      {/* วิดีโอพรีวิว */}
+      <div className="relative rounded-xl bg-white/[0.06] border border-white/10 overflow-hidden aspect-video mb-3">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-11 h-11 rounded-full bg-white/95 flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M8 6.5v11l9-5.5-9-5.5z" fill="#0F1B3D" />
+            </svg>
           </div>
-
-          {/* วิดีโอพรีวิว */}
-          <div className="relative rounded-2xl bg-white/[0.06] border border-white/10 overflow-hidden aspect-video mb-3">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-11 h-11 rounded-full bg-white/95 flex items-center justify-center shadow-lg">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <path d="M8 6.5v11l9-5.5-9-5.5z" fill="#0F1B3D" />
-                </svg>
-              </div>
-            </div>
-            <div className="absolute bottom-3 left-3 right-3 h-1 rounded-full bg-white/15 overflow-hidden">
-              <div className="h-full w-2/5 rounded-full bg-[#FF5A3C]" />
-            </div>
-          </div>
-
-          {/* ผู้เรียน + คะแนน */}
-          <div className="flex-1 flex items-center justify-between rounded-2xl bg-white/[0.06] border border-white/10 px-4 py-3.5">
-            <div className="flex items-center -space-x-2">
-              {avatarStack.map((avatar) => (
-                <span
-                  key={avatar.initial}
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white ring-2 ring-[#0F1B3D]"
-                  style={{ backgroundColor: avatar.bg }}
-                >
-                  {avatar.initial}
-                </span>
-              ))}
-              <span className="w-7 h-7 rounded-full bg-white/10 ring-2 ring-[#0F1B3D] flex items-center justify-center text-[9.5px] font-bold text-white/70">
-                +2k
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <StarIcon size={13} />
-              <span className="text-[13px] font-extrabold text-white">4.8</span>
-            </div>
-          </div>
+        </div>
+        <div className="absolute bottom-3 left-3 right-3 h-1 rounded-full bg-white/15 overflow-hidden">
+          <div className="h-full w-2/5 rounded-full bg-[#FF5A3C]" />
         </div>
       </div>
 
-      <div className="absolute -bottom-6 -left-6 bg-white rounded-2xl shadow-[0_16px_36px_-10px_rgba(15,27,61,0.22)] border border-[#0F1B3D]/[0.06] px-5 py-4 hidden sm:block -rotate-2">
-        <p className="text-[12px] text-[#0F1B3D]/50 mb-1 font-medium">เรียนจบคอร์ส</p>
-        <p className="text-[18px] font-extrabold text-[#0F1B3D]">98% อัตราความสำเร็จ</p>
+      {/* ผู้เรียน + คะแนน */}
+      <div className="flex items-center justify-between rounded-xl bg-white/[0.06] border border-white/10 px-4 py-3.5 mb-3">
+        <div className="flex items-center -space-x-2">
+          {avatarStack.map((avatar) => (
+            <span
+              key={avatar.initial}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-[#0F1B3D]"
+              style={{ backgroundColor: avatar.bg }}
+            >
+              {avatar.initial}
+            </span>
+          ))}
+          <span className="w-7 h-7 rounded-full bg-white/10 ring-2 ring-[#0F1B3D] flex items-center justify-center text-[9.5px] font-semibold text-white/70">
+            +2k
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <StarIcon size={13} />
+          <span className="text-[13px] font-bold text-white">4.8</span>
+        </div>
       </div>
-    </div>
-  );
-}
 
-// พื้นหลังตกแต่งของ hero — ก้อนสี blur ลอยช้าๆ (ใช้โทนสีเดิมของแบรนด์) + พื้นผิวจุดจางๆ เพิ่มมิติ
-// วางเป็น layer แยกไว้หลังสุด (aria-hidden, pointer-events-none) ไม่กระทบการอ่าน/การคลิกใดๆ
-// ★ แก้: ตัดก้อนสีม่วง (สีนอก 4 โทนหลักของแบรนด์) ออก เหลือ 3 ก้อน + ลดความเข้มลงอีกนิด
-// ให้ดูนุ่มนวล ไม่สีสันจัดจนเกินไป ตามที่ขอ
-function HeroBackground(): ReactElement {
-  return (
-    <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
-      <div className="absolute inset-0 bg-dot-grid opacity-[0.35] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black_45%,transparent_100%)]" />
-      <div className="animate-blob-slow absolute -top-24 left-[8%] w-80 h-80 rounded-full bg-[#3157D5]/[0.13] blur-3xl" />
-      <div className="animate-blob-slower absolute top-10 right-[6%] w-96 h-96 rounded-full bg-[#FF5A3C]/[0.14] blur-3xl" />
-      <div className="animate-blob-slowest absolute bottom-0 left-[30%] w-72 h-72 rounded-full bg-[#FFCB47]/[0.16] blur-3xl" />
+      {/* อัตราความสำเร็จ — วางเป็นแถวในการ์ดเดียวกัน ไม่ลอยทับขอบการ์ดแบบเอียง */}
+      <div className="flex items-center justify-between rounded-xl bg-white/[0.06] border border-white/10 px-4 py-3.5">
+        <span className="text-[12.5px] text-white/45 font-medium">เรียนจบคอร์ส</span>
+        <span className="text-[14px] font-bold text-white">98% อัตราความสำเร็จ</span>
+      </div>
     </div>
   );
 }
 
 function Hero(): ReactElement {
   return (
-    <section className="relative overflow-hidden">
-      <HeroBackground />
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 pb-24 lg:pt-20 lg:pb-28">
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-14 lg:gap-10 items-center">
-          <div className="animate-fade-up">
-            <span className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[#0F1B3D] bg-[#FFCB47] px-3.5 py-1.5 rounded-full mb-7 -rotate-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0F1B3D]" />
-              แพลตฟอร์มเรียนรู้แห่งอนาคต
-            </span>
+    <section className="relative">
+      <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 pb-16 lg:pt-20 lg:pb-20">
+        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-14 lg:gap-12 items-center">
+          <div>
+            <p className="text-[13px] font-semibold text-[#FF5A3C] tracking-[0.04em] mb-4">
+              แพลตฟอร์มเรียนรู้ออนไลน์
+            </p>
 
-            <h1 className="text-[42px] sm:text-[58px] leading-[1.03] font-extrabold text-[#0F1B3D] tracking-[-0.03em] text-balance">
+            <h1 className="text-[40px] sm:text-[54px] leading-[1.08] font-extrabold text-[#0F1B3D] tracking-[-0.02em] text-balance">
               เก่งขึ้นได้จริง
               <br />
-              ใน{" "}
-              <span className="relative inline-block">
-                <span className="relative z-10">โลกที่เปลี่ยนไว</span>
-                <span className="absolute left-0 right-0 bottom-1.5 h-4 bg-[#FF5A3C]/25 -rotate-1 z-0" />
-              </span>
+              ใน<span className="text-[#3157D5]">โลกที่เปลี่ยนไว</span>
             </h1>
 
-            <p className="mt-6 text-[16.5px] leading-relaxed text-[#0F1B3D]/60 max-w-[440px]">
+            <p className="mt-6 text-[16px] leading-relaxed text-[#0F1B3D]/60 max-w-[440px]">
               เรียนกับผู้สอนตัวจริงในสายงาน ลงมือทำโปรเจกต์จริง พร้อมใบรับรองที่บริษัทชั้นนำให้การยอมรับ
             </p>
 
-            <div className="mt-9 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-wrap items-center gap-4">
               <Link
                 href="/courses"
                 className="inline-flex items-center gap-2 text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 shadow-[0_12px_28px_-10px_rgba(15,27,61,0.55)]"
@@ -278,7 +298,7 @@ function Hero(): ReactElement {
 
             <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-5">
               <div>
-                <p className="text-[26px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">120+</p>
+                <p className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">120+</p>
                 <p className="text-[13px] text-[#0F1B3D]/50 font-medium">คอร์สจากผู้เชี่ยวชาญ</p>
               </div>
               <div className="w-px h-10 bg-[#0F1B3D]/10" />
@@ -287,7 +307,7 @@ function Hero(): ReactElement {
                   {avatarStack.map((avatar) => (
                     <span
                       key={avatar.initial}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-[10.5px] font-extrabold text-white ring-2 ring-white"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white ring-2 ring-white"
                       style={{ backgroundColor: avatar.bg }}
                     >
                       {avatar.initial}
@@ -295,7 +315,7 @@ function Hero(): ReactElement {
                   ))}
                 </div>
                 <div>
-                  <p className="text-[15px] font-extrabold text-[#0F1B3D] tracking-[-0.01em]">40k+ ผู้เรียน</p>
+                  <p className="text-[14.5px] font-bold text-[#0F1B3D] tracking-[-0.01em]">40k+ ผู้เรียน</p>
                   <p className="flex items-center gap-1 text-[12px] text-[#0F1B3D]/50 font-medium">
                     <StarIcon size={11} />
                     ให้คะแนน 4.8/5
@@ -321,33 +341,44 @@ interface PathCourse {
   description: string | null;
 }
 
-// ★ แก้: ตัดม่วง/เขียวออก ใช้แค่ 4 สีหลักของแบรนด์ (นำ, น้ำเงิน, ส้ม, ทอง) วนผสมกัน 4 แบบ
-// ใช้วนตามลำดับการ์ด ไม่ผูกกับหมวดหมู่ เพราะชื่อหมวดหมู่ในฐานข้อมูลจริงมีได้หลายแบบ
-const pathGradients: string[] = [
-  "from-[#0F1B3D] to-[#3157D5]",
-  "from-[#FF5A3C] to-[#FFCB47]",
-  "from-[#3157D5] to-[#0F1B3D]",
-  "from-[#FFCB47] to-[#FF5A3C]",
-];
-
-function PathCard({ course, gradient }: { course: PathCourse; gradient: string }): ReactElement {
+function PathCard({ course }: { course: PathCourse }): ReactElement {
+  const accent = tagTextColors[course.category ?? ""] ?? "text-[#0F1B3D]";
+  const accentHex = categoryAccentHex[course.category ?? ""] ?? "#0F1B3D";
   return (
     <Link
       href={`/courses/${course.slug}`}
-      className={`group relative flex min-h-[230px] flex-col justify-between overflow-hidden rounded-[24px] bg-gradient-to-br ${gradient} p-6 transition-transform duration-300 hover:-translate-y-1`}
+      className="group flex min-h-[224px] flex-col justify-between rounded-2xl border border-[#0F1B3D]/[0.06] bg-white p-6 shadow-[0_1px_2px_rgba(15,27,61,0.04)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)]"
     >
       <div>
-        <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-white/60">
+        {/* ไอคอนสีตามหมวดหมู่ พื้นหลังจางๆ — เพิ่มความมีสีสันให้การ์ดแทนที่จะเป็นขาวล้วน */}
+        <span
+          className="inline-flex items-center justify-center w-10 h-10 rounded-xl mb-4"
+          style={{ backgroundColor: `${accentHex}17` }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke={accentHex} strokeWidth="1.8" strokeLinejoin="round" />
+            <path
+              d="M6 10.5V16C6 16 8.5 18.5 12 18.5C15.5 18.5 18 16 18 16V10.5"
+              stroke={accentHex}
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity="0.55"
+            />
+          </svg>
+        </span>
+        <p className={`text-[12px] font-bold uppercase tracking-[0.06em] ${accent}`}>
           {course.category ?? "คอร์สแนะนำ"}
         </p>
-        <h3 className="mt-2 text-[19px] font-extrabold leading-snug text-white line-clamp-2">{course.title}</h3>
-        <p className="mt-2 text-[13px] leading-relaxed text-white/70 line-clamp-2">
+        <h3 className="mt-2 text-[16.5px] font-bold leading-snug text-[#0F1B3D] line-clamp-2">{course.title}</h3>
+        <p className="mt-2 text-[13px] leading-relaxed text-[#0F1B3D]/50 line-clamp-2">
           {course.description?.trim() || "เริ่มต้นเรียนรู้ทักษะใหม่ไปกับคอร์สนี้ได้เลยวันนี้"}
         </p>
       </div>
 
-      <span className="mt-4 flex h-9 w-9 items-center justify-center rounded-full bg-white text-[#0F1B3D] transition-transform duration-300 group-hover:translate-x-1">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <span className="mt-4 flex items-center gap-1.5 text-[13px] font-semibold text-[#0F1B3D]/40 transition-colors group-hover:text-[#0F1B3D]">
+        ดูรายละเอียด
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="transition-transform group-hover:translate-x-0.5">
           <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
@@ -355,27 +386,24 @@ function PathCard({ course, gradient }: { course: PathCourse; gradient: string }
   );
 }
 
-// เส้นทางสายอาชีพ — ดึงคอร์สที่เผยแพร่แล้วมาแสดงเป็นการ์ดสีสันหลากหลาย ลิงก์เข้าคอร์สจริงแต่ละใบ
+// เส้นทางสายอาชีพ — ดึงคอร์สที่เผยแพร่แล้วมาแสดงจริง ลิงก์เข้าคอร์สจริงแต่ละใบ
 function CareerPaths({ courses }: { courses: PathCourse[] }): ReactElement | null {
   if (courses.length === 0) return null;
 
   return (
-    // ★ แก้: ลด padding ล่างลง (เดิม pb-20/28 ซ้อนกับ padding บนของ CourseCatalog ด้านล่าง
-    // รวมกันกลายเป็นช่องว่างใหญ่เกินไปตามที่ทักมา) และเปลี่ยนสีป้ายจากม่วงเป็นน้ำเงินของแบรนด์
-    <section className="max-w-7xl mx-auto px-6 lg:px-8 pb-10 lg:pb-14">
+    <section id="career-paths" className="scroll-mt-24 max-w-7xl mx-auto px-6 lg:px-8 pt-14 lg:pt-20 pb-10 lg:pb-14">
       <div className="mb-10">
-        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[#3157D5] tracking-[0.06em] mb-3">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#3157D5]" />
+        <p className="text-[12.5px] font-bold text-[#3157D5] tracking-[0.04em] mb-2.5">
           เลือกเส้นทางของคุณ
-        </span>
+        </p>
         <h2 className="text-[26px] sm:text-[32px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] leading-tight max-w-xl">
           เริ่มต้นสายอาชีพที่ใช่ ตั้งแต่วันนี้
         </h2>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {courses.map((course, i) => (
-          <PathCard key={course.id} course={course} gradient={pathGradients[i % pathGradients.length]} />
+        {courses.map((course) => (
+          <PathCard key={course.id} course={course} />
         ))}
       </div>
     </section>
@@ -387,23 +415,12 @@ function CourseCard({ course }: { course: Course }): ReactElement {
   return (
     <div className="group bg-white rounded-3xl border border-[#0F1B3D]/[0.06] shadow-[0_1px_2px_rgba(15,27,61,0.04)] hover:shadow-[0_24px_48px_-20px_rgba(15,27,61,0.24)] hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col">
       <div className="relative h-40 bg-gradient-to-br from-[#0F1B3D]/[0.04] to-[#0F1B3D]/[0.09] overflow-hidden">
-        {course.cover_image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={course.cover_image_url}
-            alt={course.title}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="5" width="18" height="14" rx="2" stroke="#0F1B3D" strokeWidth="1.5" />
-                <path d="M8 9H16M8 13H13" stroke="#0F1B3D" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-          </div>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={course.cover_image_url ?? DEFAULT_COURSE_COVER_URL}
+          alt={course.title}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        />
         {course.category && (
           <span className={`absolute top-3 left-3 text-[11px] font-bold px-2.5 py-1 rounded-full shadow-sm ${tagColor}`}>
             {course.category}
@@ -422,7 +439,7 @@ function CourseCard({ course }: { course: Course }): ReactElement {
         <RatingChip avgRating={course.avgRating} reviewCount={course.reviewCount} />
 
         <p className="text-[13px] text-[#0F1B3D]/50 mb-4 font-medium">
-          {course.lessons[0]?.count || 0} บทเรียน · {formatDuration(course.total_duration_seconds)}
+          {course.lessons.length} บทเรียน · {formatDuration(courseTotalDurationSeconds(course.lessons))}
         </p>
 
         <div className="mt-auto pt-4 border-t border-[#0F1B3D]/[0.06] flex items-center justify-between">
@@ -430,10 +447,10 @@ function CourseCard({ course }: { course: Course }): ReactElement {
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
           <Link
-            href={`/courses/${course.slug}`}
+            href={course.isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
             className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
-            ลงทะเบียน
+            {course.isEnrolled ? "เข้าเรียนต่อ" : "ลงทะเบียน"}
           </Link>
         </div>
       </div>
@@ -442,17 +459,13 @@ function CourseCard({ course }: { course: Course }): ReactElement {
 }
 
 function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
-  // ★ แก้: ตัดก้อนสีตกแต่งพื้นหลัง (เขียว/น้ำเงิน) ออก ลดความสีสันลงตามที่ขอ และเปลี่ยน
-  // padding บนจาก py-20/28 เป็น pt-10/14 (แยก top/bottom) ให้ระยะห่างจาก CareerPaths ด้านบน
-  // ไม่ซ้อนกันจนเป็นช่องว่างใหญ่เกินไป
   return (
     <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-10 lg:pt-14 pb-20 lg:pb-28">
       <div className="mb-14 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
         <div>
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-[#FF5A3C] tracking-[0.06em] mb-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#FF5A3C]" />
+          <p className="text-[12.5px] font-bold text-[#FF5A3C] tracking-[0.04em] mb-2.5">
             เลือกเรียนได้เลย
-          </span>
+          </p>
           <h2 className="text-[30px] sm:text-[36px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] leading-tight">
             คอร์สแนะนำสำหรับคุณ
           </h2>
@@ -469,7 +482,7 @@ function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
           ))}
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
+        <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
           <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ยังไม่มีคอร์สที่เปิดให้ลงทะเบียนตอนนี้</p>
         </div>
       )}
@@ -480,40 +493,36 @@ function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
 function CtaBanner(): ReactElement {
   return (
     <section className="max-w-7xl mx-auto px-6 lg:px-8 pb-20 lg:pb-28">
-      <div className="relative rounded-[32px] bg-[#0F1B3D] px-8 py-14 sm:px-16 sm:py-16 overflow-hidden text-center">
-        <div className="animate-blob-slow absolute -top-16 -left-16 w-56 h-56 rounded-full bg-[#FF5A3C]/20 blur-3xl" aria-hidden="true" />
-        <div className="animate-blob-slower absolute -bottom-16 -right-16 w-56 h-56 rounded-full bg-[#3157D5]/20 blur-3xl" aria-hidden="true" />
-        <div className="relative">
-          <h2 className="text-[28px] sm:text-[38px] font-extrabold text-white tracking-[-0.02em] leading-tight max-w-xl mx-auto text-balance">
-            พร้อมเริ่มต้นเส้นทางใหม่แล้วหรือยัง?
-          </h2>
-          <p className="mt-4 text-[15.5px] text-white/60 max-w-md mx-auto">
-            สมัครวันนี้ รับส่วนลดคอร์สแรก 20% พร้อมที่ปรึกษาด้านการเรียนฟรี
-          </p>
-          <button
-            type="button"
-            className="mt-8 inline-flex items-center gap-2 text-[15px] font-bold text-[#0F1B3D] bg-[#FFCB47] hover:bg-white px-7 py-4 rounded-full transition-all hover:-translate-y-0.5"
-          >
-            เริ่มเรียนฟรีวันนี้
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+      <div className="rounded-2xl bg-[#0F1B3D] px-8 py-14 sm:px-16 sm:py-16 text-center">
+        <h2 className="text-[28px] sm:text-[36px] font-extrabold text-white tracking-[-0.02em] leading-tight max-w-xl mx-auto text-balance">
+          พร้อมเริ่มต้นเส้นทางใหม่แล้วหรือยัง?
+        </h2>
+        <p className="mt-4 text-[15px] text-white/60 max-w-md mx-auto">
+          สมัครวันนี้ รับส่วนลดคอร์สแรก 20% พร้อมที่ปรึกษาด้านการเรียนฟรี
+        </p>
+        <button
+          type="button"
+          className="mt-8 inline-flex items-center gap-2 text-[15px] font-bold text-[#0F1B3D] bg-[#FFCB47] hover:bg-white px-7 py-4 rounded-full transition-all hover:-translate-y-0.5"
+        >
+          เริ่มเรียนฟรีวันนี้
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
 
-          <div className="mt-7 flex items-center justify-center gap-2.5">
-            <div className="flex items-center -space-x-2">
-              {avatarStack.map((avatar) => (
-                <span
-                  key={avatar.initial}
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-extrabold text-white ring-2 ring-[#0F1B3D]"
-                  style={{ backgroundColor: avatar.bg }}
-                >
-                  {avatar.initial}
-                </span>
-              ))}
-            </div>
-            <p className="text-[12.5px] text-white/45 font-medium">ร่วมเรียนกับผู้เรียนกว่า 40,000 คนแล้ววันนี้</p>
+        <div className="mt-7 flex items-center justify-center gap-2.5">
+          <div className="flex items-center -space-x-2">
+            {avatarStack.map((avatar) => (
+              <span
+                key={avatar.initial}
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white ring-2 ring-[#0F1B3D]"
+                style={{ backgroundColor: avatar.bg }}
+              >
+                {avatar.initial}
+              </span>
+            ))}
           </div>
+          <p className="text-[12.5px] text-white/45 font-medium">ร่วมเรียนกับผู้เรียนกว่า 40,000 คนแล้ววันนี้</p>
         </div>
       </div>
     </section>
@@ -526,14 +535,14 @@ function Footer(): ReactElement {
       <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-5">
         <div className="flex flex-col items-center sm:items-start gap-1.5">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#0F1B3D] flex items-center justify-center -rotate-[4deg]">
+            <div className="w-8 h-8 rounded-lg bg-[#0F1B3D] flex items-center justify-center">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
                 <path d="M12 3L21 7.5L12 12L3 7.5L12 3Z" stroke="#FF5A3C" strokeWidth="1.8" strokeLinejoin="round" />
               </svg>
             </div>
             <span className="text-[14.5px] font-extrabold text-[#0F1B3D]">Interact Edu</span>
           </div>
-          <p className="text-[12.5px] text-[#0F1B3D]/40 font-medium">แพลตฟอร์มเรียนรู้แห่งอนาคต</p>
+          <p className="text-[12.5px] text-[#0F1B3D]/40 font-medium">แพลตฟอร์มเรียนรู้ออนไลน์</p>
         </div>
 
         <nav className="flex items-center gap-5">
@@ -578,8 +587,8 @@ export default async function Page(): Promise<ReactElement> {
   const { data: courses, error } = await supabase
     .from("courses")
     .select(`
-      id, title, slug, category, price, cover_image_url, total_duration_seconds,
-      lessons(count)
+      id, title, slug, category, price, cover_image_url,
+      lessons(video_duration_seconds)
     `)
     .eq("status", "published")
     .order("created_at", { ascending: false })
@@ -612,16 +621,30 @@ export default async function Page(): Promise<ReactElement> {
     }
   }
 
+  // เช็คว่าคอร์สไหนที่ user คนนี้ลงทะเบียนอนุมัติแล้วบ้าง เอาไว้สลับปุ่ม "ลงทะเบียน" เป็น
+  // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
+  const enrolledCourseIds = new Set<string>();
+  if (user && courseIds.length > 0) {
+    const { data: enrollmentRows } = await supabase
+      .from("enrollments")
+      .select("course_id")
+      .eq("student_id", user.id)
+      .eq("status", "approved")
+      .in("course_id", courseIds);
+    for (const row of enrollmentRows ?? []) enrolledCourseIds.add(row.course_id as string);
+  }
+
   const coursesWithRatings: Course[] = (courses ?? []).map((c) => {
     const stats = ratingByCourse.get(c.id);
     return {
       ...c,
       avgRating: stats ? stats.sum / stats.count : 0,
       reviewCount: stats?.count ?? 0,
+      isEnrolled: enrolledCourseIds.has(c.id),
     };
   });
 
-  // ★ เพิ่มใหม่: ดึงคอร์สที่เผยแพร่แล้วมาใส่ในการ์ด "เลือกเส้นทางของคุณ" — เอาชื่อ/คำอธิบาย/หมวดหมู่
+  // ดึงคอร์สที่เผยแพร่แล้วมาใส่ในการ์ด "เลือกเส้นทางของคุณ" — เอาชื่อ/คำอธิบาย/หมวดหมู่
   // จริงจากฐานข้อมูล ไม่ได้ผูก career-path มั่วๆ ที่ไม่ตรงกับคอร์สจริง ลิงก์ตรงไปหน้าคอร์สนั้นเลย
   const { data: pathCoursesData, error: pathCoursesError } = await supabase
     .from("courses")
@@ -635,10 +658,6 @@ export default async function Page(): Promise<ReactElement> {
   }
 
   return (
-    // ★ แก้: เดิมใช้ bg-white ทับพื้นหลัง gradient จางๆ ของทั้งเว็บที่ตั้งไว้ที่ body ใน globals.css
-    // ไปเลย หน้าแรกเลยดูขาวโล่งกว่าหน้าอื่น — เปลี่ยนมาใช้ app-canvas (คลาสเดิมที่ใช้กับหน้า
-    // dashboard อยู่แล้ว) ให้มีเฉดสีน้ำเงิน/ส้มจางๆ พาดอยู่เบื้องหลังทั้งหน้า สีเดิมของแบรนด์เป๊ะ
-    // ไม่ใส่สีใหม่ แค่ไม่ปิดทับมันด้วย white เหมือนก่อน
     <div className="min-h-screen w-full app-canvas">
       <Navbar displayName={displayName} />
       <Hero />

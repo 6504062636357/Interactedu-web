@@ -11,6 +11,11 @@ const PROTECTED_PREFIXES = ["/dashboard"];
 const AUTH_ONLY_PAGES = ["/login", "/signup"];
 
 export async function proxy(request: NextRequest) {
+
+  // ข้าม prefetch request ของ Next.js ไม่ต้อง refresh session ซ้ำ กัน race กับ navigation จริง
+  if (request.headers.get("next-router-prefetch")) {
+    return NextResponse.next();
+  }
   const { supabaseResponse, supabase, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 

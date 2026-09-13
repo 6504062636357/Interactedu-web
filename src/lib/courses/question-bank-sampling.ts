@@ -7,19 +7,13 @@ export type Difficulty = "easy" | "medium" | "hard";
 // ===== เพิ่มใหม่: allowlist ต้อง sync กับ lib/quiz/config/enabled-types.ts =====
 const ENABLED_INTERACTION_TYPES = ["multiple_choice", "true_false"] as const;
 type EnabledInteractionType = (typeof ENABLED_INTERACTION_TYPES)[number];
+// ยุบโหมด Preset เข้ากับ Custom แล้ว (ของจริงไม่มีคอร์สไหนใช้ preset เลยสักคอร์ส) — lessonId เป็น
+// null แปลว่า "ทั้งคอร์ส ไม่ระบุบท" ซึ่งเดิมคือพฤติกรรมของ preset ตอนนี้ทำได้ในเงื่อนไขเดียวกันหมด
 export interface CustomConstraint {
-  lessonId: string;
+  lessonId: string | null;
   difficulty: Difficulty;
   count: number;
 }
-
-export type PresetType = "quick_check" | "standard_final" | "challenging_final";
-
-const PRESET_RATIOS: Record<PresetType, Record<Difficulty, number>> = {
-  quick_check: { easy: 0.6, medium: 0.4, hard: 0 },
-  standard_final: { easy: 0.3, medium: 0.5, hard: 0.2 },
-  challenging_final: { easy: 0, medium: 0.5, hard: 0.5 },
-};
 
 interface BankQuestionRow {
   id: string;
@@ -75,23 +69,12 @@ export class InsufficientQuestionBankError extends Error {
     this.name = "InsufficientQuestionBankError";
   }
 }
-function countsFromPreset(preset: PresetType, total: number): Record<Difficulty, number> {
-  const ratio = PRESET_RATIOS[preset];
-  const easy = Math.round(total * ratio.easy);
-  const medium = Math.round(total * ratio.medium);
-  const hard = total - easy - medium; // กันเศษไม่ให้รวมเกิน/ขาด
-  return { easy, medium, hard: Math.max(0, hard) };
-}
-
 export async function loadSampledFinalExamQuestions(
   supabase: SupabaseClient,
   params: {
     courseId: string;
     seed: string; // ใช้ enrollment_id
-    buildMode: "custom" | "preset";
-    totalQuestions: number;
-    presetType?: PresetType | null;
-    customConstraints?: CustomConstraint[] | null;
+    customConstraints: CustomConstraint[];
   }
 ): Promise<SampledQuestion[]> {
   const serviceClient = createServiceRoleClient();
@@ -102,31 +85,32 @@ export async function loadSampledFinalExamQuestions(
     )
     .eq("usage_type", "final")
     // ===== เพิ่มใหม่: filter เฉพาะ type ที่ Final Exam รองรับตอนนี้ =====
-    .in("interaction_type", ENABLED_INTERACTION_TYPES);
+    .in("interaction_type", ENABLED_INTERACTION_TYPES)
+    // ★ B4 fix: ไม่มี ORDER BY มาก่อน ทำให้ PostgreSQL ไม่รับประกันลำดับแถวที่คืนมา — seededSample/
+    // seededShuffle ด้านล่างสุ่มจาก "ตำแหน่งในอาเรย์" ไม่ใช่ตัวข้อมูล ถ้าลำดับแถวที่ query คืนมาเปลี่ยน
+    // (เช่นมีคนแก้ไขคำถามอื่นในคลังระหว่างนั้น) seed เดิม (enrollment_id) จะได้ชุดข้อสอบคนละชุด — เคย
+    // ทำให้นักเรียนเปิดสอบได้ชุด A ทำจนครบ พอกดส่งคำนวณใหม่ได้ชุด B แล้วเช็คว่าตอบครบทุกข้อไม่ผ่าน
+    .order("id", { ascending: true });
   if (error) throw new Error(error.message);
 
   const pool = (bankData ?? []) as unknown as BankQuestionRow[];
   const seedNumber = seedFromString(params.seed);
 
-  // ★ เพิ่มใหม่: เช็คว่าคอร์สนี้มีบทเรียนอยู่หรือยัง แต่ใช้เฉพาะโหมด custom เท่านั้น เพราะโหมด custom
-  // ต้องเลือกบทเรียนก่อนถึงจะกำหนดเงื่อนไขได้ — ถ้าไม่มีบทเรียนเลยก็เลือกอะไรไม่ได้ตั้งแต่ต้น จึงควรแจ้ง
-  // สาเหตุที่แท้จริงแทน error อื่นที่กำกวม ส่วนโหมด preset ไม่ต้องพึ่งบทเรียนเลย (สุ่มจากคำถามที่ผูก
-  // tag กับ "ทั้งคอร์ส" ได้โดยไม่ต้องมีบทเรียน) เลยต้องปล่อยให้ไหลไปเจอ error คลังข้อสอบไม่พอตามจริง
-  // ไม่ใช่ถูกบล็อกด้วยเงื่อนไขนี้ทั้งที่ไม่เกี่ยวกัน
-  if (params.buildMode === "custom") {
-    const { count: lessonCount, error: lessonCountError } = await serviceClient
-      .from("lessons")
-      .select("id", { count: "exact", head: true })
-      .eq("course_id", params.courseId);
-    if (lessonCountError) throw new Error(lessonCountError.message);
-    if (!lessonCount) {
-      throw new Error("คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถสุ่มข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน");
-    }
+  // ★ เดิมมีแค่โหมด custom ต้องเช็คว่าคอร์สนี้มีบทเรียนอยู่หรือยัง (ไม่งั้นเลือกบทไม่ได้ตั้งแต่ต้น)
+  // ตอนนี้ยุบโหมด preset เข้ามาแล้ว เงื่อนไขนี้ยังจำเป็นอยู่เหมือนเดิม เพราะยังมีคอนสเตรนต์ที่อ้างอิง
+  // lessonId จริงได้ (แค่ไม่บังคับทุกแถวต้องมี lessonId แล้ว — แถวไหนเป็น "ทั้งคอร์ส" ก็ไม่ต้องพึ่งบทเรียน)
+  const { count: lessonCount, error: lessonCountError } = await serviceClient
+    .from("lessons")
+    .select("id", { count: "exact", head: true })
+    .eq("course_id", params.courseId);
+  if (lessonCountError) throw new Error(lessonCountError.message);
+  if (!lessonCount) {
+    throw new Error("คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถสุ่มข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน");
   }
 
-  // โหลดชื่อบทเรียนไว้ทำ label ที่อ่านง่าย (เฉพาะตอน custom mode ที่อ้างอิง lessonId)
+  // โหลดชื่อบทเรียนไว้ทำ label ที่อ่านง่าย (เฉพาะ constraint ที่อ้างอิง lessonId จริง)
   let lessonLabelById = new Map<string, string>();
-  if (params.buildMode === "custom" && (params.customConstraints ?? []).length > 0) {
+  if (params.customConstraints.some((c) => c.lessonId)) {
     const { data: lessonsData, error: lessonsError } = await serviceClient
       .from("lessons")
       .select("id, order_index")
@@ -137,34 +121,22 @@ export async function loadSampledFinalExamQuestions(
     );
   }
 
-  // สร้าง bucket ตาม constraint ที่ต้องการ (lesson+difficulty สำหรับ custom, difficulty อย่างเดียวสำหรับ preset)
+  // สร้าง bucket ตาม constraint แต่ละแถว — lessonId มีค่า = กรองเฉพาะบทนั้น, lessonId เป็น null =
+  // "ทั้งคอร์ส" กรองแค่ว่าคำถามผูก tag กับคอร์สนี้ (บทไหนก็ได้) — เดิมนี่คือกฎแยกของโหมด preset
   const buckets: { filter: (q: BankQuestionRow) => boolean; count: number; label: string; constraintLessonId?: string; constraintDifficulty?: Difficulty }[] =
-    params.buildMode === "custom"
-      ? (params.customConstraints ?? []).map((constraint) => ({
-          filter: (q) =>
-            q.difficulty === constraint.difficulty &&
-            q.question_bank_topic_tags.some((tag) => tag.lesson_id === constraint.lessonId),
-          count: constraint.count,
-          label: `${lessonLabelById.get(constraint.lessonId) ?? `บทเรียน ${constraint.lessonId}`} ระดับ ${constraint.difficulty}`,
-          constraintLessonId: constraint.lessonId,
-          constraintDifficulty: constraint.difficulty,
-        }))
-      : (() => {
-          const counts = countsFromPreset(params.presetType ?? "standard_final", params.totalQuestions);
-          return (Object.entries(counts) as [Difficulty, number][])
-            .filter(([, count]) => count > 0)
-            .map(([difficulty, count]) => ({
-              // ★ แก้บั๊ก: เดิมกรองแค่ difficulty อย่างเดียว ไม่เช็คว่าคำถามผูกกับคอร์สนี้หรือเปล่า
-              // ทำให้โหมด preset มีสิทธิ์สุ่มคำถามจากคอร์สอื่นทั้งระบบมาปนได้ (ไม่เกี่ยวกับหมวดวิชา)
-              // ตอนนี้เพิ่มเงื่อนไขต้องมี tag ผูกกับ courseId นี้ด้วย เหมือนโหมด custom ที่กรองผ่าน lessonId
-              filter: (q: BankQuestionRow) =>
-                q.difficulty === difficulty &&
-                q.question_bank_topic_tags.some((tag) => tag.course_id === params.courseId),
-              count,
-              label: `ระดับ ${difficulty}`,
-              constraintDifficulty: difficulty,
-            }));
-        })();
+    params.customConstraints.map((constraint) => ({
+      filter: (q) =>
+        q.difficulty === constraint.difficulty &&
+        (constraint.lessonId
+          ? q.question_bank_topic_tags.some((tag) => tag.lesson_id === constraint.lessonId)
+          : q.question_bank_topic_tags.some((tag) => tag.course_id === params.courseId)),
+      count: constraint.count,
+      label: constraint.lessonId
+        ? `${lessonLabelById.get(constraint.lessonId) ?? `บทเรียน ${constraint.lessonId}`} ระดับ ${constraint.difficulty}`
+        : `ทั้งคอร์ส ระดับ ${constraint.difficulty}`,
+      constraintLessonId: constraint.lessonId ?? undefined,
+      constraintDifficulty: constraint.difficulty,
+    }));
 
   // ★ แก้ใหม่: เดิม throw ทันทีที่เจอ bucket แรกที่ขาด (เห็นแค่ระดับเดียวต่อครั้ง) ตอนนี้ไล่เช็คให้ครบ
   // ทุก bucket ก่อน เก็บ candidates ของแต่ละ bucket ที่ "พอ" ไว้ใช้สุ่มจริงทีหลัง ส่วน bucket ที่ขาด
@@ -198,7 +170,7 @@ export async function loadSampledFinalExamQuestions(
           note = `มีคำถามที่ตรงบทเรียน (${matchingLessonTagOnly} ข้อ) และตรงระดับความยาก (${matchingDifficultyOnly} ข้อ) แยกกัน แต่ไม่มีข้อไหนตรงทั้งสองเงื่อนไขพร้อมกัน — ตรวจสอบว่าคำถามระดับ ${bucket.constraintDifficulty} ผูก tag ผิดบท หรือคำถามที่ผูกบทนี้ตั้ง usage_type ไม่ใช่ "final"`;
         }
       } else if (bucket.constraintDifficulty) {
-        // เคส preset (ไม่มี lessonId เจาะจง แต่มี courseId มาแทนตั้งแต่แก้บั๊กข้อ 1)
+        // เคสแถว "ทั้งคอร์ส" (ไม่มี lessonId เจาะจง กรองด้วย courseId แทน)
         note =
           matchingDifficultyOnly > 0
             ? `มีคำถามระดับ ${bucket.constraintDifficulty} อยู่ในคลังทั้งระบบ (${matchingDifficultyOnly} ข้อ) แต่ไม่มีข้อไหนผูก tag กับคอร์สนี้เลย — ต้องเพิ่มคำถามระดับนี้แล้วผูก tag กับคอร์สนี้ในคลังข้อสอบ`
@@ -237,11 +209,25 @@ export async function loadSampledFinalExamQuestions(
 
   return shuffled.map((question, index) => ({
     id: question.id,
-    lessonId: question.question_bank_topic_tags[0]?.lesson_id ?? null,
+    // ★ B9 fix: เดิมหยิบ tag ตัวแรกในอาเรย์ ([0]) มาใช้เป็น lessonId เฉยๆ — แต่คำถาม 1 ข้อผูก tag
+    // ได้หลายอัน (เช่น ผูกกับคอร์สนี้บทที่ 3 และผูกกับอีกคอร์สหนึ่งแบบ "ทั้งคอร์ส" พร้อมกัน) ถ้า tag
+    // ของคอร์สอื่นดันมาอยู่ตำแหน่ง [0] (ลำดับขึ้นกับตอน insert ไม่ได้การันตีว่าเรียงตามคอร์สไหนก่อน)
+    // lessonId ที่ได้จะผิดคอร์ส ทำให้ UI จัดกลุ่ม "ข้อสอบแยกตามบทเรียน" ของหน้าแอดมิน/ครูโชว์ผิดบท
+    // ทั้งที่ตัวข้อสอบจริงถูกสุ่มมาถูกคอร์สแล้ว ต้องหา tag ที่ course_id ตรงกับคอร์สที่กำลังสุ่มอยู่นี้
+    // เท่านั้น (การันตีว่ามีอยู่แน่นอน เพราะ bucket.filter ด้านบนกรองผ่านมาได้ก็ต่อเมื่อมี tag แบบนี้)
+    lessonId:
+      question.question_bank_topic_tags.find((tag) => tag.course_id === params.courseId)?.lesson_id ?? null,
     question_text: question.question_text,
     explanation: question.explanation,
     order_index: index,
     interactionType: question.interaction_type,
+    // ★ B8 fix: เดิม shuffle แล้วยังคง order_index ตัวเก่าติดไปกับแต่ละ choice — แต่ทั้ง
+    // getCourseFinalExam (แสดงผล) และ gradeCourseFinalExam (ตรวจคำตอบ) ใน course-final-exam.ts
+    // สั่ง .sort((a, b) => a.order_index - b.order_index) ก่อนใช้งานเสมอ ผลคือพอ sort กลับ
+    // ด้วย order_index เดิม ลำดับที่ seededShuffle สลับมาให้ถูกเรียงกลับเป็นลำดับเดิมในฐานข้อมูล
+    // ทันที — นักเรียนทุกคนเห็นตัวเลือกเรียงลำดับเดิมเป๊ะเหมือนกันหมด ฟีเจอร์สุ่มลำดับตัวเลือกจึง
+    // ไม่มีผลอะไรเลยในทางปฏิบัติ ต้อง re-index order_index ใหม่ตามลำดับที่ shuffle ได้จริง (เหมือนที่
+    // loadSampledPopupQuestion ทำอยู่แล้วด้านล่าง) เพื่อให้ sort ทีหลังคงลำดับที่สุ่มมาไว้
     quiz_choices: seededShuffle(
       question.question_bank_choices.map((choice) => ({
         choice_text: choice.choice_text,
@@ -249,7 +235,7 @@ export async function loadSampledFinalExamQuestions(
         order_index: choice.order_index,
       })),
       seedNumber + seedFromString(question.id) // shuffle choices ต่อข้อ ด้วย sub-seed
-    ),
+    ).map((choice, index) => ({ ...choice, order_index: index })),
   }));
 }
 
@@ -265,6 +251,13 @@ export interface SampledPopupQuestion {
 }
 
 export async function loadSampledPopupQuestion(
+  // ★ B1 fix: เดิมใช้ `supabase` (client ของนักเรียนเอง ยึด RLS ปกติ) แต่ question_bank_topic_tags
+  // และ question_bank_choices ไม่มี RLS policy ให้นักเรียนอ่านเลยสักตาราง — ผลคือ tag/choices ที่คืน
+  // มาว่างเปล่าเสมอ ตัวกรอง lesson_id ไม่เจออะไร แล้วโยน error "คลังข้อสอบมีไม่พอ" ทั้งที่มีข้อสอบจริง
+  // เปลี่ยนมาใช้ service-role client เหมือนฝั่ง final exam ที่ทำถูกอยู่แล้ว — ปลอดภัยพอเพราะทั้ง 2 endpoint
+  // ที่เรียกฟังก์ชันนี้ (video-quiz-attempts POST, video-quiz-markers/[id]/sample GET) ตรวจ enrollment
+  // และความเป็นเจ้าของหมุดไว้ก่อนหน้าแล้วทุกครั้ง — เก็บ param `supabase` ไว้เพื่อไม่ต้องแก้ signature
+  // ที่ผู้เรียกใช้อยู่ 2 จุด แต่ไม่ใช้งานจริงข้างในอีกต่อไป
   supabase: SupabaseClient,
   params: {
     lessonId: string;
@@ -272,19 +265,33 @@ export async function loadSampledPopupQuestion(
     seed: string; // ใช้ enrollmentId + markerId ต่อกัน เพื่อให้คนละคน/คนละหมุด ได้ seed คนละตัว
   }
 ): Promise<SampledPopupQuestion> {
-  const { data: bankData, error } = await supabase
+  void supabase;
+  const db = createServiceRoleClient();
+  const { data: bankData, error } = await db
     .from("question_bank")
     .select(
-      "id, question_text, explanation, difficulty, question_bank_choices(id, choice_text, is_correct, order_index), question_bank_topic_tags(lesson_id)"
+      "id, question_text, explanation, difficulty, interaction_type, question_bank_choices(id, choice_text, is_correct, order_index), question_bank_topic_tags(lesson_id)"
     )
     .eq("usage_type", "popup")
-    .eq("difficulty", params.difficulty);
+    .eq("difficulty", params.difficulty)
+    // ★ B6 fix: เดิมไม่ filter interaction_type เลย ต่างจากฝั่ง final exam ที่กรองด้วย
+    // ENABLED_INTERACTION_TYPES อยู่แล้ว — enum ของ question_bank.interaction_type มีถึง 6 ค่า
+    // (multiple_choice, true_false, sequencing, matching, fill_in_blank, note_callout) แต่ตัวเล่น
+    // popup quiz รองรับแค่รูปแบบ choice_text/is_correct เท่านั้น ถ้าครูสร้างคำถาม popup เป็น
+    // sequencing/matching/fill_in_blank ขึ้นมา (ฟอร์มสร้างคลังไม่ได้ห้ามไว้) แล้วถูกสุ่มมาเจอ นักเรียน
+    // จะเห็นตัวเลือกที่ไม่ตรงชนิดคำถามหรือว่างเปล่า เพราะข้อมูลจริงถูกเก็บคนละ shape
+    .in("interaction_type", ENABLED_INTERACTION_TYPES)
+    // ★ B4 fix: ไม่มี ORDER BY มาก่อน ทำให้ PostgreSQL ไม่รับประกันลำดับแถวที่คืนมา — seededSample
+    // ด้านล่างสุ่มจาก "ตำแหน่งในอาเรย์" ไม่ใช่ตัวข้อมูล ถ้าลำดับแถวเปลี่ยน (เช่นมีคนแก้ไขคำถามอื่น
+    // ในคลัง) seed เดิมจะได้ข้อสอบคนละข้อ ทำให้คำถามที่โชว์กับที่ตรวจคำตอบไม่ตรงกัน
+    .order("id", { ascending: true });
   if (error) throw new Error(error.message);
 
   const pool = (bankData ?? []) as unknown as {
     id: string;
     question_text: string;
     explanation: string | null;
+    interaction_type: EnabledInteractionType;
     question_bank_choices: { choice_text: string; is_correct: boolean; order_index: number }[];
     question_bank_topic_tags: { lesson_id: string | null }[];
   }[];

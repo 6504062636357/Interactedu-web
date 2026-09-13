@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactElement } from "react";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
 interface AdminCourseCardProps {
     id:string;
@@ -48,12 +49,8 @@ export default function AdminCourseCard({
   return (
     <article className={`overflow-hidden rounded-2xl border bg-white transition-shadow hover:shadow-[0_16px_38px_-22px_rgba(15,27,61,0.35)] ${isPending ? "border-amber-200 ring-1 ring-amber-100" : "border-slate-200/70"}`}>
       <div className="relative flex h-[150px] items-center justify-center bg-[#F0F1F5]">
-        {coverImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={coverImageUrl} alt={title} className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-3xl text-[#0F1B3D]/20">▤</span>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={coverImageUrl ?? DEFAULT_COURSE_COVER_URL} alt={title} className="w-full h-full object-cover" />
         {isPending && <span className="absolute left-3 top-3 rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-extrabold text-amber-950 shadow-sm">รอตรวจ</span>}
       </div>
 

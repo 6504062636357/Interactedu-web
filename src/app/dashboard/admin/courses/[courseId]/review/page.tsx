@@ -19,12 +19,20 @@ interface QuizQuestionRow {
   quiz_choices: QuizChoiceRow[];
 }
 
+interface VideoQuizMarkerRow {
+  id: string;
+  timestamp_seconds: number;
+  random_difficulty: "easy" | "medium" | "hard";
+  order_index: number;
+}
+
 interface LessonDraftRow {
   id: string;
   video_url: string | null;
   content_html: string | null;
   status: string;
   quiz_questions: QuizQuestionRow[];
+  video_quiz_markers: VideoQuizMarkerRow[];
   created_at?: string | null;
 }
 
@@ -169,6 +177,9 @@ export default async function AdminCourseReviewPage({
             quiz_questions (
               id, question_text, order_index, video_timestamp_seconds, explanation,
               quiz_choices ( choice_text, is_correct, order_index )
+            ),
+            video_quiz_markers (
+              id, timestamp_seconds, random_difficulty, order_index
             )
           )
         )

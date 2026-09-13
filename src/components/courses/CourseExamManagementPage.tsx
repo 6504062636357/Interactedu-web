@@ -12,10 +12,9 @@ interface StoredDraft { id: string; created_at: string; quiz_questions: StoredQu
 interface StoredLesson { id: string; order_index: number; lesson_drafts: StoredDraft[] }
 
 interface StoredExamConfig {
-  build_mode: "custom" | "preset";
-  total_questions: number;
-  preset_type: "quick_check" | "standard_final" | "challenging_final" | null;
-  custom_constraints: { lessonId: string; difficulty: "easy" | "medium" | "hard"; count: number }[] | null;
+  // build_mode/preset_type ยังอยู่ในคอลัมน์ฐานข้อมูลเดิม (ยุบโหมด preset ออกแล้ว ไม่ต้อง migrate
+  // schema) แต่หน้านี้ไม่ต้องอ่านมาใช้อีกต่อไป เหลือแค่ custom_constraints ที่จำเป็นจริง
+  custom_constraints: { lessonId: string | null; difficulty: "easy" | "medium" | "hard"; count: number }[] | null;
 }
 
 export default async function CourseExamManagementPage({ courseId, workspace }: { courseId: string; workspace: "teacher" | "admin" }): Promise<ReactElement> {
@@ -37,7 +36,7 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
     supabase.from("courses").select("id, title, created_by").eq("id", courseId).maybeSingle(),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
     supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
-    supabase.from("course_exam_configs").select("build_mode, total_questions, preset_type, custom_constraints").eq("course_id", courseId).maybeSingle(),
+    supabase.from("course_exam_configs").select("custom_constraints").eq("course_id", courseId).maybeSingle(),
   ]);
 
   if (courseError) {
@@ -98,14 +97,7 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
         initialQuestions={questions}
         lessons={lessons.map((lesson) => ({ id: lesson.id, title: `บทที่ ${lesson.order_index + 1}` }))}
         initialExamConfig={
-          examConfig
-            ? {
-                buildMode: examConfig.build_mode,
-                totalQuestions: examConfig.total_questions,
-                presetType: examConfig.preset_type,
-                customConstraints: examConfig.custom_constraints,
-              }
-            : null
+          examConfig ? { customConstraints: examConfig.custom_constraints } : null
         }
         workspace={workspace}
         readOnly={workspace === "admin"}

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
+import { loadSampledFinalExamQuestions } from "@/lib/courses/question-bank-sampling";
 
 export interface CourseExamQuestionInput {
   questionText: string;
@@ -138,333 +139,27 @@ export async function saveCourseFinalExam(input: {
   return {};
 }
 
-import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { FinalQuizAnswer, FinalQuizGrade } from "@/lib/scorm/grade-final-quiz";
-import { loadSampledFinalExamQuestions } from "@/lib/courses/question-bank-sampling";
-const DEFAULT_PASS_PERCENTAGE = 70;
+// หมายเหตุ (ทำความสะอาด): เดิมไฟล์นี้มีสำเนาซ้ำของ loadCourseExamData/getCourseFinalExam/
+// gradeCourseFinalExam ทั้งชุดอยู่ตรงนี้ (คนละเวอร์ชันกับที่ src/lib/courses/course-final-exam.ts
+// ใช้จริง — ไม่มี fix ของ B1/usingQuestionBank/InsufficientQuestionBankError เลย) แต่ตรวจแล้วว่า
+// ไม่มีที่ไหนใน route/หน้าเว็บ import สองฟังก์ชันนี้จากไฟล์นี้เลยสักที่ (ตัวจริงที่ทุกอย่างใช้อยู่คือ
+// จาก course-final-exam.ts ผ่าน src/app/api/courses/[courseId]/final-exam/route.ts) — เป็นโค้ดตาย
+// 100% จึงลบทิ้งไปเลย ไม่ต้องแก้ 2 ที่ให้ตรงกันทุกครั้งที่มีการเปลี่ยนแปลงอีกต่อไป
 
-interface ChoiceRow {
-  choice_text: string;
-  is_correct: boolean;
-  order_index: number;
-}
-
-interface QuestionRow {
-  id: string;
-  lesson_draft_id?: string;//เปลี่ยนเป็น optional โดยเพิ่ม ? จากเดิมเป็น แบบ required
-  lessonId?: string | null;
-  question_text: string;
-  explanation: string | null;
-  order_index: number;
-  quiz_choices: ChoiceRow[];
-}
-
-interface LessonRow {
-  id: string;
-  title: string;
-  order_index: number;
-}
-
-interface DraftRow {
-  id: string;
-  lesson_id: string;
-  created_at: string;
-}
-
-export interface CourseFinalExamQuestion {
-  id: string;
-  lessonId: string;
-  lessonTitle: string;
-  questionText: string;
-  choices: string[];
-}
-
-export interface CourseFinalExamOverview {
-  courseId: string;
-  courseTitle: string;
-  passPercentage: number;
-  certificateEnabled: boolean;
-  totalLessons: number;
-  completedLessons: number;
-  eligible: boolean;
-  questions: CourseFinalExamQuestion[];
-}
-
-function isMissingSchemaField(error: { code?: string; message?: string } | null): boolean {
-  return Boolean(
-    error && (error.code === "PGRST204" || /column .* does not exist|schema cache/i.test(error.message ?? ""))
-  );
-}
-
-async function loadCourseExamData(
-  supabase: SupabaseClient,
-  userId: string,
-  courseId: string,
-  includeCorrectAnswers: boolean
-) {
-  const { data: enrollment, error: enrollmentError } = await supabase
-    .from("enrollments")
-    .select("id")
-    .eq("student_id", userId)
-    .eq("course_id", courseId)
-    .eq("status", "approved")
-    .maybeSingle();
-  if (enrollmentError) throw new Error(enrollmentError.message);
-  if (!enrollment) throw new Error("An approved enrollment is required");
-
-  let { data: course, error: courseError } = await supabase
-    .from("courses")
-    .select("id, title, certificate_enabled, certificate_pass_percentage")
-    .eq("id", courseId)
-    .maybeSingle();
-  if (courseError && isMissingSchemaField(courseError)) {
-    const legacy = await supabase.from("courses").select("id, title").eq("id", courseId).maybeSingle();
-    course = legacy.data
-      ? { ...legacy.data, certificate_enabled: true, certificate_pass_percentage: DEFAULT_PASS_PERCENTAGE }
-      : null;
-    courseError = legacy.error;
-  }
-  if (courseError) throw new Error(courseError.message);
-  if (!course) throw new Error("Course not found");
-
-  const { data: lessonsData, error: lessonsError } = await supabase
-    .from("lessons")
-    .select("id, title, order_index")
-    .eq("course_id", courseId)
-    .order("order_index", { ascending: true });
-  if (lessonsError) throw new Error(lessonsError.message);
-  const lessons = (lessonsData ?? []) as LessonRow[];
-  if (lessons.length === 0) throw new Error("Course has no lessons");
-
-  const lessonIds = lessons.map((lesson) => lesson.id);
-  const [{ data: draftsData, error: draftsError }, { data: trackingData, error: trackingError }] =
-    await Promise.all([
-      supabase
-        .from("lesson_drafts")
-        .select("id, lesson_id, created_at")
-        .in("lesson_id", lessonIds),
-      supabase
-        .from("scorm_tracking")
-        .select("lesson_id, video_completed")
-        .eq("enrollment_id", enrollment.id)
-        .in("lesson_id", lessonIds),
-    ]);
-  if (draftsError) throw new Error(draftsError.message);
-  if (trackingError) throw new Error(trackingError.message);
-
-  const latestDraftByLesson = new Map<string, DraftRow>();
-  for (const draft of (draftsData ?? []) as DraftRow[]) {
-    const current = latestDraftByLesson.get(draft.lesson_id);
-    if (!current || new Date(draft.created_at).getTime() > new Date(current.created_at).getTime()) {
-      latestDraftByLesson.set(draft.lesson_id, draft);
-    }
-  }
-  const activeDrafts = [...latestDraftByLesson.values()];
-  const draftIds = activeDrafts.map((draft) => draft.id);
-  // const questionSelect = includeCorrectAnswers
-  //   ? "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, is_correct, order_index)"
-  //   : "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, order_index)";
-  // const { data: questionsData, error: questionsError } = draftIds.length
-  //   ? await supabase
-  //       .from("quiz_questions")
-  //       .select(questionSelect)
-  //       .in("lesson_draft_id", draftIds)
-  //       .is("video_timestamp_seconds", null)
-  //       .order("order_index", { ascending: true })
-  //   : { data: [], error: null };
-  // if (questionsError) throw new Error(questionsError.message);
-  const { data: examConfig, error: examConfigError } = await supabase
-  .from("course_exam_configs")
-  .select("build_mode, total_questions, preset_type, custom_constraints")
-  .eq("course_id", courseId)
-  .maybeSingle();
-if (examConfigError) throw new Error(examConfigError.message);
-
-let questions: QuestionRow[];
-if (examConfig) {
-  // ทางใหม่: สุ่มจาก question_bank ตาม config, seed จาก enrollment_id (deterministic)
-  questions = await loadSampledFinalExamQuestions(supabase, {
-    courseId,
-    seed: enrollment.id,
-    buildMode: examConfig.build_mode,
-    totalQuestions: examConfig.total_questions,
-    presetType: examConfig.preset_type,
-    customConstraints: examConfig.custom_constraints,
-  });
-} else {
-  // ทางเดิม: ไม่มี config = fallback พฤติกรรมเดิมเป๊ะ (คอร์สเก่าที่ยังไม่ตั้งค่า)
-  const questionSelect = includeCorrectAnswers
-    ? "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, is_correct, order_index)"
-    : "id, lesson_draft_id, question_text, explanation, order_index, quiz_choices(choice_text, order_index)";
-  const { data: questionsData, error: questionsError } = draftIds.length
-    ? await supabase
-        .from("quiz_questions")
-        .select(questionSelect)
-        .in("lesson_draft_id", draftIds)
-        .is("video_timestamp_seconds", null)
-        .order("order_index", { ascending: true })
-    : { data: [], error: null };
-  if (questionsError) throw new Error(questionsError.message);
-  questions = (questionsData ?? []) as unknown as QuestionRow[];
-}
-
-  const completedLessonIds = new Set(
-    (trackingData ?? [])
-      .filter((row) => Boolean(row.video_completed))
-      .map((row) => row.lesson_id as string)
-  );
-  const lessonById = new Map(lessons.map((lesson) => [lesson.id, lesson]));
-  const lessonIdByDraft = new Map(activeDrafts.map((draft) => [draft.id, draft.lesson_id]));
-
-  return {
-    enrollment,
-    course,
-    lessons,
-    completedLessonIds,
-    lessonById,
-    lessonIdByDraft,
-    questions,
-  };
-}
-
-function resolveLessonId(question: QuestionRow, lessonIdByDraft: Map<string, string>): string {
-  return question.lessonId ?? lessonIdByDraft.get(question.lesson_draft_id ?? "") ?? "";
-}
-
-export async function getCourseFinalExam(
-  supabase: SupabaseClient,
-  userId: string,
-  courseId: string
-): Promise<CourseFinalExamOverview> {
-  const data = await loadCourseExamData(supabase, userId, courseId, false);
-  const eligible = data.completedLessonIds.size === data.lessons.length;
-
-  return {
-    courseId,
-    courseTitle: data.course.title,
-    passPercentage: Number(data.course.certificate_pass_percentage ?? DEFAULT_PASS_PERCENTAGE),
-    certificateEnabled: Boolean(data.course.certificate_enabled),
-    totalLessons: data.lessons.length,
-    completedLessons: data.completedLessonIds.size,
-    eligible,
-    questions: eligible
-      ? [...data.questions]
-        .sort((a, b) => {
-  const lessonA = data.lessonById.get(resolveLessonId(a, data.lessonIdByDraft))?.order_index ?? 0;
-  const lessonB = data.lessonById.get(resolveLessonId(b, data.lessonIdByDraft))?.order_index ?? 0;
-  return lessonA - lessonB || a.order_index - b.order_index;
-})
-.map((question) => {
-  const lessonId = resolveLessonId(question, data.lessonIdByDraft);
-          return {
-            id: question.id,
-            lessonId,
-            lessonTitle: data.lessonById.get(lessonId)?.title ?? "บทเรียน",
-            questionText: question.question_text,
-            choices: [...(question.quiz_choices ?? [])]
-              .sort((a, b) => a.order_index - b.order_index)
-              .map((choice) => choice.choice_text),
-          };
-        })
-      : [],
-  };
-}
-
-export async function gradeCourseFinalExam(
-  supabase: SupabaseClient,
-  userId: string,
-  courseId: string,
-  answers: FinalQuizAnswer[]
-): Promise<FinalQuizGrade> {
-  const data = await loadCourseExamData(supabase, userId, courseId, true);
-  if (data.completedLessonIds.size < data.lessons.length) {
-    throw new Error("Complete every lesson before taking the final exam");
-  }
-  if (data.questions.length === 0) throw new Error("Course final exam has no questions");
-
-  const answersByQuestion = new Map<string, number>();
-  for (const answer of answers) {
-    if (typeof answer.questionId !== "string" || !Number.isInteger(answer.selectedChoiceIndex) || answer.selectedChoiceIndex < 0) {
-      throw new Error("Invalid exam answer");
-    }
-    answersByQuestion.set(answer.questionId, answer.selectedChoiceIndex);
-  }
-  if (answersByQuestion.size !== data.questions.length) throw new Error("Answer every question before submitting");
-
-  const details = data.questions.map((question) => {
-    const selectedChoiceIndex = answersByQuestion.get(question.id);
-    const choices = [...(question.quiz_choices ?? [])].sort((a, b) => a.order_index - b.order_index);
-    if (selectedChoiceIndex === undefined || !choices[selectedChoiceIndex]) throw new Error("Invalid exam answer");
-    return {
-      questionId: question.id,
-      isCorrect: Boolean(choices[selectedChoiceIndex].is_correct),
-      correctChoiceIndex: choices.findIndex((choice) => choice.is_correct),
-      explanation: question.explanation,
-    };
-  });
-
-  const attemptedAt = new Date().toISOString();
-  const attemptRows = data.questions.map((question) => ({
-  student_id: userId,
-  lesson_id: resolveLessonId(question, data.lessonIdByDraft),
-    question_id: question.id,
-    selected_choice_index: answersByQuestion.get(question.id),
-    is_correct: details.find((detail) => detail.questionId === question.id)?.isCorrect ?? false,
-    attempted_at: attemptedAt,
-  }));
-  const { error: answerSaveError } = await supabase
-    .from("video_quiz_attempts")
-    .upsert(attemptRows, { onConflict: "student_id,question_id" });
-  if (answerSaveError) throw new Error(answerSaveError.message);
-
-  const correctAnswers = details.filter((detail) => detail.isCorrect).length;
-  const scorePercentage = Math.round((correctAnswers / data.questions.length) * 10000) / 100;
-  const passPercentage = Number(data.course.certificate_pass_percentage ?? DEFAULT_PASS_PERCENTAGE);
-  const passed = scorePercentage >= passPercentage;
-  const attemptLesson = data.lessons[data.lessons.length - 1];
-  const { data: tracking, error: trackingError } = await supabase
-    .from("scorm_tracking")
-    .update({
-      lesson_status: passed ? "passed" : "completed",
-      score_raw: scorePercentage,
-      quiz_passed: passed,
-      quiz_score_recorded: true,
-      course_final_exam_recorded: true,
-      quiz_attempted_at: attemptedAt,
-      last_accessed: attemptedAt,
-    })
-    .eq("enrollment_id", data.enrollment.id)
-    .eq("lesson_id", attemptLesson.id)
-    .select("id")
-    .single();
-  if (trackingError) throw new Error(trackingError.message);
-
-  return {
-    courseId,
-    attemptId: tracking.id,
-    totalQuestions: data.questions.length,
-    correctAnswers,
-    scorePercentage,
-    passPercentage,
-    passed,
-    details,
-  };
-}
 
 export interface CustomConstraintInput {
-  lessonId: string;
+  lessonId: string | null; // null = ทั้งคอร์ส ไม่ระบุบท (เดิมคือพฤติกรรมของโหมด preset ที่ยุบเข้ามาแล้ว)
   difficulty: "easy" | "medium" | "hard";
   count: number;
 }
 
+// ยุบโหมด Preset/Custom เข้าเป็นกลไกเดียว (ของจริงไม่มีคอร์สไหนใช้ preset เลยสักคอร์ส — เช็คจาก
+// course_exam_configs แล้วทั้ง 3 แถวเป็น custom หมด) totalQuestions ไม่ต้องกรอกเองอีกต่อไป คำนวณ
+// จากผลรวมของ customConstraints ให้เลย ตัดเคส "ผลรวมไม่ตรงกับจำนวนข้อสอบทั้งหมด" ทิ้งไปด้วยในตัว
 export interface SaveCourseExamConfigInput {
   courseId: string;
-  buildMode: "custom" | "preset";
-  totalQuestions: number;
-  presetType?: "quick_check" | "standard_final" | "challenging_final" | null;
-  customConstraints?: CustomConstraintInput[] | null;
+  customConstraints: CustomConstraintInput[];
 }
 
 export async function saveCourseExamConfig(input: SaveCourseExamConfigInput): Promise<{ error?: string }> {
@@ -482,39 +177,32 @@ export async function saveCourseExamConfig(input: SaveCourseExamConfigInput): Pr
     return { error: "ไม่มีสิทธิ์แก้ไขบททดสอบของคอร์สนี้" };
   }
 
-  if (!Number.isInteger(input.totalQuestions) || input.totalQuestions <= 0) {
-    return { error: "จำนวนข้อสอบต้องเป็นจำนวนเต็มมากกว่า 0" };
+  // เช็คก่อนว่าคอร์สนี้มีบทเรียนอยู่หรือยัง (เงื่อนไขที่อ้าง lessonId จริงต้องมีบทให้เลือกก่อน —
+  // แถวที่เป็น "ทั้งคอร์ส" ไม่ต้องพึ่งอันนี้ก็จริง แต่หน้าจอยังต้องมีบทเรียนอย่างน้อย 1 บทถึงจะเปิด
+  // ให้ตั้งค่าข้อสอบท้ายคอร์สได้ตั้งแต่ต้นอยู่ดี)
+  const { count: lessonCount, error: lessonCountError } = await supabase
+    .from("lessons")
+    .select("id", { count: "exact", head: true })
+    .eq("course_id", input.courseId);
+  if (lessonCountError) return { error: lessonCountError.message };
+  if (!lessonCount) {
+    return { error: "คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถสุ่มข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน" };
   }
 
-  if (input.buildMode === "preset") {
-    if (!input.presetType) return { error: "กรุณาเลือกแม่แบบข้อสอบ" };
-  } else {
-    // ★ เพิ่มใหม่: เช็คก่อนว่าคอร์สนี้มีบทเรียนอยู่หรือยัง เพราะโหมด custom ต้องเลือกบทเรียนก่อนถึงจะ
-    // ตั้งเงื่อนไขได้ ถ้าไม่มีบทเรียนเลยผู้ใช้จะเจอแค่ "ผลรวมไม่ตรงกับจำนวนข้อสอบทั้งหมด" ซึ่งไม่บอก
-    // สาเหตุจริง (เข้าใจผิดว่าต้องกรอกจำนวนข้อให้ครบ ทั้งที่ปัญหาจริงคือเลือกบทเรียนไม่ได้ตั้งแต่ต้น)
-    const { count: lessonCount, error: lessonCountError } = await supabase
-      .from("lessons")
-      .select("id", { count: "exact", head: true })
-      .eq("course_id", input.courseId);
-    if (lessonCountError) return { error: lessonCountError.message };
-    if (!lessonCount) {
-      return { error: "คอร์สนี้ยังไม่มีบทเรียนเลย จึงยังไม่สามารถสุ่มข้อสอบท้ายคอร์สได้ กรุณาเพิ่มบทเรียนก่อน" };
-    }
-
-    if (!input.customConstraints?.length) return { error: "กรุณาตั้งเงื่อนไขสุ่มข้อสอบอย่างน้อย 1 รายการ" };
-    const sum = input.customConstraints.reduce((total, constraint) => total + constraint.count, 0);
-    if (sum !== input.totalQuestions) {
-      return { error: `ผลรวมจำนวนข้อในเงื่อนไข (${sum}) ไม่ตรงกับจำนวนข้อสอบทั้งหมด (${input.totalQuestions})` };
-    }
-  }
+  if (!input.customConstraints?.length) return { error: "กรุณาตั้งเงื่อนไขสุ่มข้อสอบอย่างน้อย 1 รายการ" };
+  const invalidRow = input.customConstraints.find((c) => !Number.isInteger(c.count) || c.count <= 0);
+  if (invalidRow) return { error: "จำนวนข้อในแต่ละเงื่อนไขต้องเป็นจำนวนเต็มมากกว่า 0" };
+  // เดิมต้องกรอก "จำนวนข้อสอบทั้งหมด" แยกแล้วเช็คว่าผลรวม constraint ตรงกันไหม (คลาสบั๊กที่ผู้ใช้
+  // งงบ่อยว่าทำไมกรอกครบแล้วยังเซฟไม่ผ่าน) ตอนนี้คำนวณจากผลรวมให้เลย ไม่ต้องมีช่องให้กรอกซ้ำอีกแล้ว
+  const totalQuestions = input.customConstraints.reduce((total, constraint) => total + constraint.count, 0);
 
   const { error: upsertError } = await supabase.from("course_exam_configs").upsert(
     {
       course_id: input.courseId,
-      build_mode: input.buildMode,
-      total_questions: input.totalQuestions,
-      preset_type: input.buildMode === "preset" ? input.presetType : null,
-      custom_constraints: input.buildMode === "custom" ? input.customConstraints : null,
+      build_mode: "custom", // เหลือโหมดเดียวแล้ว เก็บคอลัมน์นี้ไว้เพื่อไม่ต้อง migrate schema
+      total_questions: totalQuestions,
+      preset_type: null,
+      custom_constraints: input.customConstraints,
       created_by: user.id,
       updated_at: new Date().toISOString(),
     },
@@ -541,10 +229,7 @@ export interface PreviewQuestion {
 // บันทึก) เข้ามาโดยตรงแทน จะได้พรีวิวตรงกับสิ่งที่กำลังตั้งค่าอยู่จริงๆ เสมอ
 export async function previewCourseExamSample(input: {
   courseId: string;
-  buildMode: "custom" | "preset";
-  totalQuestions: number;
-  presetType?: "quick_check" | "standard_final" | "challenging_final" | null;
-  customConstraints?: CustomConstraintInput[] | null;
+  customConstraints: CustomConstraintInput[];
 }): Promise<{ error?: string; questions?: PreviewQuestion[] }> {
   const { courseId } = input;
   const supabase = await createClient();
@@ -561,12 +246,7 @@ export async function previewCourseExamSample(input: {
     return { error: "ไม่มีสิทธิ์เข้าถึงบททดสอบของคอร์สนี้" };
   }
 
-  if (!Number.isInteger(input.totalQuestions) || input.totalQuestions <= 0) {
-    return { error: "จำนวนข้อสอบต้องเป็นจำนวนเต็มมากกว่า 0" };
-  }
-  if (input.buildMode === "preset") {
-    if (!input.presetType) return { error: "กรุณาเลือกแม่แบบข้อสอบ" };
-  } else if (!input.customConstraints?.length) {
+  if (!input.customConstraints?.length) {
     return { error: "กรุณาตั้งเงื่อนไขสุ่มข้อสอบอย่างน้อย 1 รายการ" };
   }
 
@@ -575,9 +255,6 @@ export async function previewCourseExamSample(input: {
     const sampled = await loadSampledFinalExamQuestions(supabase, {
       courseId,
       seed: `preview-${courseId}`,
-      buildMode: input.buildMode,
-      totalQuestions: input.totalQuestions,
-      presetType: input.presetType,
       customConstraints: input.customConstraints,
     });
     return {

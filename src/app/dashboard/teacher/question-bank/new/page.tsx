@@ -15,7 +15,7 @@ export default async function NewQuestionBankPage(): Promise<ReactElement> {
   // ดึงบทเรียนของครูคนนี้ทุกคอร์ส เพื่อผูก tag
   const { data: lessonsData } = await supabase
   .from("lessons")
-  .select("id, order_index, course_id, courses!inner(title, created_by)")
+  .select("id, order_index, course_id, courses!inner(title, created_by, category)")
   .eq("courses.created_by", user.id)
   .order("order_index", { ascending: true });
 
@@ -23,6 +23,8 @@ export default async function NewQuestionBankPage(): Promise<ReactElement> {
     id: lesson.id,
     courseId: lesson.course_id,
     courseTitle: (lesson.courses as unknown as { title: string }).title,
+    // เพิ่มใหม่: เอา category ของคอร์สติดมาด้วย ใช้เตือนตอนครูผูกคำถาม category หนึ่งเข้ากับคอร์สที่ category ไม่ตรงกัน
+    courseCategory: (lesson.courses as unknown as { category: string | null }).category,
     orderIndex: lesson.order_index,
     title: `บทที่ ${lesson.order_index + 1}`,
     }));

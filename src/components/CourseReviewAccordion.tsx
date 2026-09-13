@@ -19,12 +19,20 @@ interface QuizQuestion {
   quiz_choices: QuizChoice[];
 }
 
+interface VideoQuizMarker {
+  id: string;
+  timestamp_seconds: number;
+  random_difficulty: "easy" | "medium" | "hard";
+  order_index: number;
+}
+
 interface LessonDraft {
   id: string;
   video_url: string | null;
   content_html: string | null;
   status: string;
   quiz_questions: QuizQuestion[];
+  video_quiz_markers?: VideoQuizMarker[];
 }
 
 interface LessonWithDraft {
@@ -44,6 +52,30 @@ function formatTimestamp(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+const difficultyLabel: Record<"easy" | "medium" | "hard", string> = {
+  easy: "ง่าย",
+  medium: "ปานกลาง",
+  hard: "ยาก",
+};
+
+// การ์ดแสดงจุดที่ตั้งให้ "สุ่มคำถามจากคลังข้อสอบ" — ไม่มีคำถามตายตัวให้โชว์ (สุ่มไม่ซ้ำต่อผู้เรียนแต่ละคน)
+// เลยโชว์แค่ตำแหน่งเวลา + ระดับความยากที่ตั้งไว้ ให้แอดมินเห็นว่าจุดนี้มีอยู่จริงตอนรีวิว
+function RandomBankMarkerRow({ marker, index }: { marker: VideoQuizMarker; index: number }): ReactElement {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[11px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-0.5 rounded-full shrink-0">
+          ⏱ {formatTimestamp(marker.timestamp_seconds)}
+        </span>
+        <p className="text-[13.5px] font-bold text-[#0F1B3D]">{index + 1}. สุ่มจากคลังข้อสอบ</p>
+      </div>
+      <p className="text-[13px] text-[#0F1B3D]/60 pl-4">
+        ระบบจะสุ่ม 1 ข้อจากคลังระดับ{difficultyLabel[marker.random_difficulty]}ให้ผู้เรียนแต่ละคน (คำถามไม่ตายตัว)
+      </p>
+    </div>
+  );
 }
 
 // ปุ่มอนุมัติ/ปฏิเสธ ของ "บทเรียนเดียว" — เรียก server action ระดับ lesson ไม่ใช่ระดับคอร์ส
@@ -248,17 +280,26 @@ export default function CourseReviewAccordion({
                     )}
 
                     {(() => {
-                      const videoQuizzes = draft.quiz_questions
-                        .filter((q) => q.video_timestamp_seconds != null)
-                        .sort((a, b) => (a.video_timestamp_seconds ?? 0) - (b.video_timestamp_seconds ?? 0));
-                      const renderQuestion = (q: QuizQuestion, qi: number, showTimestamp: boolean) => (
+                      const fixedQuizzes = draft.quiz_questions.filter((q) => q.video_timestamp_seconds != null);
+                      const randomMarkers = draft.video_quiz_markers ?? [];
+
+                      // รวมทั้งคำถามตายตัว (quiz_questions) และจุดสุ่มจากคลัง (video_quiz_markers)
+                      // เป็นไทม์ไลน์เดียว เรียงตามวินาทีในวิดีโอ — ไม่งั้นจุดสุ่มจากคลังจะหายไปจากหน้ารีวิวเลย
+                      type TimelineItem =
+                        | { kind: "fixed"; ts: number; question: QuizQuestion }
+                        | { kind: "random"; ts: number; marker: VideoQuizMarker };
+
+                      const timeline: TimelineItem[] = [
+                        ...fixedQuizzes.map((q) => ({ kind: "fixed" as const, ts: q.video_timestamp_seconds ?? 0, question: q })),
+                        ...randomMarkers.map((m) => ({ kind: "random" as const, ts: m.timestamp_seconds, marker: m })),
+                      ].sort((a, b) => a.ts - b.ts);
+
+                      const renderQuestion = (q: QuizQuestion, qi: number) => (
                         <div key={q.id}>
                           <div className="flex items-center gap-2 mb-1.5">
-                            {showTimestamp && (
-                              <span className="text-[11px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-0.5 rounded-full shrink-0">
-                                ⏱ {formatTimestamp(q.video_timestamp_seconds ?? 0)}
-                              </span>
-                            )}
+                            <span className="text-[11px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-0.5 rounded-full shrink-0">
+                              ⏱ {formatTimestamp(q.video_timestamp_seconds ?? 0)}
+                            </span>
                             <p className="text-[13.5px] font-bold text-[#0F1B3D]">
                               {qi + 1}. {q.question_text}
                             </p>
@@ -287,17 +328,22 @@ export default function CourseReviewAccordion({
 
                       return (
                         <>
-                          {videoQuizzes.length > 0 && (
+                          {timeline.length > 0 && (
                             <div className="mb-6">
                               <h3 className="text-[13px] font-bold text-[#0F1B3D] mb-3">
-                                In-Video Quiz ({videoQuizzes.length} ข้อ)
+                                In-Video Quiz ({timeline.length} ข้อ)
                               </h3>
                               <div className="space-y-4">
-                                {videoQuizzes.map((q, qi) => renderQuestion(q, qi, true))}
+                                {timeline.map((item, i) =>
+                                  item.kind === "fixed" ? (
+                                    renderQuestion(item.question, i)
+                                  ) : (
+                                    <RandomBankMarkerRow key={item.marker.id} marker={item.marker} index={i} />
+                                  )
+                                )}
                               </div>
                             </div>
                           )}
-
                         </>
                       );
                     })()}

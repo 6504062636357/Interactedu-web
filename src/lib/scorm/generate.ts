@@ -125,9 +125,20 @@ function loadInitialAttempts() {
         quizSummary.total++;
         if (a.isCorrect) quizSummary.correct++;
       });
-      // เผื่อกลับมาเรียนซ้ำ (resume) ต้องต่อ index ของ cmi.interactions ให้ไม่ชนกับที่เคยเขียนไว้
-      // รอบก่อน (ซึ่งถูกโหลดกลับเข้า CMI แล้วผ่าน loadFromJSON ฝั่ง page.tsx ก่อน SCO นี้จะ initialize)
-      interactionIndex = quizSummary.total;
+      // [แก้บั๊ก SCORM 402: "Cannot set array element at index N. Current array length is 0,
+      // expected index 0"] เดิมตั้ง interactionIndex จาก quizSummary.total (จำนวนที่ตอบไปแล้วใน DB)
+      // ตรงๆ โดยสมมติว่า cmi.interactions เก่าถูก loadFromJSON คืนกลับเข้า CMI ครบแล้วก่อนหน้านี้เสมอ
+      // (ฝั่ง page.tsx) — ถ้าเคสไหน restore ไม่ครบ (เช่นรอบก่อนไม่เคย commit ก้อน cmi เต็มๆ ไว้เลย)
+      // array cmi.interactions จริงในเครื่อง LMS จะยังว่างอยู่ (length 0) แต่ interactionIndex ตั้งเป็น
+      // ค่าจาก DB ทันที พอเขียน cmi.interactions.N.* ที่ N > 0 ก่อนมี index 0 จะชนกฎ SCORM ที่บังคับ
+      // ว่า index ต้องเรียงต่อกันจาก 0 เสมอ
+      //
+      // ทางแก้: อ่านจำนวนจริงจาก cmi.interactions._count (data element มาตรฐานของ SCORM 1.2 —
+      // scorm-again รองรับ) มาเป็นตัวตั้งต้นแทน รับประกันว่าเขียนต่อจาก index ที่ LMS มีอยู่จริง
+      // ไม่ใช่ index ที่ DB "คิดว่า" ควรจะมี ถ้า LMS ที่เปิดอยู่ไม่รองรับ _count (คืนค่าว่าง/ไม่ใช่
+      // ตัวเลข) ค่อย fallback กลับไปใช้ quizSummary.total เหมือนพฤติกรรมเดิม (ดีกว่าไม่มีค่าให้ใช้เลย)
+      var actualInteractionCount = parseInt(ScormAPI.getValue("cmi.interactions._count"), 10);
+      interactionIndex = isNaN(actualInteractionCount) ? quizSummary.total : actualInteractionCount;
       reportQuizSummaryToCmi();
     })
     .catch(function (err) { console.warn("Failed to load quiz attempts", err); });
@@ -444,8 +455,17 @@ function renderQuizModalContent(question) {
   overlay.classList.add("open");
 }
   
-function submitAnswer(question, choiceIndex, choicesWrap) {
+// [แก้บั๊ก: ส่งคำตอบไม่สำเร็จแล้วค้าง] ถ้า POST ล้มเหลวเพราะเน็ต/เซิร์ฟเวอร์สะดุดชั่วครู่ (เช่น Supabase
+// free-tier หน่วงเป็นพักๆ) เดิมจะโชว์ error ทันทีรอบเดียว ผู้เรียนต้องกดตอบเองซ้ำทุกครั้ง — ถ้าจังหวะนั้น
+// เน็ตแกว่งพอดีอาจต้องกดวนหลายรอบ กว่าจะหลุด ตอนนี้เพิ่ม retry อัตโนมัติให้ 1 ครั้งก่อน (หน่วง 1.2 วิ
+// สั้นพอไม่ทำให้รอนาน และไม่ยิง request รัวจนหนักเซิร์ฟเวอร์) ถ้ายังไม่สำเร็จอีกถึงค่อยโชว์ error ให้กดเอง
+function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
+  attempt = attempt || 0;
   Array.prototype.forEach.call(choicesWrap.children, function (btn) { btn.disabled = true; });
+  var feedback = document.getElementById("quiz-modal-feedback");
+  if (attempt > 0) {
+    feedback.innerHTML = "<p class=\\"quiz-modal-hint\\">สัญญาณอินเทอร์เน็ตช้าไปนิด กำลังลองส่งคำตอบให้อีกครั้ง...</p>";
+  }
 
   fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts", {
     method: "POST",
@@ -481,7 +501,6 @@ function submitAnswer(question, choiceIndex, choicesWrap) {
       var chosenBtn = choicesWrap.children[choiceIndex];
       chosenBtn.classList.add(result.isCorrect ? "correct" : "incorrect");
 
-      var feedback = document.getElementById("quiz-modal-feedback");
       feedback.innerHTML = "";
 
       var resultText = document.createElement("p");
@@ -518,9 +537,17 @@ function submitAnswer(question, choiceIndex, choicesWrap) {
       }
     })
     .catch(function (err) {
-      console.error("Failed to submit answer", err);
-      var feedback = document.getElementById("quiz-modal-feedback");
-      feedback.innerHTML = "<p class=\\"quiz-modal-error\\">ส่งคำตอบไม่สำเร็จ ลองใหม่อีกครั้ง</p>";
+      console.error("Failed to submit answer (attempt " + (attempt + 1) + ")", err);
+      // ลองส่งซ้ำอัตโนมัติแค่ 1 ครั้ง หน่วง 1.2 วิ (สั้นพอ ไม่ทำให้รอนาน และไม่ยิงรัวจนหนักเซิร์ฟเวอร์)
+      // ก่อนจะยอมโชว์ error ให้ผู้เรียนกดเอง — เผื่อเป็นแค่เน็ตสะดุด/เซิร์ฟเวอร์หน่วงชั่วครู่เดียว
+      if (attempt < 1) {
+        setTimeout(function () {
+          submitAnswer(question, choiceIndex, choicesWrap, attempt + 1);
+        }, 1200);
+        return;
+      }
+      feedback.innerHTML =
+        "<p class=\\"quiz-modal-error\\">เชื่อมต่อไม่สำเร็จ อินเทอร์เน็ตหรือระบบอาจไม่เสถียรชั่วคราว ลองกดคำตอบอีกครั้ง หรือตรวจสอบสัญญาณอินเทอร์เน็ตของคุณ</p>";
       Array.prototype.forEach.call(choicesWrap.children, function (btn) { btn.disabled = false; });
     });
 }
@@ -1231,6 +1258,7 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 .quiz-modal-result-text.is-incorrect { color: #DC2626; }
 .quiz-modal-explanation { font-size: 13.5px; color: #475569; margin: 0 0 14px; }
 .quiz-modal-error { color: #DC2626; font-size: 13px; }
+.quiz-modal-hint { color: #64748B; font-size: 13px; }
 
 .quiz-modal-continue-btn {
   background: #0F1B3D;

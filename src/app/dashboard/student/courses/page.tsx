@@ -2,6 +2,7 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
 interface EnrolledCourse {
   id: string;
@@ -51,14 +52,12 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
       className="group rounded-2xl border border-[#0F1B3D]/[0.06] overflow-hidden hover:shadow-[0_15px_35px_-15px_rgba(15,27,61,0.2)] transition-shadow bg-white"
     >
       <div className="relative h-36 bg-gradient-to-br from-[#0F1B3D] to-[#182852]">
-        {course.coverImageUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={course.coverImageUrl}
-            alt={course.title}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={course.coverImageUrl ?? DEFAULT_COURSE_COVER_URL}
+          alt={course.title}
+          className="absolute inset-0 w-full h-full object-cover"
+        />
         {course.certified && (
           <span className="absolute left-3 top-3 rounded-full bg-emerald-500 px-2.5 py-1 text-[10.5px] font-bold text-white shadow-sm">
             ✓ Certified

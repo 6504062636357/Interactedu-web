@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 
 export type Difficulty = "easy" | "medium" | "hard";
-export type QuestionFormat = "multiple_choice" | "code_practical";
+// ตัดตัวเลือก "code_practical" ออกแล้ว (ไม่เคยมีโค้ดจุดไหนใช้ branch ตามค่านี้เลยนอกจาก
+// dropdown ในฟอร์ม) เหลือแค่ multiple_choice อย่างเดียว ยังคง field/column เดิมไว้เผื่ออนาคต
+export type QuestionFormat = "multiple_choice";
 export type UsageType = "popup" | "final";
 export type PrivacyScope = "private" | "department" | "public";
 
@@ -84,6 +86,38 @@ function buildTagRows(
   });
 }
 
+// ★ B7 fix: เดิม createQuestionBankItem/updateQuestionBankItem รับ topicTags.courseId/lessonId
+// จาก client มาผูกเข้า question_bank_topic_tags ตรง ๆ โดยไม่เคยเช็คว่าครูคนนี้เป็นเจ้าของ/ผู้สอน
+// คอร์สนั้นจริงไหม — RLS ของตาราง question_bank_topic_tags (qb_tags_owner_all) เช็คแค่ว่า
+// "เจ้าของคำถาม" ตรงกับผู้ใช้ ไม่ได้เช็คว่า courseId ที่ถูกผูกเป็นคอร์สของครูคนนั้นด้วย ผลคือครูคน
+// หนึ่งส่ง courseId ของอีกคนมาผูกคำถามตัวเองเข้าคลังคอร์สนั้นได้เลย — คำถามนั้นจะไปโผล่ในคลังสุ่ม
+// final exam/popup quiz ของคอร์สคนอื่นทันทีโดยเจ้าของคอร์สไม่รู้ตัว ฟังก์ชันนี้เช็คสิทธิ์ก่อนบันทึกจริง
+async function verifyTopicTagOwnership(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  topicTags: QuestionBankTopicTagInput[],
+  teacherId: string,
+  isAdmin: boolean
+): Promise<string | null> {
+  if (isAdmin || topicTags.length === 0) return null;
+
+  const courseIds = [...new Set(topicTags.map((t) => t.courseId))];
+  const [{ data: courses }, { data: coTeaching }] = await Promise.all([
+    supabase.from("courses").select("id, created_by, title").in("id", courseIds),
+    supabase.from("course_teachers").select("course_id").eq("teacher_id", teacherId).in("course_id", courseIds),
+  ]);
+
+  const foundIds = new Set((courses ?? []).map((c) => c.id));
+  const missing = courseIds.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) return "พบคอร์สที่เลือกไม่มีอยู่จริงในระบบ กรุณาเลือกคอร์สใหม่";
+
+  const coTeachingIds = new Set((coTeaching ?? []).map((r) => r.course_id));
+  const unauthorized = (courses ?? []).filter((c) => c.created_by !== teacherId && !coTeachingIds.has(c.id));
+  if (unauthorized.length > 0) {
+    return `ไม่มีสิทธิ์ผูกคำถามกับคอร์สนี้: ${unauthorized.map((c) => c.title).join(", ")}`;
+  }
+  return null;
+}
+
 async function fetchTitleMaps(
   supabase: Awaited<ReturnType<typeof createClient>>,
   topicTags: QuestionBankTopicTagInput[]
@@ -113,6 +147,9 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
 
   const validationError = validateQuestion(input);
   if (validationError) return { error: validationError };
+
+  const ownershipError = await verifyTopicTagOwnership(supabase, input.topicTags, auth.user.id, auth.isAdmin);
+  if (ownershipError) return { error: ownershipError };
 
   const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
 
@@ -182,8 +219,11 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
   if (!existing) return { error: "ไม่พบคำถามนี้" };
   if (!auth.isAdmin && existing.owner_teacher_id !== auth.user.id) return { error: "ไม่มีสิทธิ์แก้ไขคำถามนี้" };
 
+  const ownershipError = await verifyTopicTagOwnership(supabase, input.topicTags, auth.user.id, auth.isAdmin);
+  if (ownershipError) return { error: ownershipError };
+
   const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
-  
+
   const { error: updateError } = await supabase
     .from("question_bank")
     .update({
