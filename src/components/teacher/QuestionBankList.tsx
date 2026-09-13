@@ -246,12 +246,12 @@ function CategoryQuestionList({
           <option value="popup">Pop-up Quiz</option>
           <option value="final">Final Exam</option>
         </select>
-        <select value={scopeFilter} onChange={(e) => resetPageFilters(() => setScopeFilter(e.target.value))} className={selectClass}>
+        {/* <select value={scopeFilter} onChange={(e) => resetPageFilters(() => setScopeFilter(e.target.value))} className={selectClass}>
           <option value="all">ทุกสิทธิ์การเข้าถึง</option>
           <option value="private">ส่วนตัว</option>
           <option value="department">หมวดวิชา</option>
           <option value="public">สาธารณะ</option>
-        </select>
+        </select> */}
       </div>
 
       {selectedIds.size > 0 && (

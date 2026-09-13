@@ -6,17 +6,15 @@ import { createQuestionBankItem, updateQuestionBankItem, type QuestionBankInput,
 import { CATEGORIES, type Category } from "@/lib/constants/categories";
 interface ChoiceState { text: string; isCorrect: boolean }
 
-const WHOLE_COURSE_VALUE = "__whole_course__";
-
 type InteractionType = "multiple_choice" | "true_false" | "sequencing" | "matching" | "fill_in_blank" | "note_callout";
 
 // type ที่เปิดให้ครูเลือกได้จริงตอนนี้ (sync กับ lib/quiz/config/enabled-types.ts ฝั่ง backend)
 const ENABLED_INTERACTION_TYPES: { value: InteractionType; label: string; disabled?: boolean }[] = [
   { value: "multiple_choice", label: "Multiple Choice" },
   { value: "true_false", label: "True / False" },
-  { value: "fill_in_blank", label: "Fill in the blank (เร็วๆ นี้)", disabled: true },
-  { value: "sequencing", label: "Sequencing (เร็วๆ นี้)", disabled: true },
-  { value: "matching", label: "Matching (เร็วๆ นี้)", disabled: true },
+  // { value: "fill_in_blank", label: "Fill in the blank (เร็วๆ นี้)", disabled: true },
+  // { value: "sequencing", label: "Sequencing (เร็วๆ นี้)", disabled: true },
+  // { value: "matching", label: "Matching (เร็วๆ นี้)", disabled: true },
 ];
 
 interface ChoiceState { text: string; isCorrect: boolean }
@@ -27,7 +25,7 @@ export default function QuestionBankForm({
   initialData,
 }: {
   questionId?: string;
-  lessons: { id: string; courseId: string; courseTitle: string; orderIndex: number; title: string }[];
+  lessons: { id: string; courseId: string; courseTitle: string; courseCategory: string | null; orderIndex: number; title: string }[];
   initialData?: QuestionBankInput | null;
 }) {
   const router = useRouter();
@@ -45,9 +43,14 @@ const [customCategory, setCustomCategory] = useState(
   initialCategory && !isKnownCategory(initialCategory) ? initialCategory : ""
 );
   const [difficulty, setDifficulty] = useState<Difficulty>(initialData?.difficulty ?? "medium");
-  const [format, setFormat] = useState<QuestionFormat>(initialData?.format ?? "multiple_choice");
+  // ตัดตัวเลือก Code/Practical ออกแล้ว เหลือแค่ multiple_choice อย่างเดียว เลยไม่ต้องมี dropdown
+  // ให้เลือกอีกต่อไป (ค่าคงที่เสมอ) — ยังเก็บ field นี้ไว้ส่งตาม schema เดิมของ question_bank.format
+  const format: QuestionFormat = "multiple_choice";
   const [usageType, setUsageType] = useState<UsageType>(initialData?.usageType ?? "final");
-  const [privacyScope, setPrivacyScope] = useState<PrivacyScope>(initialData?.privacyScope ?? "private");
+  // ตัดตัวเลือก "สิทธิ์การเข้าถึง" (ส่วนตัว/หมวดวิชา) ออกจากฟอร์มแล้ว เพราะปัจจุบันไม่มีผลกับใครเลย
+  // (ยังไม่มีเคสหลายครูสอนวิชาเดียวกันจริง + ตาราง course_teachers ที่ใช้เช็คสิทธิ์ยังว่างเปล่า)
+  // บันทึกเป็น "private" เสมอ — ค่อยกลับมาทำตอนมีเคสจริงพร้อมหน้า "คลังข้อสอบที่แชร์กับฉัน"
+  const privacyScope: PrivacyScope = "private";
   const [topicTags, setTopicTags] = useState<QuestionBankTopicTagInput[]>(initialData?.topicTags ?? []);
   const [choices, setChoices] = useState<ChoiceState[]>(
     initialData?.choices?.length ? initialData.choices : [{ text: "", isCorrect: true }, { text: "", isCorrect: false }]
@@ -84,8 +87,8 @@ const [customCategory, setCustomCategory] = useState(
     }
   }, [interactionType]);
 
-  const lessonsByCourse = lessons.reduce<Record<string, { courseId: string; courseTitle: string; items: typeof lessons }>>((groups, lesson) => {
-  if (!groups[lesson.courseId]) groups[lesson.courseId] = { courseId: lesson.courseId, courseTitle: lesson.courseTitle, items: [] };
+  const lessonsByCourse = lessons.reduce<Record<string, { courseId: string; courseTitle: string; courseCategory: string | null; items: typeof lessons }>>((groups, lesson) => {
+  if (!groups[lesson.courseId]) groups[lesson.courseId] = { courseId: lesson.courseId, courseTitle: lesson.courseTitle, courseCategory: lesson.courseCategory, items: [] };
   groups[lesson.courseId].items.push(lesson);
   return groups;
 }, {});
@@ -98,9 +101,34 @@ const courseGroups = Object.values(lessonsByCourse)
   // default ไปที่คอร์สของ tag แรกที่เคยผูกไว้ (ถ้ามี) เพื่อไม่ให้ดูเหมือนค่าเดิมหายตอนเปิดแก้ไข
   const [selectedCourseId, setSelectedCourseId] = useState<string>(() => initialData?.topicTags?.[0]?.courseId ?? "");
   const [pendingLessonValue, setPendingLessonValue] = useState<string>("");
+  // แทนที่ตัวเลือก "ทั้งคอร์ส" ในดรอปดาวน์เดิมด้วย checkbox แยก เพื่อให้เห็นชัดว่าแลกอะไรไป —
+  // แท็กทั้งคอร์สใช้ได้แค่กับข้อสอบปลายภาคแบบรวมทั้งคอร์ส (ไม่ใช้กับ Pop-up Quiz หรือ preset แบบระบุสัดส่วนรายบท)
+  const [useWholeCourseTag, setUseWholeCourseTag] = useState(false);
 
   const courseTitleById = useMemo(() => new Map(courseGroups.map((g) => [g.courseId, g.courseTitle])), [courseGroups]);
+  const courseCategoryById = useMemo(() => new Map(courseGroups.map((g) => [g.courseId, g.courseCategory])), [courseGroups]);
   const lessonById = useMemo(() => new Map(lessons.map((l) => [l.id, l])), [lessons]);
+
+  // ===== เพิ่มใหม่: กรองตัวเลือก "เลือกคอร์ส" ให้เหลือแค่คอร์สที่อยู่หมวดเดียวกับคำถามข้อนี้ =====
+  // ถ้าไม่มีคอร์สในหมวดนั้นเลย (เช่น ครูยังไม่เคยสร้างคอร์สหมวดนี้ หรือกำลังกรอกหมวดกำหนดเอง "อื่นๆ")
+  // fallback กลับไปแสดงคอร์สทั้งหมด กันไม่ให้ครูเลือกคอร์สไม่ได้เลยเพราะหมวดไม่ตรงเป๊ะ
+  const finalCategoryForCompare = category === "อื่นๆ" ? customCategory.trim() : category;
+  const categoryMatchedCourseGroups = useMemo(
+    () => (finalCategoryForCompare ? courseGroups.filter((g) => g.courseCategory === finalCategoryForCompare) : courseGroups),
+    [courseGroups, finalCategoryForCompare]
+  );
+  const isFilteredByCategory = !!finalCategoryForCompare && categoryMatchedCourseGroups.length > 0;
+  const visibleCourseGroups = categoryMatchedCourseGroups.length > 0 ? categoryMatchedCourseGroups : courseGroups;
+  const noCourseInThisCategory = !!finalCategoryForCompare && categoryMatchedCourseGroups.length === 0 && courseGroups.length > 0;
+
+  // ถ้าคอร์สที่เลือกค้างอยู่ในตัวเลือก (สำหรับผูก tag ถัดไป) หลุดจากรายการที่กรองแล้ว (เพราะเพิ่งเปลี่ยนหมวดคำถาม) ให้ล้างค่าทิ้ง
+  useEffect(() => {
+    if (selectedCourseId && !visibleCourseGroups.some((g) => g.courseId === selectedCourseId)) {
+      setSelectedCourseId("");
+      setPendingLessonValue("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleCourseGroups]);
 
   // const lessonsForSelectedCourse = useMemo(
   //   () => courseGroups.find((g) => g.courseId === selectedCourseId)?.items ?? [],
@@ -118,11 +146,11 @@ const courseGroups = Object.values(lessonsByCourse)
   }
 
   function addPendingSelection() {
-    if (!selectedCourseId || !pendingLessonValue) return;
-    const newTag: QuestionBankTopicTagInput =
-      pendingLessonValue === WHOLE_COURSE_VALUE
-        ? { courseId: selectedCourseId, lessonId: null }
-        : { courseId: selectedCourseId, lessonId: pendingLessonValue };
+    if (!selectedCourseId) return;
+    const newTag: QuestionBankTopicTagInput = useWholeCourseTag
+      ? { courseId: selectedCourseId, lessonId: null }
+      : { courseId: selectedCourseId, lessonId: pendingLessonValue };
+    if (!useWholeCourseTag && !pendingLessonValue) return;
     setTopicTags((current) => (current.some((t) => tagKey(t) === tagKey(newTag)) ? current : [...current, newTag]));
     setPendingLessonValue("");
   }
@@ -337,11 +365,6 @@ const courseGroups = Object.values(lessonsByCourse)
               <option value="easy">ง่าย</option><option value="medium">ปานกลาง</option><option value="hard">ยาก</option>
             </select>
           </label>
-          <label><span className={labelClass}>รูปแบบคำถาม</span>
-            <select value={format} onChange={(e) => setFormat(e.target.value as QuestionFormat)} className={inputClass}>
-              <option value="multiple_choice">Multiple Choice</option><option value="code_practical">Code/Practical</option>
-            </select>
-          </label>
           <label><span className={labelClass}>ใช้สำหรับ</span>
             <select value={usageType} onChange={(e) => setUsageType(e.target.value as UsageType)} className={inputClass}>
               <option value="final">Final Exam</option><option value="popup">Pop-up Quiz</option>
@@ -359,24 +382,21 @@ const courseGroups = Object.values(lessonsByCourse)
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={selectedCourseId}
-                    onChange={(e) => { setSelectedCourseId(e.target.value); setPendingLessonValue(""); }}
+                    onChange={(e) => { setSelectedCourseId(e.target.value); setPendingLessonValue(""); setUseWholeCourseTag(false); }}
                     className={`${inputClass} w-auto min-w-[180px] flex-1`}
                   >
                     <option value="">— เลือกคอร์ส —</option>
-                    {courseGroups.map((group) => (
+                    {visibleCourseGroups.map((group) => (
                       <option key={group.courseId} value={group.courseId}>{group.courseTitle}</option>
                     ))}
                   </select>
                   <select
                     value={pendingLessonValue}
                     onChange={(e) => setPendingLessonValue(e.target.value)}
-                    disabled={!selectedCourseId}
+                    disabled={!selectedCourseId || useWholeCourseTag}
                     className={`${inputClass} w-auto min-w-[160px] flex-1 disabled:opacity-50`}
                   >
-                    <option value="">{!selectedCourseId ? "เลือกคอร์สก่อน" : "เลือกขอบเขต..."}</option>
-                    {selectedCourseId && (
-                      <option value={WHOLE_COURSE_VALUE}>— ทั้งคอร์ส (ไม่ระบุบทเรียน) —</option>
-                    )}
+                    <option value="">{!selectedCourseId ? "เลือกคอร์สก่อน" : "เลือกบทเรียน..."}</option>
                     {availableLessonsForSelectedCourse.map((lesson) => (
                       <option key={lesson.id} value={lesson.id}>{lesson.title}</option>
                     ))}
@@ -384,7 +404,7 @@ const courseGroups = Object.values(lessonsByCourse)
                   <button
                     type="button"
                     onClick={addPendingSelection}
-                    disabled={!pendingLessonValue}
+                    disabled={!selectedCourseId || (!useWholeCourseTag && !pendingLessonValue)}
                     className="shrink-0 rounded-lg bg-[#0F1B3D] px-4 py-2.5 text-[12.5px] font-bold text-white disabled:opacity-40"
                   >
                     + เพิ่ม
@@ -392,7 +412,7 @@ const courseGroups = Object.values(lessonsByCourse)
                   {selectedCourseId && (
                     <button
                       type="button"
-                      onClick={() => { setSelectedCourseId(""); setPendingLessonValue(""); }}
+                      onClick={() => { setSelectedCourseId(""); setPendingLessonValue(""); setUseWholeCourseTag(false); }}
                       className="shrink-0 text-[12px] font-bold text-[#0F1B3D]/40 hover:text-[#0F1B3D]"
                     >
                       ล้างค่า
@@ -400,18 +420,49 @@ const courseGroups = Object.values(lessonsByCourse)
                   )}
                 </div>
 
+                {selectedCourseId && (
+                  <label className="mt-2.5 flex items-start gap-2 text-[12.5px] leading-5 text-[#0F1B3D]/70">
+                    <input
+                      type="checkbox"
+                      checked={useWholeCourseTag}
+                      onChange={(e) => { setUseWholeCourseTag(e.target.checked); setPendingLessonValue(""); }}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      ใช้กับ<strong>ข้อสอบปลายภาคแบบรวมทั้งคอร์สเท่านั้น</strong> (ไม่ระบุบทเรียน) —
+                      คำถามนี้จะ<strong>ไม่ถูกสุ่มใช้กับ Pop-up Quiz</strong> และไม่ถูกใช้ในการจัดชุดสอบปลายภาคแบบระบุสัดส่วนรายบท
+                    </span>
+                  </label>
+                )}
+
+                {/* ===== เพิ่มใหม่: แจ้งสถานะการกรองคอร์สตามหมวดเนื้อหาของคำถาม ===== */}
+                {isFilteredByCategory && (
+                  <p className="mt-2.5 text-[12px] leading-5 text-[#0F1B3D]/40">
+                    กำลังแสดงเฉพาะคอร์สหมวด &quot;{finalCategoryForCompare}&quot; ({categoryMatchedCourseGroups.length} คอร์ส) — เปลี่ยนหมวดเนื้อหาด้านบนถ้าต้องการเลือกคอร์สหมวดอื่น
+                  </p>
+                )}
+                {noCourseInThisCategory && (
+                  <p className="mt-2.5 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12px] leading-5 text-amber-800">
+                    ⚠ ไม่มีคอร์สที่อยู่หมวด &quot;{finalCategoryForCompare}&quot; เลย ระบบเลยแสดงคอร์สทั้งหมดแทนชั่วคราว — เลือกได้ตามปกติ แต่ตรวจสอบว่าตั้งใจผูกข้ามหมวดจริงไหม
+                  </p>
+                )}
+
                 {topicTags.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {topicTags.map((tag) => {
                       const courseTitle = courseTitleById.get(tag.courseId) ?? "คอร์สที่ไม่พบ";
                       const lessonTitle = tag.lessonId ? lessonById.get(tag.lessonId)?.title : null;
+                      const tagCourseCategory = courseCategoryById.get(tag.courseId) ?? null;
+                      const tagMismatch = !!tagCourseCategory && !!finalCategoryForCompare && tagCourseCategory !== finalCategoryForCompare;
                       return (
                         <button
                           key={tagKey(tag)}
                           type="button"
                           onClick={() => removeTag(tag)}
-                          className="flex items-center gap-1.5 rounded-full bg-[#0F1B3D] px-3.5 py-1.5 text-[12.5px] font-bold text-white"
+                          title={tagMismatch ? `หมวดคอร์สไม่ตรงกับคำถาม (คอร์สอยู่หมวด "${tagCourseCategory}")` : undefined}
+                          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-bold text-white ${tagMismatch ? "bg-amber-500" : "bg-[#0F1B3D]"}`}
                         >
+                          {tagMismatch && <span>⚠</span>}
                           <span className="text-white/60">{courseTitle} ·</span>{" "}
                           {tag.lessonId ? (lessonTitle ?? "บทเรียนที่ไม่พบ") : "ทั้งคอร์ส"}
                           <span className="text-white/60">✕</span>
@@ -425,20 +476,9 @@ const courseGroups = Object.values(lessonsByCourse)
 
            <p className="mt-3 rounded-xl bg-blue-50 px-3.5 py-2.5 text-[12px] leading-5 text-blue-800">
             💡 คำแนะนำการเลือก :<br />
-            • <strong>เลือกบทเรียน</strong> — เหมาะสำหรับข้อสอบที่เจาะจงเนื้อหาของบทนั้นๆ (นำไปใช้ทำ Quiz ระหว่างเรียน และจัดชุดสอบปลายภาคแบบระบุสัดส่วนรายบทได้)<br />
-            • <strong>เลือกทั้งคอร์ส</strong> — ใช้ได้กับการจัดสอบปลายภาคแบบระบุคอร์สโดยไม่เจาะจงบท
+            • <strong>เลือกบทเรียน</strong> — เหมาะสำหรับข้อสอบที่เจาะจงเนื้อหาของบทนั้นๆ (นำไปใช้ทำ Pop-up Quiz ระหว่างเรียน และจัดชุดสอบปลายภาคแบบระบุสัดส่วนรายบทได้)<br />
+            • <strong>ติ๊ก &quot;ทั้งคอร์สเท่านั้น&quot;</strong> — ใช้ได้เฉพาะข้อสอบปลายภาคแบบรวมทั้งคอร์สโดยไม่เจาะจงบท จะไม่ถูกสุ่มไปใช้ใน Pop-up Quiz
           </p>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5 sm:p-6">
-        <h2 className="mb-4 text-[14.5px] font-bold text-[#0F1B3D]">สิทธิ์การเข้าถึง</h2>
-        <div className="flex gap-2">
-          {([["private", " ส่วนตัว"], ["department", " หมวดวิชา"], ["public", " สาธารณะ"]] as [PrivacyScope, string][]).map(([value, label]) => (
-            <button key={value} type="button" onClick={() => setPrivacyScope(value)} className={`rounded-full px-4 py-2 text-[13px] font-bold ${privacyScope === value ? "bg-[#0F1B3D] text-white" : "bg-white border border-[#0F1B3D]/10 text-[#0F1B3D]/60"}`}>
-              {label}
-            </button>
-          ))}
         </div>
       </section>
 

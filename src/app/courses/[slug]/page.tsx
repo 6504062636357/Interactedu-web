@@ -5,6 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import CourseTabs from "@/components/CourseTabs";
 import AppBrand from "@/components/AppBrand";
 import CourseReviews, { type CourseReviewItem } from "@/components/courses/CourseReviews";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
 interface Course {
   id: string;
@@ -55,11 +56,23 @@ function getCategoryColor(category: string | null): string {
   return categoryColors[category] ?? "bg-[#0F1B3D]/10 text-[#0F1B3D]";
 }
 
-function formatDuration(totalSeconds: number): string {
-  if (totalSeconds <= 0) return "< 1 ชั่วโมง";
+// [แก้บั๊ก: หน้านี้เคยปัดทุกค่าต่ำกว่า 1 ชม. เป็น "< 1 ชั่วโมง" หมด] ตอนนี้คอลัมน์
+// lessons.video_duration_seconds เริ่มมีค่าจริงแล้ว (ดู saveLessonDraft/updateLessonDraft) แต่บทเรียน
+// ส่วนใหญ่ตอนนี้ยาวแค่หลักนาที/วินาที (วิดีโอทดสอบ) ทำให้โดนปัดจนดูเหมือนยังไม่ได้แก้ — เปลี่ยนมาใช้
+// สูตรเดียวกับ app/page.tsx และ CoursesExplorer.tsx (แสดงวินาที/นาที/ชั่วโมงตามจริง) ให้ตรงกันทั้งเว็บ
+function formatDuration(seconds: number): string {
+  const totalSeconds = Math.round(seconds);
   const hours = Math.floor(totalSeconds / 3600);
-  if (hours <= 0) return "< 1 ชั่วโมง";
-  return `${hours} ชั่วโมง`;
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} ชม. ${minutes} นาที` : `${hours} ชั่วโมง`;
+  }
+  if (minutes > 0) {
+    return secs > 0 ? `${minutes} นาที ${secs} วินาที` : `${minutes} นาที`;
+  }
+  return `${secs} วินาที`;
 }
 
 function formatPrice(price: number): string {
@@ -229,23 +242,12 @@ export default async function CourseDetailPage({
         <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10">
           <div className="grid lg:grid-cols-[1.4fr_1fr] gap-8 bg-white rounded-[28px] p-4 sm:p-5 shadow-[0_25px_60px_-25px_rgba(15,27,61,0.4)]">
             <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#0F1B3D] to-[#182852] aspect-[16/9] lg:aspect-auto">
-              {typedCourse.cover_image_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={typedCourse.cover_image_url}
-                  alt={typedCourse.title}
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center">
-                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="5" width="18" height="14" rx="2" stroke="white" strokeWidth="1.5" />
-                      <path d="M8 9H16M8 13H13" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                </div>
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={typedCourse.cover_image_url ?? DEFAULT_COURSE_COVER_URL}
+                alt={typedCourse.title}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
             </div>
 
             <div className="flex flex-col justify-center py-2">

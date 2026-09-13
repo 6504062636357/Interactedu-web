@@ -40,16 +40,28 @@ interface BankQuestionOption {
   choices: { text: string; isCorrect: boolean }[];
 }
 
-function createEmptyQuestion(timestampSeconds: number | null): QuestionState {
+function createEmptyQuestion(
+  timestampSeconds: number | null,
+  interactionType: "multiple_choice" | "true_false" = "multiple_choice"
+): QuestionState {
   return {
     key: crypto.randomUUID(),
     questionText: "",
     timestampSeconds,
     explanation: null,
-    choices: [
-      { text: "", isCorrect: true },
-      { text: "", isCorrect: false },
-    ],
+    interactionType,
+    // ★ เพิ่มใหม่: คำถามแบบ "ถูก-ผิด" ล็อกตัวเลือกไว้ตายตัวเป็น "ถูก"/"ผิด" 2 ตัวเลือกเสมอ
+    // (ผู้สอนแค่เลือกว่าอันไหนคือคำตอบที่ถูก) ต่างจาก multiple_choice ที่เริ่มด้วยช่องว่างให้พิมพ์เอง
+    choices:
+      interactionType === "true_false"
+        ? [
+            { text: "ถูก", isCorrect: true },
+            { text: "ผิด", isCorrect: false },
+          ]
+        : [
+            { text: "", isCorrect: true },
+            { text: "", isCorrect: false },
+          ],
   };
 }
 
@@ -113,6 +125,9 @@ export default function LessonDraftForm({
   const [bankLoading, setBankLoading] = useState(false);
   const [selectedBankQuestionId, setSelectedBankQuestionId] = useState<string | null>(null);
   const [randomDifficulty, setRandomDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  // ★ เพิ่มใหม่: ประเภทคำถามที่จะสร้างในแท็บ "สร้างคำถามใหม่" — เดิม hardcode เป็น multiple_choice
+  // เสมอ ทั้งที่ quiz_questions มีคอลัมน์ interaction_type รองรับ true_false อยู่แล้ว
+  const [customQuestionType, setCustomQuestionType] = useState<"multiple_choice" | "true_false">("multiple_choice");
 
   const [saving, setSaving] = useState<boolean>(false);
   const [savedDraftId, setSavedDraftId] = useState<string | null>(initialData?.draftId ?? null);
@@ -132,7 +147,7 @@ export default function LessonDraftForm({
     if (!videoPreviewUrl) return;
     return () => URL.revokeObjectURL(videoPreviewUrl);
   }, [videoPreviewUrl]);
-
+  
   const handleVideoChange = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -173,37 +188,50 @@ export default function LessonDraftForm({
     }
   };
 
+  // เรียกทุกครั้งที่มีการแก้ไขเนื้อหา เพื่อสลับกลับจากกล่อง "บันทึกแล้ว" มาเป็นปุ่มบันทึกปกติ
+  function markDirty(): void {
+    setSubmitted(false);
+  }
+
   // ---------- ตัวช่วยจัดการคำถามในวิดีโอ ----------
 
   function removeQuestion(setter: typeof setVideoQuizQuestions, key: string): void {
+    markDirty();
     setter((prev) => prev.filter((q) => q.key !== key));
   }
 
   function updateQuestionText(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
+    markDirty();
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, questionText: text } : q)));
   }
 
   function updateQuestionExplanation(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, explanation: text || null } : q)));
+    markDirty();
+    setter((prev) => prev.map((q) => (q.key === key ? { ...q, explanation: text || null } : q)));
   }
 
   function updateQuestionTimestamp(setter: typeof setVideoQuizQuestions, key: string, seconds: number): void {
+    markDirty();
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, timestampSeconds: seconds } : q)));
   }
 
   function addChoice(setter: typeof setVideoQuizQuestions, key: string): void {
+    markDirty();
     setter((prev) =>
       prev.map((q) => (q.key === key ? { ...q, choices: [...q.choices, { text: "", isCorrect: false }] } : q))
     );
   }
 
   function removeChoice(setter: typeof setVideoQuizQuestions, key: string, choiceIndex: number): void {
+    markDirty();
     setter((prev) =>
       prev.map((q) => (q.key === key ? { ...q, choices: q.choices.filter((_, i) => i !== choiceIndex) } : q))
     );
   }
 
   function updateChoiceText(setter: typeof setVideoQuizQuestions, key: string, choiceIndex: number, text: string): void {
+    markDirty();
     setter((prev) =>
       prev.map((q) =>
         q.key === key
@@ -214,6 +242,7 @@ export default function LessonDraftForm({
   }
 
   function setCorrectChoice(setter: typeof setVideoQuizQuestions, key: string, choiceIndex: number): void {
+    markDirty();
     setter((prev) =>
       prev.map((q) =>
         q.key === key
@@ -233,8 +262,17 @@ export default function LessonDraftForm({
     const seconds = videoRef.current ? Math.floor(videoRef.current.currentTime) : 0;
     setPinModalTimestamp(seconds);
     setPinModalMode("custom");
+    setCustomQuestionType("multiple_choice");
     setSelectedBankQuestionId(null);
     setBankOptions([]);
+    // ★ แก้บั๊ก: เดิมเคลียร์แค่ bankOptions (รายการ "เลือกจากคลังข้อสอบ") ตอนเปิด modal ใหม่ทุกครั้ง
+    // แต่ไม่เคยเคลียร์ bankCounts (จำนวนคำถาม "สุ่มจากคลังข้อสอบ" ต่อระดับความยาก) เลย — เพราะแท็บ
+    // bank_random เช็ค `bankCounts === null` ก่อนค่อยยิง loadBankCountsForLesson() ใหม่ (กันยิงซ้ำ)
+    // ผลคือถ้าครูเปิด modal นี้ครั้งแรกตอนคลังยังไม่มีคำถอง (หรือมีน้อย) แล้วปิดไป จากนั้นไปเพิ่ม/แก้
+    // คำถามในคลังให้ครบ/พอแล้วกลับมาเปิด modal ปักหมุดอีกครั้งในหน้าเดิม (ไม่ได้รีเฟรชหน้า) ตัวเลข
+    // ที่โชว์เตือน "คลังไม่พอ" จะเป็นค่าเก่าที่ค้างมาจากตอนแรกเสมอ ทั้งที่จริงคลังพอแล้ว ต้องเคลียร์
+    // bankCounts ด้วยทุกครั้งที่เปิด modal เพื่อบังคับให้ดึงจำนวนล่าสุดจริงจาก DB ใหม่เสมอ
+    setBankCounts(null);
     setPinModalOpen(true);
   }
 
@@ -269,8 +307,9 @@ export default function LessonDraftForm({
 }
 
   function confirmPinModal(): void {
+    markDirty();
     if (pinModalMode === "custom") {
-      setVideoQuizQuestions((prev) => [...prev, createEmptyQuestion(pinModalTimestamp)]);
+      setVideoQuizQuestions((prev) => [...prev, createEmptyQuestion(pinModalTimestamp, customQuestionType)]);
     } else if (pinModalMode === "bank_manual") {
       const picked = bankOptions.find((q) => q.id === selectedBankQuestionId);
       if (!picked) return;
@@ -392,6 +431,11 @@ export default function LessonDraftForm({
       confidence: confidence ?? null,
     }));
 
+    // ความยาววิดีโอจริงที่ browser จับได้จาก <video> ตอนโหลด metadata (videoDuration)
+    // ส่งไปเก็บที่ server ด้วย เพราะก่อนหน้านี้ server คำนวณความยาวจาก video segment
+    // เท่านั้น ซึ่งบทเรียนส่วนใหญ่ไม่ได้แบ่ง segment เลยได้ 0 เสมอ
+    const videoDurationSeconds = videoDuration > 0 ? Math.round(videoDuration) : 0;
+
     return savedDraftId && savedLessonId
       ? await updateLessonDraft({
           courseId,
@@ -400,6 +444,7 @@ export default function LessonDraftForm({
           title,
           videoUrl,
           contentHtml,
+          videoDurationSeconds,
           videoSegments: allVideoSegments,
           questions: allQuestions,
           randomMarkers: allRandomMarkers,
@@ -410,6 +455,7 @@ export default function LessonDraftForm({
           title,
           videoUrl,
           contentHtml,
+          videoDurationSeconds,
           videoSegments: allVideoSegments,
           questions: allQuestions,
           randomMarkers: allRandomMarkers,
@@ -531,6 +577,7 @@ export default function LessonDraftForm({
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
+                 markDirty();
                 // พิมพ์แก้ไขแล้ว เคลียร์ error เดิมทิ้ง (เดิม error ค้างอยู่จนกว่าจะกด save ใหม่)
                 if (error === "กรุณาใส่ชื่อบทเรียน") setError(null);
               }}
@@ -591,7 +638,7 @@ export default function LessonDraftForm({
             <label className="block text-[13px] font-bold text-[#0F1B3D]/70 mb-2">เนื้อหา / เอกสารประกอบ</label>
             <textarea
               value={contentHtml}
-              onChange={(e) => setContentHtml(e.target.value)}
+              onChange={(e) => { setContentHtml(e.target.value); markDirty(); }}
               rows={8}
               placeholder="พิมพ์เนื้อหาบทเรียน สรุปประเด็นสำคัญ หรือวางลิงก์เอกสารประกอบ"
               className="w-full px-4 py-3 text-[14px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all resize-y"
@@ -633,7 +680,7 @@ export default function LessonDraftForm({
               analysisVideoUrl={videoUrl}
               sourceFile={videoFile}
               segments={videoSegments}
-              onSegmentsChange={setVideoSegments}
+              onSegmentsChange={(segments) => { setVideoSegments(segments); markDirty(); }}
             />
           )}
         </div>
@@ -812,44 +859,72 @@ export default function LessonDraftForm({
                     className="w-full mb-3 px-4 py-2.5 text-[14px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-xl outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
                   />
 
-                  <div className="space-y-2.5 mb-3">
-                    {q.choices.map((choice, cIndex) => (
-                      <div key={cIndex} className="flex items-center gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => setCorrectChoice(setVideoQuizQuestions, q.key, cIndex)}
-                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                            choice.isCorrect ? "border-[#00B37E]" : "border-[#0F1B3D]/20"
-                          }`}
-                          title="ตั้งเป็นคำตอบที่ถูก"
-                        >
-                          {choice.isCorrect && <span className="w-2.5 h-2.5 rounded-full bg-[#00B37E]" />}
-                        </button>
-                        <input
-                          value={choice.text}
-                          onChange={(e) => updateChoiceText(setVideoQuizQuestions, q.key, cIndex, e.target.value)}
-                          placeholder={`ตัวเลือกที่ ${cIndex + 1}`}
-                          className="flex-1 px-3.5 py-2 text-[13.5px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-lg outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
-                        />
-                        {q.choices.length > 2 && (
+                  {/* ★ เพิ่มใหม่: คำถามแบบ "ถูก-ผิด" ล็อกข้อความตัวเลือกไว้ตายตัว ผู้สอนแค่กดเลือก
+                      ว่าอันไหนคือคำตอบที่ถูก แก้ข้อความ/เพิ่ม/ลบตัวเลือกไม่ได้ (ต่างจาก multiple_choice
+                      เดิมที่พิมพ์ตัวเลือกเองได้อิสระและเพิ่ม/ลบได้) */}
+                  {(q.interactionType ?? "multiple_choice") === "true_false" ? (
+                    <div className="space-y-2.5 mb-3">
+                      <span className="inline-flex items-center rounded-full bg-[#7C5CFF]/10 px-2.5 py-1 text-[10.5px] font-bold text-[#5D45C7]">
+                        ถูก-ผิด
+                      </span>
+                      {q.choices.map((choice, cIndex) => (
+                        <div key={cIndex} className="flex items-center gap-2.5">
                           <button
                             type="button"
-                            onClick={() => removeChoice(setVideoQuizQuestions, q.key, cIndex)}
-                            className="text-[12px] font-bold text-[#0F1B3D]/30 hover:text-[#EB4A2D] shrink-0"
+                            onClick={() => setCorrectChoice(setVideoQuizQuestions, q.key, cIndex)}
+                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                              choice.isCorrect ? "border-[#00B37E]" : "border-[#0F1B3D]/20"
+                            }`}
+                            title="ตั้งเป็นคำตอบที่ถูก"
                           >
-                            ✕
+                            {choice.isCorrect && <span className="w-2.5 h-2.5 rounded-full bg-[#00B37E]" />}
                           </button>
-                        )}
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => addChoice(setVideoQuizQuestions, q.key)}
-                      className="text-[12.5px] font-bold text-[#7C5CFF] hover:underline pl-7"
-                    >
-                      + เพิ่มตัวเลือก
-                    </button>
-                  </div>
+                          <span className="flex-1 px-3.5 py-2 text-[13.5px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-lg">
+                            {choice.text}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 mb-3">
+                      {q.choices.map((choice, cIndex) => (
+                        <div key={cIndex} className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setCorrectChoice(setVideoQuizQuestions, q.key, cIndex)}
+                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                              choice.isCorrect ? "border-[#00B37E]" : "border-[#0F1B3D]/20"
+                            }`}
+                            title="ตั้งเป็นคำตอบที่ถูก"
+                          >
+                            {choice.isCorrect && <span className="w-2.5 h-2.5 rounded-full bg-[#00B37E]" />}
+                          </button>
+                          <input
+                            value={choice.text}
+                            onChange={(e) => updateChoiceText(setVideoQuizQuestions, q.key, cIndex, e.target.value)}
+                            placeholder={`ตัวเลือกที่ ${cIndex + 1}`}
+                            className="flex-1 px-3.5 py-2 text-[13.5px] text-[#0F1B3D] bg-[#F7F8FA] border border-[#0F1B3D]/[0.08] rounded-lg outline-none focus:border-[#0F1B3D]/30 focus:bg-white transition-all"
+                          />
+                          {q.choices.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => removeChoice(setVideoQuizQuestions, q.key, cIndex)}
+                              className="text-[12px] font-bold text-[#0F1B3D]/30 hover:text-[#EB4A2D] shrink-0"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => addChoice(setVideoQuizQuestions, q.key)}
+                        className="text-[12.5px] font-bold text-[#7C5CFF] hover:underline pl-7"
+                      >
+                        + เพิ่มตัวเลือก
+                      </button>
+                    </div>
+                  )}
 
                   <textarea
                     value={q.explanation ?? ""}
@@ -881,7 +956,7 @@ export default function LessonDraftForm({
                   <div className="flex-1" />
                   <button
                     type="button"
-                    onClick={() => setRandomMarkers((prev) => prev.filter((item) => item.key !== m.key))}
+                    onClick={() => { setRandomMarkers((prev) => prev.filter((item) => item.key !== m.key)); markDirty(); }}
                     className="text-[12.5px] font-bold text-[#0F1B3D]/40 hover:text-[#EB4A2D]"
                   >
                     ลบ
@@ -905,13 +980,18 @@ export default function LessonDraftForm({
         {submitted ? (
           <div className="flex flex-col gap-4 rounded-2xl border border-[#00B37E]/20 bg-[#00B37E]/[0.08] p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
+              {/* [แก้คำ] เดิมบอกว่า "ส่งให้แอดมินตรวจสอบเรียบร้อยแล้ว รอการอนุมัติ" ทำให้เข้าใจผิดว่า
+                  ถึงแอดมินแล้วจริง ๆ ทั้งที่ submitDraftForReview ส่งแค่บทเรียนนี้บทเดียว — ถ้าคอร์ส
+                  ยังเป็นฉบับร่าง (ไม่เคย publish มาก่อน) จะยังไม่ถึงแอดมินจนกว่าจะกด "ส่งคอร์สเข้าตรวจ"
+                  ที่หน้าคอร์สด้วย (เว้นแต่คอร์ส publish แล้วและกำลังแก้บทที่ publish ไปแล้ว กรณีนั้น
+                  ระบบจะดึงคอร์สกลับเข้าคิว pending ให้อัตโนมัติ) */}
               <p className="text-[13.5px] font-semibold text-[#00885F]">
-                {isAdmin ? "เผยแพร่บทเรียนเรียบร้อยแล้ว" : "ส่งให้แอดมินตรวจสอบเรียบร้อยแล้ว รอการอนุมัติ"}
+                {isAdmin ? "เผยแพร่บทเรียนเรียบร้อยแล้ว" : "บันทึกบทเรียนนี้เรียบร้อยแล้ว"}
               </p>
               <p className="mt-1 text-[12px] text-[#00885F]/70">
                 {isAdmin
                   ? "หากกลับมาแก้ไข ต้องบันทึกและเผยแพร่ใหม่อีกครั้ง"
-                  : "หากกลับมาแก้ไข ต้องบันทึกและส่งตรวจใหม่อีกครั้ง"}
+                  : "ทำครบทุกบทแล้วอย่าลืมกด \"ส่งคอร์สเข้าตรวจ\" ที่หน้าหลักของคอร์ส คอร์สถึงจะไปถึงแอดมิน (หากกลับมาแก้ไขบทนี้ ต้องบันทึกและส่งตรวจใหม่อีกครั้ง)"}
               </p>
             </div>
             <button
@@ -928,52 +1008,57 @@ export default function LessonDraftForm({
         ) : (
           <div className="rounded-2xl bg-white border border-[#0F1B3D]/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
+              {/* [แก้คำ] ย่อให้สั้น กระชับที่สุดตามที่ครูขอ — ข้อความเดิมยาวเกินไป และแบ่งเคส
+                  savedDraftId/isAdmin จนซับซ้อนเกินจำเป็นสำหรับฝั่งครู (non-admin) รวบเหลือ
+                  หัวข้อ+คำอธิบายคงที่อันเดียว ยังคงบอกให้ไปกด "ส่งคอร์สเข้าตรวจ" ที่หน้าคอร์สด้วย
+                  เพราะปุ่มนี้ส่งแค่บทเรียนนี้บทเดียว (ดูรายละเอียดกลไกที่ submitDraftForReview) */}
               <p className="text-[13.5px] font-semibold text-[#0F1B3D]">
-                {savedDraftId
-                  ? "บันทึกฉบับร่างแล้ว คุณยังแก้ไขและบันทึกซ้ำได้"
-                  : isAdmin
-                    ? "บันทึกฉบับร่างของบทเรียนนี้"
-                    : "บันทึกฉบับร่างก่อนส่งให้แอดมินตรวจสอบ"}
+                {isAdmin
+                  ? savedDraftId
+                    ? "บันทึกฉบับร่างแล้ว คุณยังแก้ไขและบันทึกซ้ำได้"
+                    : "บันทึกฉบับร่างของบทเรียนนี้"
+                  : "จัดการบทเรียน"}
               </p>
               <p className="mt-1 text-[12px] text-[#0F1B3D]/45">
                 {isAdmin
                   ? "เมื่อกดเผยแพร่ ระบบจะบันทึกเนื้อหาและควิซในวิดีโอล่าสุดให้อัตโนมัติ"
-                  : "เมื่อกดส่งตรวจ ระบบจะบันทึกเนื้อหาและควิซในวิดีโอล่าสุดให้อัตโนมัติ"}
+                  : "บันทึกร่างไว้แก้ต่อได้ เมื่อครบทุกบทให้ไปกดส่งตรวจที่หน้าหลัก"}
               </p>
               {submitError && <p className="mt-2 text-[13px] font-semibold text-[#EB4A2D]">{submitError}</p>}
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {/* [แก้ UI] เดิมปุ่มขาวใช้ข้อความยาว ("บันทึกการแก้ไข"/"บันทึกฉบับร่าง") ตกบรรทัดเป็น
+                  2 บรรทัดในบางความกว้างหน้าจอ ขณะที่ปุ่มส้มอยู่บรรทัดเดียว ทำให้สองปุ่มดูไม่สมมาตร
+                  กัน — ย่อคำให้สั้นลงเหลือคำเดียวทั้งคู่ (บันทึก / ส่งตรวจ) และเติม whitespace-nowrap
+                  กันตกบรรทัดอีก ความหมายเต็มยังอยู่ใน subtext ด้านบนอยู่แล้ว ไม่ต้องพึ่งปุ่มสื่อสารเอง
+                  ทั้งหมด */}
               <button
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={saving || submitting || uploadingVideo}
                 title={uploadingVideo ? "กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน" : undefined}
-                className="inline-flex items-center justify-center rounded-full border border-[#0F1B3D]/15 px-5 py-3 text-[13.5px] font-bold text-[#0F1B3D] transition-colors hover:bg-[#0F1B3D]/[0.04] disabled:opacity-60"
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-[#0F1B3D]/15 px-6 py-3 text-[13.5px] font-bold text-[#0F1B3D] transition-colors hover:bg-[#0F1B3D]/[0.04] disabled:opacity-60"
               >
                 {uploadingVideo
-                  ? `รออัปโหลดวิดีโอ ${uploadProgress ?? 0}%`
+                  ? `รออัปโหลด ${uploadProgress ?? 0}%`
                   : saving
                     ? "กำลังบันทึก..."
-                    : savedDraftId
-                      ? "บันทึกการแก้ไข"
-                      : "บันทึกฉบับร่าง"}
+                    : "บันทึกร่าง"}
               </button>
               <button
                 type="button"
                 onClick={handleSubmitForReview}
                 disabled={saving || submitting || uploadingVideo}
                 title={uploadingVideo ? "กรุณารอให้อัปโหลดวิดีโอเสร็จก่อน" : undefined}
-                className="shrink-0 rounded-full bg-[#FF5A3C] px-6 py-3 text-[14px] font-bold text-white transition-colors hover:bg-[#EB4A2D] disabled:opacity-60"
+                className="shrink-0 whitespace-nowrap rounded-full bg-[#FF5A3C] px-6 py-3 text-[14px] font-bold text-white transition-colors hover:bg-[#EB4A2D] disabled:opacity-60"
               >
                 {uploadingVideo
-                  ? `รออัปโหลดวิดีโอ ${uploadProgress ?? 0}%`
+                  ? `รออัปโหลด ${uploadProgress ?? 0}%`
                   : submitting
-                  ? isAdmin
-                    ? "กำลังบันทึกและเผยแพร่..."
-                    : "กำลังบันทึกและส่ง..."
+                  ? "กำลังบันทึก..."
                   : isAdmin
-                    ? "บันทึกและเผยแพร่"
-                    : "บันทึกและส่งตรวจ"}
+                    ? "เผยแพร่"
+                    : "บันทึกบทเรียน"}
               </button>
             </div>
           </div>
@@ -1028,10 +1113,36 @@ export default function LessonDraftForm({
 
       {/* --- แท็บ: สร้างใหม่ --- */}
       {pinModalMode === "custom" && (
-        <div className="mb-5 rounded-xl border border-dashed border-[#0F1B3D]/15 bg-[#F7F8FA] px-4 py-5 text-center">
-          <p className="text-[13px] text-[#0F1B3D]/60">
-            กดยืนยันเพื่อสร้างคำถามใหม่ที่เวลานี้ แล้วไปกรอกคำถาม/ตัวเลือกได้ในขั้นถัดไป
-          </p>
+        <div className="mb-5">
+          <label className="mb-1.5 block text-[12.5px] font-semibold text-[#0F1B3D]/70">ประเภทคำถาม</label>
+          {/* ★ เพิ่มใหม่: ให้เลือกประเภทคำถามได้ตั้งแต่ตอนสร้าง (เดิม hardcode เป็นปรนัยเสมอ) */}
+          <div className="mb-3 flex rounded-xl bg-[#0F1B3D]/[0.05] p-1">
+            {(
+              [
+                ["multiple_choice", "ปรนัย (เลือกตอบ)"],
+                ["true_false", "ถูก-ผิด"],
+              ] as [typeof customQuestionType, string][]
+            ).map(([type, label]) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setCustomQuestionType(type)}
+                className={`flex-1 rounded-lg px-3 py-2 text-[12.5px] font-bold transition-colors ${
+                  customQuestionType === type
+                    ? "bg-white text-[#0F1B3D] shadow-sm"
+                    : "text-[#0F1B3D]/45 hover:text-[#0F1B3D]/70"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="rounded-xl border border-dashed border-[#0F1B3D]/15 bg-[#F7F8FA] px-4 py-5 text-center">
+            <p className="text-[13px] text-[#0F1B3D]/60">
+              กดยืนยันเพื่อสร้างคำถาม{customQuestionType === "true_false" ? "แบบถูก-ผิด" : "ปรนัย"}ที่เวลานี้
+              แล้วไปกรอกคำถาม{customQuestionType === "true_false" ? "" : "/ตัวเลือก"}ได้ในขั้นถัดไป
+            </p>
+          </div>
         </div>
       )}
 
@@ -1131,9 +1242,8 @@ export default function LessonDraftForm({
         if (missing > 0) {
           return (
             <p className="mt-2 rounded-lg bg-[#FF5A3C]/[0.08] px-3 py-2.5 text-[12px] font-semibold text-[#EB4A2D]">
-              ⚠ คลังข้อสอบระดับ{label}ของบทนี้ยังไม่พอสำหรับจุดที่ปักหมุดไว้ — ตอนนี้มีคำถามพร้อมใช้ {available} ข้อ
-              แต่บทนี้ปักหมุดสุ่มคำถามระดับ{label}ไว้ทั้งหมด {needed} จุดแล้ว (นับรวมจุดที่กำลังเพิ่มนี้ด้วย)
-              ขาดอีก {missing} ข้อ กรุณาเพิ่มคำถามในคลังข้อสอบระดับ{label}ให้ครบก่อนส่งตรวจ
+              ⚠ คลังข้อสอบระดับ{label}ไม่พอ — มี {available} ข้อ แต่ปักหมุดไว้ {needed} จุด
+              ขาดอีก {missing} ข้อ กรุณาเพิ่มก่อนส่งตรวจ
             </p>
           );
         }
@@ -1163,7 +1273,10 @@ export default function LessonDraftForm({
         <button
           type="button"
           onClick={confirmPinModal}
-          disabled={pinModalMode === "bank_manual" && !selectedBankQuestionId}
+          disabled={
+            (pinModalMode === "bank_manual" && !selectedBankQuestionId) ||
+            (pinModalMode === "bank_random" && !savedLessonId)
+          }
           className="rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"
         >
           บันทึกหมุดแบบทดสอบ

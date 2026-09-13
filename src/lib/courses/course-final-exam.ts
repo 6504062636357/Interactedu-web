@@ -138,9 +138,11 @@ async function loadCourseExamData(
   //       .order("order_index", { ascending: true })
   //   : { data: [], error: null };
   // if (questionsError) throw new Error(questionsError.message);
+  // build_mode/total_questions/preset_type ยังอยู่ในคอลัมน์เดิม (ยุบโหมด preset ออกแล้ว ไม่ต้อง
+  // migrate schema) แต่ตอนสุ่มจริงใช้แค่ custom_constraints เป็นแหล่งความจริงเดียวพอ
   const { data: examConfig, error: examConfigError } = await supabase
   .from("course_exam_configs")
-  .select("build_mode, total_questions, preset_type, custom_constraints")
+  .select("custom_constraints")
   .eq("course_id", courseId)
   .maybeSingle();
 if (examConfigError) throw new Error(examConfigError.message);
@@ -155,10 +157,7 @@ if (examConfig) {
     questions = await loadSampledFinalExamQuestions(supabase, {
       courseId,
       seed: enrollment.id,
-      buildMode: examConfig.build_mode,
-      totalQuestions: examConfig.total_questions,
-      presetType: examConfig.preset_type,
-      customConstraints: examConfig.custom_constraints,
+      customConstraints: examConfig.custom_constraints ?? [],
     });
   } catch (sampleError) {
     if (sampleError instanceof InsufficientQuestionBankError) {

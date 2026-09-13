@@ -7,6 +7,7 @@ import CertificateSettingsForm from "@/components/certificates/CertificateSettin
 import SubmitCourseButton from "@/components/teacher/SubmitCourseButton";
 import DeleteLessonButton from "@/components/teacher/DeleteLessonButton";
 import { checkCourseReadiness } from "../actions";
+import { CATEGORY_COLORS, type Category } from "@/lib/constants/categories";
 
 interface PageProps {
   params: Promise<{ courseId: string }>;
@@ -70,7 +71,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
   const [courseRes, certificateRes] = await Promise.all([
     supabase
       .from("courses")
-      .select("id, title, status, created_by")
+      .select("id, title, status, created_by, category")
       .eq("id", courseId)
       .maybeSingle(),
     supabase
@@ -83,6 +84,14 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
   const course = courseRes.data;
   const certificateSettings = certificateRes.data as CertificateSettings | null;
 
+  // [แก้บั๊ก: หน้าคอร์ส 404 แบบไม่มีร่องรอย] เดิมถ้า courseRes มี error จริง (เช่น query ล้มเหลว
+  // ชั่วคราว, connection หลุด) .maybeSingle() จะคืน { data: null, error } — โค้ดเช็คแค่ !course
+  // เลยพา error ทุกแบบไปออกเป็น notFound() เหมือนกันหมด ทั้งที่ "คอร์สไม่มีอยู่จริง" กับ
+  // "ดึงคอร์สไม่สำเร็จชั่วคราว" ควรแยกกัน — log error ไว้ให้เห็นใน server console เพื่อ debug ได้
+  // ว่าเป็น query error จริง ไม่ใช่แค่ไม่มีคอร์สนี้ในระบบ
+  if (courseRes.error) {
+    console.error("[teacher/courses/:courseId] failed to load course:", courseRes.error.message, { courseId });
+  }
   if (!course) notFound();
   if (profile.role === "teacher" && course.created_by !== user.id) redirect("/dashboard/teacher");
 
@@ -131,9 +140,20 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
             ← กลับไปหน้ารวมคอร์ส
           </Link>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
-              {course.title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-[24px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
+                {course.title}
+              </h1>
+              {course.category && (
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                    CATEGORY_COLORS[course.category as Category] ?? "bg-[#0F1B3D]/5 text-[#0F1B3D]/60"
+                  }`}
+                >
+                  {course.category}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap items-start gap-2">
               <Link href={`/dashboard/teacher/courses/${course.id}/materials`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">เอกสารประกอบ</Link>
               <Link href={`/dashboard/teacher/courses/${course.id}/exam`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">

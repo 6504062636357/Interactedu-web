@@ -6,7 +6,11 @@ import ProfileDropdown from "@/components/ProfileDropdown";
 import CoursesExplorer, { type ExplorerCourse } from "@/components/CoursesExplorer";
 import AppBrand from "@/components/AppBrand";
 
-const navLinks: string[] = ["คอร์สทั้งหมด", "เกี่ยวกับเรา", "บทความ"];
+const navLinks: { label: string; href: string }[] = [
+  { label: "คอร์สทั้งหมด", href: "/courses" },
+  { label: "เส้นทางสายอาชีพ", href: "/#career-paths" },
+  { label: "คอร์สฟรี", href: "/courses?price=free" },
+];
 
 function Navbar({ displayName }: { displayName: string | null }): ReactElement {
   return (
@@ -17,21 +21,21 @@ function Navbar({ displayName }: { displayName: string | null }): ReactElement {
 
           <nav className="hidden md:flex items-center gap-2">
             {navLinks.map((link) =>
-              link === "คอร์สทั้งหมด" ? (
+              link.label === "คอร์สทั้งหมด" ? (
                 <Link
-                  key={link}
-                  href="/courses"
+                  key={link.label}
+                  href={link.href}
                   className="rounded-xl bg-[#0F1B3D] px-4 py-2 text-[13px] font-bold text-white shadow-sm"
                 >
-                  {link}
+                  {link.label}
                 </Link>
               ) : (
                 <Link
-                  key={link}
-                  href="#"
+                  key={link.label}
+                  href={link.href}
                   className="rounded-xl px-4 py-2 text-[13px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#0F1B3D]"
                 >
-                  {link}
+                  {link.label}
                 </Link>
               )
             )}
@@ -104,7 +108,14 @@ function Footer(): ReactElement {
   );
 }
 
-export default async function CoursesPage(): Promise<ReactElement> {
+export default async function CoursesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ price?: string }>;
+}): Promise<ReactElement> {
+  const { price } = await searchParams;
+  const initialFreeOnly = price === "free";
+
   const supabase = await createClient();
 
   const {
@@ -116,17 +127,33 @@ export default async function CoursesPage(): Promise<ReactElement> {
     : null;
 
   // ดึงคอร์สที่เผยแพร่แล้วทั้งหมด — กรอง/ค้นหาฝั่ง client ผ่าน CoursesExplorer
+  // [แก้บั๊ก: ความยาวคอร์สค้าง 0] เดิมอ่าน courses.total_duration_seconds ตรงๆ แต่คอลัมน์นี้ไม่เคย
+  // มีโค้ดจุดไหนอัปเดตเลย (ค้าง 0 ทุกคอร์ส) — ดึง video_duration_seconds ของแต่ละบทเรียนมาแทน
+  // แล้วรวมยอด/นับจำนวนบทเรียนสดๆ ด้านล่าง (บทเรียนเก่าที่ยังไม่เคย resave/approve หลังแก้จุดบันทึก
+  // ค่าจะนับเป็น 0 ไปก่อน ไม่ error แค่ยอดรวมคอร์สนั้นดูน้อยกว่าความจริงจนกว่าจะ resave/approve)
   const { data: courses, error } = await supabase
     .from("courses")
     .select(`
-      id, title, slug, category, price, cover_image_url, total_duration_seconds,
-      lessons(count)
+      id, title, slug, category, price, cover_image_url,
+      lessons(video_duration_seconds)
     `)
     .eq("status", "published")
     .order("created_at", { ascending: false });
 
   if (error) {
     console.error("Failed to fetch courses:", error.message);
+  }
+
+  // เช็คว่าคอร์สไหนที่ user คนนี้ลงทะเบียนอนุมัติแล้วบ้าง เอาไว้สลับปุ่ม "ลงทะเบียน" เป็น
+  // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
+  let enrolledCourseIds: string[] = [];
+  if (user) {
+    const { data: enrollmentRows } = await supabase
+      .from("enrollments")
+      .select("course_id")
+      .eq("student_id", user.id)
+      .eq("status", "approved");
+    enrolledCourseIds = (enrollmentRows ?? []).map((e) => e.course_id as string);
   }
 
   const explorerCourses: ExplorerCourse[] = (courses ?? []).map((course) => ({
@@ -136,15 +163,15 @@ export default async function CoursesPage(): Promise<ReactElement> {
     category: course.category,
     price: course.price,
     cover_image_url: course.cover_image_url,
-    total_duration_seconds: course.total_duration_seconds,
-    lesson_count: course.lessons[0]?.count ?? 0,
+    total_duration_seconds: course.lessons.reduce((sum, l) => sum + (l.video_duration_seconds ?? 0), 0),
+    lesson_count: course.lessons.length,
   }));
 
   return (
     <div className="min-h-screen w-full bg-white">
       <Navbar displayName={displayName} />
       <ExplorerHero />
-      <CoursesExplorer courses={explorerCourses} />
+      <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} initialFreeOnly={initialFreeOnly} />
       <Footer />
     </div>
   );

@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
 const supabase = createClient();
 
@@ -76,14 +77,12 @@ export default function FavoriteCoursesPage(): ReactElement {
             >
               <Link href={`/courses/${course.id}`}>
                 <div className="w-full h-32 bg-slate-100">
-                  {course.cover_image_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={course.cover_image_url}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={course.cover_image_url ?? DEFAULT_COURSE_COVER_URL}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="p-3">
                   <p className="text-[13.5px] font-semibold text-slate-900 line-clamp-2">

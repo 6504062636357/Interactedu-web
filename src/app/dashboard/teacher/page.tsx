@@ -14,6 +14,7 @@ interface CourseRow {
   id: string;
   title: string;
   price: number;
+  category: string | null;
   lessonCount: number;
   studentCount: number;
   latestStatus: LessonDraftStatus | null;
@@ -65,6 +66,7 @@ function CourseRowItem({ course }: { course: CourseRow }): ReactElement {
         </div>
         <p className="text-[12px] text-slate-400 mt-1">
           {course.lessonCount} บทเรียน · {course.studentCount} นักเรียน · ฿{course.price.toLocaleString()}
+          {course.category && <> · {course.category}</>}
         </p>
         {course.latestStatus === "rejected" && course.latestRejectionReason && (
           <p className="text-[12px] text-red-500 mt-1">เหตุผล: {course.latestRejectionReason}</p>
@@ -124,7 +126,7 @@ export default function TeacherDashboardPage(): ReactElement {
 
     const { data: courseRows, error: courseError } = await supabase
       .from("courses")
-      .select("id, title, price, status")
+      .select("id, title, price, status, category")
       .eq("created_by", user.id)
       .order("created_at", { ascending: false });
 
@@ -174,6 +176,7 @@ export default function TeacherDashboardPage(): ReactElement {
         id: course.id,
         title: course.title,
         price: course.price,
+        category: course.category,
         lessonCount: lessonsForCourse.length,
         studentCount: approvedEnrollments.filter((e) => e.course_id === course.id).length,
         latestStatus: latest?.status ?? null,

@@ -162,7 +162,7 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
       .order("order_index", { ascending: true }),
     supabase
       .from("course_exam_configs")
-      .select("build_mode, total_questions, preset_type, custom_constraints")
+      .select("custom_constraints")
       .eq("course_id", courseId)
       .maybeSingle(),
     supabase.from("lessons").select("id").eq("course_id", courseId),
@@ -251,10 +251,7 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
       await loadSampledFinalExamQuestions(supabase, {
         courseId,
         seed: `readiness-check-${courseId}`,
-        buildMode: examConfig.build_mode,
-        totalQuestions: examConfig.total_questions,
-        presetType: examConfig.preset_type,
-        customConstraints: examConfig.custom_constraints,
+        customConstraints: examConfig.custom_constraints ?? [],
       });
     } catch (err) {
       examIssue = err instanceof Error ? err.message : "คลังข้อสอบท้ายคอร์สไม่เพียงพอ";

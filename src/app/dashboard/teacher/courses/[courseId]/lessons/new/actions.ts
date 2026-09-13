@@ -16,6 +16,9 @@ export interface DraftQuestionInput {
   explanation: string | null;
   sourceType?: "custom" | "bank_manual"; // ไม่ระบุ = custom (ของเดิม)
   sourceQuestionId?: string | null; // ใช้เมื่อ sourceType = bank_manual
+  // ★ เพิ่มใหม่: ประเภทคำถาม — เดิม hardcode เป็น multiple_choice เสมอทั้งที่ quiz_questions
+  // มีคอลัมน์ interaction_type รองรับ true_false อยู่แล้ว ไม่ระบุ = multiple_choice (ของเดิม)
+  interactionType?: "multiple_choice" | "true_false";
 }
 
 export interface DraftRandomMarkerInput {
@@ -46,6 +49,7 @@ interface StoredDraftQuestion {
   explanation: string | null;
   source_type: "custom" | "bank_manual" | null;
   source_question_id: string | null;
+  interaction_type: "multiple_choice" | "true_false" | null;
   quiz_choices: StoredDraftChoice[];
 }
 
@@ -66,6 +70,7 @@ interface SaveLessonDraftInput {
   title: string;
   videoUrl: string | null;
   contentHtml: string;
+  videoDurationSeconds?: number;
   videoSegments: DraftVideoSegmentInput[];
   questions: DraftQuestionInput[];
   randomMarkers: DraftRandomMarkerInput[];
@@ -188,11 +193,24 @@ function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
 
 // ความยาววิดีโอทั้งบทเรียนหาได้จาก end เวลาที่มากที่สุดในบรรดา segment ที่ส่งมา
 // เพราะ segment สุดท้ายมักจะจบที่ความยาวเต็มของวิดีโอเสมอ (ทั้งจากโหมด AI/manual/timed)
-// ใช้ค่านี้แทนการรับ duration จาก client ตรงๆ เพื่อไม่ต้องแก้ schema หรือฟอร์มฝั่ง client
+// ใช้เป็น fallback กรณีไม่มีค่าความยาวจริงจาก client ส่งมา
 function computeVideoDurationSeconds(segments: DraftVideoSegmentInput[]): number {
   if (segments.length === 0) return 0;
   const maxEnd = Math.max(...segments.map((segment) => segment.end));
   return Math.round(maxEnd);
+}
+
+// ★ แก้บั๊ก: บทเรียนส่วนใหญ่ไม่ได้แบ่ง video segment เลย computeVideoDurationSeconds
+// จาก segment เพียงอย่างเดียวจึงได้ 0 เกือบทุกบท ทั้งที่ browser ฝั่ง client จับความยาว
+// วิดีโอจริงได้อยู่แล้ว (onLoadedMetadata) ตอนนี้รับค่านั้นมาด้วย แล้วเลือกค่าที่มากกว่า
+// ระหว่างสองแหล่ง (segment กับ client) เผื่อกรณี segment ถูกตัดไม่ถึงท้ายวิดีโอจริง
+function resolveVideoDurationSeconds(
+  segments: DraftVideoSegmentInput[],
+  clientDurationSeconds: number | undefined
+): number {
+  const fromSegments = computeVideoDurationSeconds(segments);
+  const fromClient = clientDurationSeconds && Number.isFinite(clientDurationSeconds) ? Math.round(clientDurationSeconds) : 0;
+  return Math.max(fromSegments, fromClient);
 }
 
 async function replaceVideoSegments(
@@ -246,6 +264,8 @@ async function batchInsertQuestions(
     explanation: q.explanation,
     source_type: q.sourceType ?? "custom",
     source_question_id: q.sourceQuestionId ?? null,
+    // ★ เพิ่มใหม่: ไม่ระบุ = multiple_choice (พฤติกรรมเดิม) — รองรับ true_false ที่เลือกได้ตอนสร้างคำถามใหม่แล้ว
+    interaction_type: q.interactionType ?? "multiple_choice",
   }));
   const orderIndexes = questionRows.map((r) => r.order_index);
 
@@ -337,10 +357,10 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
-  // ★ เพิ่มใหม่: หาความยาววิดีโอรวมของบทเรียนจาก segment ที่เพิ่งตรวจสอบผ่าน
-  // แล้วบันทึกลง lessons.video_duration_seconds — คอลัมน์นี้มีอยู่แล้วในฐานข้อมูล (default 0)
-  // แต่ก่อนหน้านี้ไม่มีจุดไหนเซ็ตค่าให้เลย หน้าคอร์ส (/courses/[slug]) เลยคำนวณรวมได้ 0 เสมอ
-  const videoDurationSeconds = computeVideoDurationSeconds(preparedSegments.segments);
+  // ★ เพิ่มใหม่: หาความยาววิดีโอรวมของบทเรียนจาก segment ที่เพิ่งตรวจสอบผ่าน หรือจากค่าที่
+  // client จับได้จริงตอนโหลดวิดีโอ (แล้วเลือกค่าที่มากกว่า) แล้วบันทึกลง lessons.video_duration_seconds
+  // — คอลัมน์นี้มีอยู่แล้วในฐานข้อมูล (default 0) แต่ก่อนหน้านี้แทบไม่มีจุดไหนเซ็ตค่าให้จริงเลย
+  const videoDurationSeconds = resolveVideoDurationSeconds(preparedSegments.segments, input.videoDurationSeconds);
 
   // 1. หา order_index ถัดไปใน module
   const { data: lastLesson } = await supabase
@@ -439,6 +459,7 @@ export interface ExistingDraftData {
     choices: { text: string; isCorrect: boolean }[];
     sourceType?: "custom" | "bank_manual";
     sourceQuestionId?: string | null;
+    interactionType?: "multiple_choice" | "true_false";
   }[];
   randomMarkers: {
     markerId: string;
@@ -462,7 +483,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
     .from("lesson_drafts")
     .select(
       `id, video_url, content_html, status,
-       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation, source_type, source_question_id,
+       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation, source_type, source_question_id, interaction_type,
          quiz_choices ( choice_text, is_correct, order_index ) )`
     )
     .eq("lesson_id", lessonId)
@@ -501,6 +522,7 @@ export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: 
         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
       sourceType: q.source_type ?? "custom",
       sourceQuestionId: q.source_question_id,
+      interactionType: q.interaction_type ?? "multiple_choice",
     }));
 
   const randomMarkers = (markersData ?? []).map((m) => ({
@@ -542,6 +564,7 @@ export async function updateLessonDraft(input: {
   title: string;
   videoUrl: string | null;
   contentHtml: string;
+  videoDurationSeconds?: number;
   videoSegments: DraftVideoSegmentInput[];
   questions: DraftQuestionInput[];
   randomMarkers: DraftRandomMarkerInput[];
@@ -557,7 +580,7 @@ export async function updateLessonDraft(input: {
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
-  const videoDurationSeconds = computeVideoDurationSeconds(preparedSegments.segments);
+  const videoDurationSeconds = resolveVideoDurationSeconds(preparedSegments.segments, input.videoDurationSeconds);
 
   // 1-3. อัปเดต lesson / draft / สถานะคอร์ส พร้อมกัน — ไม่มีอันไหนต้องรอผลอันอื่นก่อน
   const [{ error: lessonError }, { error: draftError }, { error: courseStatusError }] = await Promise.all([

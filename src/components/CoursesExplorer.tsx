@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import Link from "next/link";
 import { CATEGORIES, CATEGORY_COLORS, type Category } from "@/lib/constants/categories";
+import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 
 export interface ExplorerCourse {
@@ -17,34 +18,37 @@ export interface ExplorerCourse {
 }
 
 function formatDuration(seconds: number): string {
-  const hours = Math.round(seconds / 3600);
-  return `${hours} ชั่วโมง`;
+  const totalSeconds = Math.round(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} ชม. ${minutes} นาที` : `${hours} ชั่วโมง`;
+  }
+  if (minutes > 0) {
+    return secs > 0 ? `${minutes} นาที ${secs} วินาที` : `${minutes} นาที`;
+  }
+  return `${secs} วินาที`;
 }
 
 function formatPrice(price: number): string {
   return `฿${price.toLocaleString("th-TH")}`;
 }
 
-function CourseCard({ course }: { course: ExplorerCourse }): ReactElement {
+function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled: boolean }): ReactElement {
   const tagColor =
     (course.category && CATEGORY_COLORS[course.category as Category]) ?? "bg-[#0F1B3D] text-white";
 
   return (
     <div className="group bg-white rounded-3xl border border-[#0F1B3D]/[0.06] shadow-[0_1px_2px_rgba(15,27,61,0.04)] hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.22)] hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col">
       <div className="relative h-40 bg-gradient-to-br from-[#0F1B3D]/[0.04] to-[#0F1B3D]/[0.09] overflow-hidden">
-        {course.cover_image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={course.cover_image_url} alt={course.title} className="w-full h-full object-cover" />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="5" width="18" height="14" rx="2" stroke="#0F1B3D" strokeWidth="1.5" />
-                <path d="M8 9H16M8 13H13" stroke="#0F1B3D" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-          </div>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={course.cover_image_url ?? DEFAULT_COURSE_COVER_URL}
+          alt={course.title}
+          className="w-full h-full object-cover"
+        />
         {course.category && (
           <span className={`absolute top-3 left-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${tagColor}`}>
             {course.category}
@@ -66,10 +70,10 @@ function CourseCard({ course }: { course: ExplorerCourse }): ReactElement {
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
           <Link
-            href={`/courses/${course.slug}`}
+            href={isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
             className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
-            ลงทะเบียน
+            {isEnrolled ? "เข้าเรียนต่อ" : "ลงทะเบียน"}
           </Link>
         </div>
       </div>
@@ -77,9 +81,19 @@ function CourseCard({ course }: { course: ExplorerCourse }): ReactElement {
   );
 }
 
-export default function CoursesExplorer({ courses }: { courses: ExplorerCourse[] }): ReactElement {
+export default function CoursesExplorer({
+  courses,
+  enrolledCourseIds = [],
+  initialFreeOnly = false,
+}: {
+  courses: ExplorerCourse[];
+  enrolledCourseIds?: string[];
+  initialFreeOnly?: boolean;
+}): ReactElement {
   const [query, setQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Category[]>([]);
+  const [freeOnly, setFreeOnly] = useState(initialFreeOnly);
+  const enrolledSet = useMemo(() => new Set(enrolledCourseIds), [enrolledCourseIds]);
 
   function toggleCategory(category: Category) {
     setSelectedCategories((prev) =>
@@ -94,9 +108,10 @@ export default function CoursesExplorer({ courses }: { courses: ExplorerCourse[]
       const matchesCategory =
         selectedCategories.length === 0 ||
         (course.category !== null && selectedCategories.includes(course.category as Category));
-      return matchesQuery && matchesCategory;
+      const matchesFree = !freeOnly || course.price === 0;
+      return matchesQuery && matchesCategory && matchesFree;
     });
-  }, [courses, query, selectedCategories]);
+  }, [courses, query, selectedCategories, freeOnly]);
 
   return (
     <>
@@ -148,10 +163,25 @@ export default function CoursesExplorer({ courses }: { courses: ExplorerCourse[]
                   </button>
                 );
               })}
-              {selectedCategories.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setFreeOnly((prev) => !prev)}
+                aria-pressed={freeOnly}
+                className={`text-[13px] font-semibold px-4 py-2 rounded-full border transition-colors ${
+                  freeOnly
+                    ? "bg-[#00B37E] text-white border-[#00B37E]"
+                    : "bg-white text-[#0F1B3D]/70 border-[#0F1B3D]/12 hover:border-[#00B37E]/40 hover:text-[#00B37E]"
+                }`}
+              >
+                คอร์สฟรีเท่านั้น
+              </button>
+              {(selectedCategories.length > 0 || freeOnly) && (
                 <button
                   type="button"
-                  onClick={() => setSelectedCategories([])}
+                  onClick={() => {
+                    setSelectedCategories([]);
+                    setFreeOnly(false);
+                  }}
                   className="text-[13px] font-bold text-[#FF5A3C] px-4 py-2 rounded-full hover:bg-[#FF5A3C]/[0.06] transition-colors"
                 >
                   ล้างตัวกรอง
@@ -174,7 +204,7 @@ export default function CoursesExplorer({ courses }: { courses: ExplorerCourse[]
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {filtered.map((course) => (
-              <CourseCard key={course.id} course={course} />
+              <CourseCard key={course.id} course={course} isEnrolled={enrolledSet.has(course.id)} />
             ))}
           </div>
         ) : (
