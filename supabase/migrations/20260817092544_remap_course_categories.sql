@@ -1,0 +1,14 @@
+-- Reconstructed placeholder (2026-09-16).
+-- The applied migration "remap_course_categories" is a ONE-TIME DATA UPDATE
+-- (not a schema change) that remapped existing free-text values in
+-- courses.category to a new taxonomy. Its exact old->new value mapping is
+-- not recoverable from the live schema alone (no audit/history table
+-- captured it), so this file cannot losslessly reconstruct the original
+-- UPDATE statement.
+--
+-- courses.category is a plain `text` column (no enum/check constraint) as
+-- of this writing, so there is nothing further to apply here for a fresh
+-- database — this file exists only to keep the migration-history sequence
+-- honest. If you need to know the exact remap that was performed, ask
+-- whoever ran it, or check any backup taken before 2026-08-17.
+select 1;
