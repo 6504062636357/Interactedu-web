@@ -122,6 +122,9 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   // ใช้กัน iframe ไม่ให้ขึ้นก่อน เพราะ SCO จะหา window.API ตอน load แค่ครั้งเดียว
   const [apiReady, setApiReady] = useState(false);
 
+  // ความคืบหน้าของ item ที่กำลังเล่นอยู่ (0-1) จาก currentTime/duration ของ <video> ใน iframe
+  const [currentItemFraction, setCurrentItemFraction] = useState(0);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (window.matchMedia('(min-width: 1024px)').matches) setSidebarOpen(true);
@@ -498,6 +501,59 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     loadCourseLessons();
   }, [courseId]);
 
+  // --- Effect ที่ 6: อ่านตำแหน่งวิดีโอปัจจุบันจาก <video> ใน iframe (same-origin) ---
+  useEffect(() => {
+    setCurrentItemFraction(0);
+    if (!currentPath || !apiReady) return;
+
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    let video: HTMLVideoElement | null = null;
+    let cleanupVideoListeners: (() => void) | undefined;
+
+    function attachVideo() {
+      try {
+        const doc = iframe?.contentDocument;
+        video = doc?.querySelector('video') ?? null;
+      } catch {
+        video = null;
+      }
+      if (!video) return;
+
+      let lastReported = -1;
+      const update = () => {
+        if (!video || !video.duration || Number.isNaN(video.duration)) return;
+        const fraction = Math.min(1, video.currentTime / video.duration);
+        if (Math.abs(fraction - lastReported) >= 0.01) {
+          lastReported = fraction;
+          setCurrentItemFraction(fraction);
+        }
+      };
+      video.addEventListener('timeupdate', update);
+      video.addEventListener('loadedmetadata', update);
+      update();
+
+      cleanupVideoListeners = () => {
+        video?.removeEventListener('timeupdate', update);
+        video?.removeEventListener('loadedmetadata', update);
+      };
+    }
+
+    attachVideo();
+
+    const onLoad = () => {
+      cleanupVideoListeners?.();
+      attachVideo();
+    };
+    iframe.addEventListener('load', onLoad);
+
+    return () => {
+      iframe.removeEventListener('load', onLoad);
+      cleanupVideoListeners?.();
+    };
+  }, [currentPath, apiReady]);
+
   // แนบ completed จริงเข้ากับแต่ละ SCO ของเลสสันปัจจุบัน
   const flatItems = useMemo(() => {
     // [งานข้อ 07] ตัวกรอง "ซ่อน SCO ควิซรุ่นเดิม" ใช้ได้เฉพาะแพ็กเกจ 'generated' เท่านั้น —
@@ -528,9 +584,15 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const prevItem = currentIndex > 0 ? flatItems[currentIndex - 1] : null;
   const nextItem = currentIndex >= 0 && currentIndex < flatItems.length - 1 ? flatItems[currentIndex + 1] : null;
 
-  const completedCount = flatItems.filter((i) => i.completed).length;
-  const progressPercent = flatItems.length > 0 ? Math.round((completedCount / flatItems.length) * 100) : 0;
-
+  // const completedCount = flatItems.filter((i) => i.completed).length;
+  // const progressPercent = flatItems.length > 0 ? Math.round((completedCount / flatItems.length) * 100) : 0;
+    const completedCount = flatItems.filter((i) => i.completed).length;
+  // ถ้า item ปัจจุบันจบแล้ว ไม่ต้องบวก fraction ซ้อน (currentItemFraction อาจค้างที่ 1 หรือ video ยังเล่นซ้ำอยู่)
+  const isCurrentItemCompleted = currentItem?.completed ?? false;
+  const progressUnits = completedCount + (isCurrentItemCompleted ? 0 : currentItemFraction);
+  const progressPercent =
+    flatItems.length > 0 ? Math.round((progressUnits / flatItems.length) * 100) : 0;
+    
   const displayCourseTitle = courseTitle ?? manifest?.organizationTitle ?? 'กำลังโหลด...';
   const displayLessonTitle = lessonTitle ?? currentItem?.title ?? null;
 

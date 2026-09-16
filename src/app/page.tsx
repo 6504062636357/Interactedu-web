@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 import AppBrand from "@/components/AppBrand";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
-import { BookOpen, BrainCircuit, BriefcaseBusiness, Calculator, Code2, Compass, Languages, Laptop, Megaphone, Palette, type LucideIcon } from "lucide-react";
+import { BookOpen, BrainCircuit, BriefcaseBusiness, Calculator, Code2, Compass, Languages, Laptop, Megaphone, Palette, Search, PlayCircle, Award, type LucideIcon } from "lucide-react";
 interface Course {
   id: string;
   title: string;
@@ -271,12 +271,12 @@ function Hero(): ReactElement {
                   <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
-              <button
-                type="button"
+              <Link
+                href="#how-it-works"
                 className="text-[15px] font-bold text-[#0F1B3D] px-4 py-4 hover:underline underline-offset-4 decoration-2 decoration-[#FF5A3C]"
               >
                 ดูวิธีการเรียน
-              </button>
+              </Link>
             </div>
 
             <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-5">
@@ -380,6 +380,105 @@ function PathCard({ course }: { course: PathCourse }): ReactElement {
         <span className="mt-auto pt-5 text-[13px] font-semibold text-[#3157D5] transition-colors group-hover:text-[#0F1B3D]">ดูรายละเอียด</span>
       </div>
     </Link>
+  );
+}
+
+interface HowItWorksStep {
+  number: string;
+  icon: LucideIcon;
+  accent: string;
+  surface: string;
+  title: string;
+  description: string;
+}
+
+const howItWorksSteps: HowItWorksStep[] = [
+  {
+    number: "1",
+    icon: Search,
+    accent: "#FF5A3C",
+    surface: "#FF5A3C1A",
+    title: "เลือกคอร์สที่ใช่",
+    description: "ค้นหาคอร์สจากสายอาชีพที่สนใจ ดูรีวิวและเนื้อหาก่อนตัดสินใจได้เต็มที่",
+  },
+  {
+    number: "2",
+    icon: PlayCircle,
+    accent: "#3157D5",
+    surface: "#3157D51A",
+    title: "เรียนกับผู้สอนตัวจริง",
+    description: "เรียนตามจังหวะของตัวเอง ผ่านวิดีโอคุณภาพสูงจากผู้เชี่ยวชาญในสายงานนั้นๆ",
+  },
+  {
+    number: "3",
+    icon: Award,
+    accent: "#A6790B",
+    surface: "#FFCB4733",
+    title: "รับใบรับรอง",
+    description: "เรียนจบครบหลักสูตร รับใบรับรองที่บริษัทชั้นนำให้การยอมรับทันที",
+  },
+];
+
+// วิธีการเรียน — 3 ขั้นตอน วางต่อจาก Hero/Marquee ก่อนเข้า CareerPaths
+// ปุ่ม "ดูวิธีการเรียน" ใน Hero เลื่อนมาที่ id="how-it-works" นี้
+function HowItWorks(): ReactElement {
+  return (
+    <section id="how-it-works" className="scroll-mt-24 relative overflow-hidden">
+      <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 lg:pt-24 pb-6 lg:pb-8">
+        <div className="mb-14 text-center max-w-2xl mx-auto">
+          <p className="text-[12.5px] font-bold text-[#3157D5] tracking-[0.04em] mb-2.5">
+            เริ่มต้นง่ายๆ ใน 3 ขั้นตอน
+          </p>
+          <h2 className="text-[28px] sm:text-[34px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] leading-tight">
+            วิธีการเรียนกับเรา
+          </h2>
+          <p className="mt-4 text-[15px] text-[#0F1B3D]/55 font-medium leading-relaxed">
+            ไม่ต้องมีพื้นฐานมาก่อน แค่เลือกคอร์สที่ใช่ แล้วเริ่มเรียนได้ทันที
+          </p>
+        </div>
+
+        <div className="relative grid sm:grid-cols-3 gap-6 lg:gap-8">
+          <div className="hidden sm:block absolute top-[52px] left-[16.5%] right-[16.5%] h-[2px] bg-gradient-to-r from-[#FF5A3C]/25 via-[#3157D5]/25 to-[#FFCB47]/25" />
+
+          {howItWorksSteps.map((step, i) => (
+            <div
+              key={step.number}
+              className={`relative bg-white rounded-3xl border border-[#0F1B3D]/[0.06] shadow-[0_1px_2px_rgba(15,27,61,0.04)] p-7 pt-9 flex flex-col items-start hover:-translate-y-1 hover:shadow-[0_20px_40px_-18px_rgba(15,27,61,0.18)] transition-all duration-300 ${
+                i === 1 ? "sm:mt-4" : i === 2 ? "sm:mt-6" : ""
+              }`}
+            >
+              <div className="relative mb-5">
+                <span
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                  style={{ backgroundColor: step.surface, color: step.accent }}
+                >
+                  <step.icon size={26} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#0F1B3D] text-[11px] font-extrabold text-white ring-4 ring-white">
+                  {step.number}
+                </span>
+              </div>
+              <h3 className="text-[17px] font-bold text-[#0F1B3D] mb-2">{step.title}</h3>
+              <p className="text-[13.5px] leading-relaxed text-[#0F1B3D]/50 font-medium">
+                {step.description}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 flex justify-center">
+          <Link
+            href="/courses"
+            className="inline-flex items-center gap-2 text-[14.5px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5"
+          >
+            เริ่มเลือกคอร์สของคุณ
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -495,17 +594,17 @@ function CtaBanner(): ReactElement {
           พร้อมเริ่มต้นเส้นทางใหม่แล้วหรือยัง?
         </h2>
         <p className="mt-4 text-[15px] text-white/60 max-w-md mx-auto">
-          สมัครวันนี้ รับส่วนลดคอร์สแรก 20% พร้อมที่ปรึกษาด้านการเรียนฟรี
+          สร้างบัญชีฟรีวันนี้ เข้าถึงคอร์สพื้นฐานและเริ่มเรียนรู้ได้ทันที
         </p>
-        <button
-          type="button"
+        <Link
+          href="/courses?price=free"
           className="mt-8 inline-flex items-center gap-2 text-[15px] font-bold text-[#0F1B3D] bg-[#FFCB47] hover:bg-white px-7 py-4 rounded-full transition-all hover:-translate-y-0.5"
         >
           เริ่มเรียนฟรีวันนี้
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-        </button>
+        </Link>
 
         <div className="mt-7 flex items-center justify-center gap-2.5">
           <div className="flex items-center -space-x-2">
@@ -659,6 +758,7 @@ export default async function Page(): Promise<ReactElement> {
     <div className="min-h-screen w-full app-canvas">
       <Navbar displayName={displayName} avatarUrl={avatarUrl} />
       <Hero />
+      <HowItWorks />
       <CareerPaths courses={oneCoursePerCategory(pathCoursesData ?? [])} />
       <CourseCatalog courses={coursesWithRatings} />
       <CtaBanner />
