@@ -114,7 +114,7 @@ export default function StudentSettingsPage(): ReactElement {
         updated_at: new Date().toISOString(),
       })
       .eq("id", user.id)
-      .select("id, full_name")
+      .select("id, full_name, avatar_url")
       .maybeSingle();
 
     if (error || !savedProfile) {
@@ -123,14 +123,22 @@ export default function StudentSettingsPage(): ReactElement {
       return;
     }
 
+    // sync ไปที่ auth user_metadata ด้วย เพราะ ProfileDropdown / header ทุกหน้า
+    // ("app/page.tsx", "app/courses/page.tsx" ฯลฯ) อ่านชื่อ/รูปจาก user_metadata
+    // ไม่ได้อ่านจากตาราง profiles โดยตรง ถ้าไม่ sync ตรงนี้ ชื่อ/รูปบน header จะไม่มีวันอัปเดต
     const { error: authError } = await supabase.auth.updateUser({
-      data: { full_name: savedProfile.full_name },
+      data: { full_name: savedProfile.full_name, avatar_url: savedProfile.avatar_url },
     });
-    setMessage(authError
-      ? { type: "error", text: "บันทึกโปรไฟล์แล้ว แต่ปรับชื่อในบัญชีไม่สำเร็จ: " + authError.message }
-      : { type: "success", text: "บันทึกเรียบร้อยแล้ว" });
-    router.refresh();
+
     setIsSaving(false);
+
+    if (authError) {
+      setMessage({ type: "error", text: "บันทึกโปรไฟล์แล้ว แต่ปรับข้อมูลในบัญชีไม่สำเร็จ: " + authError.message });
+      return;
+    }
+
+    setMessage({ type: "success", text: "บันทึกเรียบร้อยแล้ว" });
+    router.refresh(); // บังคับให้ server component (header ของหน้าอื่นๆ) fetch user ใหม่
   }
 
   if (isLoading) return <p className="text-[13.5px] text-slate-400 py-8 text-center">กำลังโหลด...</p>;
@@ -218,7 +226,7 @@ export default function StudentSettingsPage(): ReactElement {
         <ChangePasswordForm />
       </section>
 
-      <section>
+      {/* <section>
         <h2 className="text-[15px] font-bold text-slate-900 mb-4">ความถนัด / ภาษา</h2>
         <label className="block text-[12.5px] font-semibold text-slate-600 mb-1">ภาษาที่ใช้งาน</label>
         <select
@@ -229,7 +237,7 @@ export default function StudentSettingsPage(): ReactElement {
           <option value="th">ไทย</option>
           <option value="en">English</option>
         </select>
-      </section>
+      </section> */}
 
       {message && (
         <p className={`text-[13px] font-medium ${message.type === "success" ? "text-emerald-600" : "text-red-500"}`}>

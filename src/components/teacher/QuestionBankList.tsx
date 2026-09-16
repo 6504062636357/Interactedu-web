@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { deleteQuestionBankItem } from "@/app/dashboard/teacher/question-bank/actions";
 
@@ -134,10 +135,13 @@ function CategoryQuestionList({
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
+  // const [deletingId, setDeletingId] = useState<string | null>(null);
+  // const [bulkDeleting, setBulkDeleting] = useState(false);
+  // const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const [confirmTarget, setConfirmTarget] = useState<{ type: "single"; id: string } | { type: "bulk" } | null>(null);
   const filtered = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return questions.filter((question) => {
@@ -182,8 +186,17 @@ function CategoryQuestionList({
     });
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("ลบคำถามนี้ออกจากคลังหรือไม่? การลบไม่มีผลย้อนหลังกับข้อสอบที่ถูกคัดลอกไปใช้แล้ว")) return;
+    function handleDelete(id: string) {
+    setConfirmTarget({ type: "single", id });
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    setConfirmTarget({ type: "bulk" });
+  }
+
+  async function confirmDeleteSingle(id: string) {
+    setConfirmTarget(null);
     setDeletingId(id);
     setError(null);
     const result = await deleteQuestionBankItem(id);
@@ -192,9 +205,8 @@ function CategoryQuestionList({
     else setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
   }
 
-  async function handleBulkDelete() {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`ลบคำถามที่เลือกไว้ ${selectedIds.size} ข้อออกจากคลังหรือไม่? การลบไม่มีผลย้อนหลังกับข้อสอบที่ถูกคัดลอกไปใช้แล้ว`)) return;
+  async function confirmDeleteBulk() {
+    setConfirmTarget(null);
     setBulkDeleting(true);
     setError(null);
     const ids = [...selectedIds];
@@ -340,7 +352,7 @@ function CategoryQuestionList({
             ))}
           </div>
 
-          {totalPages > 1 && (
+                    {totalPages > 1 && (
             <div className="mt-6 flex items-center justify-center gap-2">
               <button
                 type="button"
@@ -363,9 +375,49 @@ function CategoryQuestionList({
           )}
         </>
       )}
+
+            {confirmTarget && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1B3D]/40 backdrop-blur-[2px] px-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.35)]">
+            <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z" />
+              </svg>
+            </div>
+            <p className="text-center text-[14.5px] font-bold text-[#0F1B3D]">
+              {confirmTarget.type === "bulk"
+                ? `ลบคำถามที่เลือกไว้ ${selectedIds.size} ข้อออกจากคลังหรือไม่?`
+                : "ลบคำถามนี้ออกจากคลังหรือไม่?"}
+            </p>
+            <p className="mt-1.5 text-center text-[12.5px] text-[#0F1B3D]/50">
+              การลบไม่มีผลย้อนหลังกับข้อสอบที่ถูกคัดลอกไปใช้แล้ว
+            </p>
+            <div className="mt-5 flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setConfirmTarget(null)}
+                className="flex-1 rounded-full border border-[#0F1B3D]/15 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-[#0F1B3D]/[0.04]"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  confirmTarget.type === "bulk" ? confirmDeleteBulk() : confirmDeleteSingle(confirmTarget.id)
+                }
+                className="flex-1 rounded-full bg-red-600 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-red-700"
+              >
+                ลบ
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
+
 
 function CopyButton({ questionId }: { questionId: string }) {
   const [copying, setCopying] = useState(false);
