@@ -4,12 +4,17 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import LessonDraftForm from "@/components/teacher/LessonDraftForm";
-import { getLessonDraftForEdit } from "./actions";
+import { getLessonDraftForEdit, type ExistingDraftData } from "./actions";
 
 interface PageProps {
   params: Promise<{ courseId: string }>;
   searchParams: Promise<{ lessonId?: string }>;
 }
+
+// ★ error ที่แปลว่า "ไม่มี draft จริงๆ" (ไม่ใช่ปัญหาชั่วคราว) — เจอแบบนี้ถือว่าไม่ผิดปกติ
+// อย่างอื่น (โหลดไม่สำเร็จ / ไม่พบบทเรียน) ถือเป็น transient แล้วต้อง retry + แสดง error แทนการ
+// เด้งเงียบไปโหมด "เพิ่มบทเรียนใหม่"
+const NO_DRAFT_ERRORS = new Set(["ยังไม่มีฉบับร่างของบทเรียนนี้"]);
 
 export async function CourseLessonEditorPage({
   params,
@@ -94,11 +99,53 @@ export async function CourseLessonEditorPage({
     courseModule = newModule;
   }
 
-  // ---- เพิ่มใหม่: ถ้ามี lessonId ใน query ให้โหลด draft เดิมมา pre-fill ----
-  let initialData = null;
+  // ---- โหลด draft เดิมมา pre-fill (โหมดแก้ไข) ----
+  // ★ แก้บั๊ก: เดิมเขียน `if (result.data) initialData = result.data;` เฉยๆ เท่ากับ
+  // "กลืน" error ทิ้ง — พอ getLessonDraftForEdit พลาดชั่วคราว (timeout / auth.uid() หลุด /
+  // RLS กรองเงียบ) initialData จะเป็น null แล้วหน้าจะ render เป็น "เพิ่มบทเรียนใหม่" ทั้งที่
+  // ผู้ใช้ตั้งใจเข้ามาแก้บทเรียนที่มีอยู่จริง (มี ?lessonId= ใน URL) ทำให้เข้าใจผิดว่าข้อมูลหาย
+  // ตอนนี้: ถ้ามี lessonId ต้องได้ draft จริงเท่านั้นถึงจะเข้าโหมดแก้ไข — พลาดแบบ transient
+  // ให้ retry เงียบ 1 ครั้ง แล้วถ้ายังไม่ได้ให้โชว์หน้า error + ปุ่มลองใหม่ ไม่ตกไปหน้าเพิ่มใหม่
+  let initialData: ExistingDraftData | null = null;
   if (lessonId) {
-    const result = await getLessonDraftForEdit(lessonId);
-    if (result.data) initialData = result.data;
+    let result = await getLessonDraftForEdit(lessonId);
+
+    // transient error → ลองซ้ำอีกครั้งแบบเงียบๆ ก่อนฟันธง
+    if (!result.data && result.error && !NO_DRAFT_ERRORS.has(result.error)) {
+      result = await getLessonDraftForEdit(lessonId);
+    }
+
+    if (result.data) {
+      initialData = result.data;
+    } else if (result.error && !NO_DRAFT_ERRORS.has(result.error)) {
+      // ยังพลาดอยู่ และไม่ใช่กรณี "ไม่มี draft" ที่ถูกต้องตามกติกา → อย่าเด้งไปหน้าเพิ่มใหม่
+      console.error("[lessons/new] load draft failed:", lessonId, result.error);
+      return (
+        <div className="min-h-screen w-full bg-[#F7F8FA] py-12 px-6 lg:px-8">
+          <main className="max-w-3xl mx-auto text-center py-20">
+            <p className="text-[15px] font-bold text-red-500 mb-2">โหลดบทเรียนที่จะแก้ไขไม่สำเร็จ</p>
+            <p className="text-[13.5px] text-[#0F1B3D]/50 mb-6">
+              อาจเกิดจากปัญหาการเชื่อมต่อชั่วคราว กรุณาลองใหม่อีกครั้ง — ข้อมูลบทเรียนเดิมยังอยู่ครบ ไม่ได้หายไป
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Link
+                href={`/dashboard/${workspace}/courses/${courseId}/lessons/new?lessonId=${lessonId}`}
+                className="inline-block px-5 py-2.5 rounded-xl bg-[#0F1B3D] text-white text-[13.5px] font-bold hover:bg-[#0F1B3D]/90 transition-colors"
+              >
+                ลองใหม่
+              </Link>
+              <Link
+                href={`/dashboard/${workspace}/courses/${courseId}`}
+                className="inline-block px-5 py-2.5 rounded-xl border border-[#0F1B3D]/10 text-[#0F1B3D] text-[13.5px] font-bold hover:bg-white transition-colors"
+              >
+                กลับไปที่คอร์ส
+              </Link>
+            </div>
+          </main>
+        </div>
+      );
+    }
+    // result.error เป็น NO_DRAFT_ERRORS → ปล่อย initialData = null ตามเดิม (เข้าโหมดสร้างใหม่ได้)
   }
 
   return (
