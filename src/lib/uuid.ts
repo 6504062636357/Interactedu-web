@@ -1,0 +1,23 @@
+// ★ ตัวสร้าง UUID ที่ทำงานได้ทั้งบน HTTPS และ HTTP (non-secure context)
+// crypto.randomUUID() มีเฉพาะ secure context (HTTPS/localhost) — บน http:// + IP จะเป็น
+// undefined แล้ว throw ทำให้ client component พังทั้งหน้า ตัวนี้ fallback ไปใช้ getRandomValues
+// (ซึ่งใช้ได้บน HTTP) เพื่อสร้าง UUID v4 เอง วิธีถาวรคือทำ HTTPS แต่ตัวนี้กันไว้ทุกกรณี
+export function genId(): string {
+  const c: Crypto | undefined =
+    typeof crypto !== "undefined" ? crypto : undefined;
+
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
+  }
+
+  if (c && typeof c.getRandomValues === "function") {
+    const b = c.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variant
+    const h = Array.from(b, (x) => (x + 0x100).toString(16).slice(1));
+    return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
+  }
+
+  // สุดท้ายจริงๆ (แทบไม่มีทางถึง) — ไม่ unique ระดับ crypto แต่พอสำหรับ key ใน UI
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactElement } from "react";
+import { genId } from "@/lib/uuid";
 import {
   CirclePlay,
   Clock3,
@@ -75,7 +76,7 @@ function createSegment(
   source: VideoSegment["source"]
 ): VideoSegment {
   return {
-    id: crypto.randomUUID(),
+    id: genId(),
     start: Number(start.toFixed(1)),
     end: Number(end.toFixed(1)),
     title: `บทที่ ${index + 1}`,
@@ -160,7 +161,7 @@ export default function VideoSegmenter({
     }
 
     return payload.segments.map((segment, index) => ({
-      id: crypto.randomUUID(),
+      id: genId(),
       start: segment.start,
       end: segment.end,
       title: `บทที่ ${index + 1}: ${segment.title}`,

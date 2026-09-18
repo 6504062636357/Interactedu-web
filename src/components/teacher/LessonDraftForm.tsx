@@ -10,6 +10,7 @@ import {
 } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
 import { approveLesson } from "@/app/dashboard/admin/courses/[courseId]/review/actions";
 import { uploadVideoToR2 } from "@/lib/uploadVideoToR2";
+import { genId } from "@/lib/uuid";
 import VideoSegmenter, { type VideoSegment } from "@/components/teacher/VideoSegmenter";
 import type { BankQuestionCounts } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
 
@@ -45,7 +46,7 @@ function createEmptyQuestion(
   interactionType: "multiple_choice" | "true_false" = "multiple_choice"
 ): QuestionState {
   return {
-    key: crypto.randomUUID(),
+    key: genId(),
     questionText: "",
     timestampSeconds,
     explanation: null,
@@ -110,11 +111,11 @@ export default function LessonDraftForm({
 
   // แบบทดสอบท้ายคอร์สจัดการจากหน้าคอร์สโดยเฉพาะ ส่วนนี้เก็บเฉพาะควิซในวิดีโอ
   const initialVideoQuizzes =
-    initialData?.questions.filter((q) => q.timestampSeconds != null).map((q) => ({ key: crypto.randomUUID(), ...q })) ?? [];
+    initialData?.questions.filter((q) => q.timestampSeconds != null).map((q) => ({ key: genId(), ...q })) ?? [];
 
     const [videoQuizQuestions, setVideoQuizQuestions] = useState<QuestionState[]>(initialVideoQuizzes);
   const [randomMarkers, setRandomMarkers] = useState<RandomMarkerState[]>(
-    initialData?.randomMarkers?.map((m) => ({ key: crypto.randomUUID(), ...m })) ?? []
+    initialData?.randomMarkers?.map((m) => ({ key: genId(), ...m })) ?? []
   );
 
   // ---- Modal ปักหมุด ----
@@ -316,7 +317,7 @@ export default function LessonDraftForm({
       setVideoQuizQuestions((prev) => [
         ...prev,
         {
-          key: crypto.randomUUID(),
+          key: genId(),
           questionText: picked.questionText,
           timestampSeconds: pinModalTimestamp,
           explanation: null,
@@ -328,7 +329,7 @@ export default function LessonDraftForm({
     } else {
       setRandomMarkers((prev) => [
         ...prev,
-        { key: crypto.randomUUID(), markerId: null, timestampSeconds: pinModalTimestamp, difficulty: randomDifficulty },
+        { key: genId(), markerId: null, timestampSeconds: pinModalTimestamp, difficulty: randomDifficulty },
       ]);
     }
     setPinModalOpen(false);
