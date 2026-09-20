@@ -171,9 +171,11 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
 
   const { data: courseInfo } = await supabase
     .from("courses")
-    .select("title, created_by")
+    .select("title, created_by, status")
     .eq("id", courseId)
     .maybeSingle();
+
+  if (!courseInfo) return { error: "ไม่พบคอร์สนี้" };
 
   const { data: lessons, error: lessonsError } = await supabase
     .from("lessons")
@@ -191,23 +193,22 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
     .filter((d) => d.status === "submitted" || d.status === "pending_review")
     .map((d) => d.id);
 
-  if (draftIds.length === 0) {
-    return { error: "ไม่มี draft ที่รอตรวจสอบในคอร์สนี้" };
-  }
+  // มี draft ที่รอตรวจ -> reject ให้ด้วย / ไม่มี (เช่น ถูก reject รายบทไปหมดแล้ว) -> ข้ามได้
+  if (draftIds.length > 0) {
+    const { error: draftError } = await supabase
+      .from("lesson_drafts")
+      .update({
+        status: "rejected",
+        rejection_reason: reason.trim(),
+        reviewed_by: user!.id,
+        reviewed_at: new Date().toISOString(),
+      })
+      .in("id", draftIds);
 
-  const { error: draftError } = await supabase
-    .from("lesson_drafts")
-    .update({
-      status: "rejected",
-      rejection_reason: reason.trim(),
-      reviewed_by: user!.id,
-      reviewed_at: new Date().toISOString(),
-    })
-    .in("id", draftIds);
-
-  if (draftError) {
-    console.error("[rejectCourse] draft reject failed:", draftError);
-    return { error: "ปฏิเสธ draft ไม่สำเร็จ" };
+    if (draftError) {
+      console.error("[rejectCourse] draft reject failed:", draftError);
+      return { error: "ปฏิเสธ draft ไม่สำเร็จ" };
+    }
   }
 
   const { error: courseUpdateError } = await supabase
