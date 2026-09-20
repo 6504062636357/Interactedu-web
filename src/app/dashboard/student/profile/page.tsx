@@ -1,7 +1,8 @@
 // app/dashboard/student/profile/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Award, BookOpenText, GraduationCap, Languages, Mail, Pencil, Play, UserRound } from "lucide-react";
+import StudentProfileClient from "@/components/StudentProfileClient";
+import { ArrowUpRight, Award, BookOpenText, GraduationCap, Play } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 
 interface CourseInfo {
@@ -43,7 +44,7 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, avatar_url, language")
+    .select("full_name, avatar_url")
     .eq("id", user.id)
     .single();
 
@@ -124,60 +125,12 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
 
   const certificates = (certsRaw ?? []) as unknown as CertificateRow[];
 
-  const displayName = profile?.full_name || user.email?.split("@")[0] || "นักเรียน";
-
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-6">
-        <p className="mb-1 text-[11px] font-extrabold uppercase tracking-[0.18em] text-[#3157D5]">Student profile</p>
-        <h1 className="text-[26px] font-extrabold tracking-[-0.03em] text-[#0F1B3D] sm:text-[30px]">โปรไฟล์ของฉัน</h1>
-        <p className="mt-1 text-[13px] text-slate-500">ข้อมูลส่วนตัวและภาพรวมการเรียนรู้ของคุณ</p>
-      </div>
-
-      <section className="relative mb-5 overflow-hidden rounded-[28px] bg-[linear-gradient(125deg,#0F1B3D_0%,#1B3267_68%,#3157D5_100%)] p-6 text-white shadow-[0_18px_36px_-22px_rgba(15,27,61,0.7)] sm:p-8">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-64 w-64 rounded-full border border-white/10" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-20 h-60 w-60 rounded-full bg-white/[0.04]" />
-        <div className="relative flex flex-col items-start gap-5 sm:flex-row sm:items-end">
-          <div className="h-24 w-24 shrink-0 overflow-hidden rounded-[25px] border-4 border-white/25 bg-white/15 shadow-xl sm:h-28 sm:w-28">
-            {profile?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={profile.avatar_url} alt="รูปโปรไฟล์" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-3xl font-extrabold text-white">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-bold text-white/90">
-              <GraduationCap size={14} /> ผู้เรียน
-            </span>
-            <h2 className="mt-3 break-words text-[25px] font-extrabold tracking-[-0.03em] sm:text-[30px]">{displayName}</h2>
-            <p className="mt-1 break-all text-[13px] text-white/70">{user.email}</p>
-          </div>
-          <Link
-            href="/dashboard/student/settings"
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-[12.5px] font-extrabold text-[#0F1B3D] shadow-sm transition hover:bg-blue-50"
-          >
-            <Pencil size={15} /> แก้ไขโปรไฟล์
-          </Link>
-        </div>
-      </section>
-
-      <section className="mb-7 grid gap-3 sm:grid-cols-3" aria-label="ข้อมูลส่วนตัว">
-        {[
-          { label: "ชื่อ-นามสกุล", value: profile?.full_name || "ยังไม่ได้ระบุ", icon: UserRound },
-          { label: "อีเมล", value: user.email || "ยังไม่ได้ระบุ", icon: Mail },
-          { label: "ภาษาที่ใช้งาน", value: profile?.language === "en" ? "English" : "ไทย", icon: Languages },
-        ].map(({ label, value, icon: Icon }) => (
-          <div key={label} className="min-w-0 rounded-[20px] border border-slate-200/80 bg-white p-4 shadow-[0_10px_28px_-24px_rgba(15,27,61,0.35)]">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3157D5]/10 text-[#3157D5]"><Icon size={18} /></div>
-            <p className="mt-3 text-[11px] font-semibold text-slate-400">{label}</p>
-            <p className="mt-1 break-words text-[13px] font-bold text-[#0F1B3D]">{value}</p>
-          </div>
-        ))}
-      </section>
-
+      <StudentProfileClient
+        initialProfile={{ full_name: profile?.full_name ?? "", avatar_url: profile?.avatar_url ?? "" }}
+        email={user.email ?? ""}
+      >
       <div className="mb-9 grid gap-3 sm:grid-cols-3">
         <div className="flex items-center gap-4 rounded-[20px] border border-blue-100 bg-blue-50/70 p-4">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#3157D5]/10 text-[#3157D5]"><BookOpenText size={21} /></span>
@@ -304,6 +257,7 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
           </div>
         )}
       </section>
+      </StudentProfileClient>
     </div>
   );
 }

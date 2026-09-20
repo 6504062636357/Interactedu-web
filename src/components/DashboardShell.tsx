@@ -1,4 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
+import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import AppBrand from "@/components/AppBrand";
 import NotificationBell from "@/components/NotificationBell";
 import ProfileDropdown from "@/components/ProfileDropdown";
@@ -36,11 +38,18 @@ export default function DashboardShell({
               {ROLE_LABEL[role]}
             </span>
           </div>
-          <div className="flex items-center gap-2.5">
-            <p className="mr-1 hidden text-right lg:block">
-              <span className="block text-[10px] font-medium text-slate-400">ยินดีต้อนรับ</span>
-              <span className="block max-w-40 truncate text-[12px] font-bold text-[#0F1B3D]">{displayName}</span>
-            </p>
+          <div className="flex shrink-0 items-center gap-2.5">
+            {role === "student" && (
+              <Link
+                href="/courses"
+                aria-label="ดูคอร์สทั้งหมด"
+                title="ดูคอร์สทั้งหมด"
+                className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-3 text-[13px] font-bold text-[#0F1B3D] shadow-sm transition-colors hover:border-[#3157D5]/30 hover:bg-blue-50 hover:text-[#3157D5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] focus-visible:ring-offset-2 sm:px-3.5"
+              >
+                <BookOpen size={18} aria-hidden="true" />
+                <span className="hidden sm:inline">ดูคอร์สทั้งหมด</span>
+              </Link>
+            )}
             <NotificationBell />
             <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role={role} />
           </div>
