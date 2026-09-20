@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import { generateScormPackage } from "@/lib/scorm/generate";
 import { createNotification } from "@/lib/notifications/service";
 import { revalidatePath } from "next/cache";
+import { checkCourseReadiness } from "@/app/dashboard/teacher/courses/actions";
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -28,10 +29,17 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     .eq("id", courseId)
     .maybeSingle();
 
+  if (!courseInfo) return { error: "ไม่พบคอร์สนี้" };
+  const isOwnCourse = courseInfo.created_by === user!.id;
+  const readiness = await checkCourseReadiness(courseId);
+  if (!readiness.ready) {
+    return { error: readiness.examIssue ?? (!readiness.hasLessons ? "กรุณาเพิ่มบทเรียนก่อนเผยแพร่" : "กรุณาเพิ่มวิดีโอและตรวจสอบควิซของทุกบทให้ครบก่อนเผยแพร่") };
+  }
+
   // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้
   const { data: lessons, error: lessonsError } = await supabase
   .from("lessons")
-  .select("id, title, lesson_drafts(id, status)")
+  .select("id, title, lesson_drafts(id, status, created_at)")
   .eq("course_id", courseId);
 
   if (lessonsError || !lessons) {
@@ -49,7 +57,7 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     .select("exam_status")
     .eq("id", courseId)
     .maybeSingle();
-  if (examStatusRow?.exam_status !== "approved") {
+  if (!isOwnCourse && examStatusRow?.exam_status !== "approved") {
     return { error: "บททดสอบท้ายคอร์สยังไม่ได้รับการอนุมัติ ไม่สามารถอนุมัติทั้งคอร์สได้" };
   }
   // เช็คว่าทุกบทมี draft ที่พร้อมอนุมัติ (submitted / pending_review)
@@ -69,15 +77,15 @@ for (const lesson of lessons) {
     return { error: `บทเรียน "${title}" ยังไม่มีเนื้อหา ไม่สามารถอนุมัติทั้งคอร์สได้` };
   }
 
-  const latestDraft = drafts[0];
+  const latestDraft = [...drafts].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
 
-  if (latestDraft.status === "rejected" || latestDraft.status === "draft") {
+  if (!isOwnCourse && (latestDraft.status === "rejected" || latestDraft.status === "draft")) {
     return {
       error: `บทเรียน "${title}" ยังมีแบบร่างที่ยังไม่ส่งตรวจหรือถูกปฏิเสธอยู่ ไม่สามารถอนุมัติทั้งคอร์สได้`,
     };
   }
 
-  if (latestDraft.status === "submitted" || latestDraft.status === "pending_review") {
+  if (isOwnCourse || latestDraft.status === "submitted" || latestDraft.status === "pending_review") {
     pendingDrafts.push({ draftId: latestDraft.id, lessonId, lessonTitle: title });
   }
 }
@@ -94,11 +102,11 @@ for (const lesson of lessons) {
 
     // เช็คว่า draft.status === "approved" ถึงจะยอมสร้างแพ็กเกจ (เหมือน approveLesson)
   const draftIds = pendingDrafts.map((d) => d.draftId);
-  const { data: updatedDrafts, error: draftUpdateError } = await supabase
+  const { data: updatedDrafts, error: draftUpdateError } = draftIds.length ? await supabase
     .from("lesson_drafts")
     .update({ status: "approved", reviewed_by: user!.id, reviewed_at: new Date().toISOString() })
     .in("id", draftIds)
-    .select();
+    .select() : { data: [], error: null };
 
   if (draftUpdateError || !updatedDrafts || updatedDrafts.length !== draftIds.length) {
     console.error("[approveCourse] draft status update failed:", draftUpdateError);
@@ -111,7 +119,7 @@ for (const lesson of lessons) {
     if ("error" in genResult) {
       // rollback: ดึง draft ทั้งชุดที่เพิ่ง approved ไปกลับเป็น pending_review
       // เพื่อไม่ให้ค้างสถานะ approved ทั้งที่บางบทยังไม่มีแพ็กเกจจริง
-      await supabase.from("lesson_drafts").update({ status: "pending_review" }).in("id", draftIds);
+      await supabase.from("lesson_drafts").update({ status: isOwnCourse ? "draft" : "pending_review" }).in("id", draftIds);
       return { error: `สร้างไฟล์ SCORM ของบทเรียน "${lessonTitle}" ไม่สำเร็จ: ${genResult.error}` };
     }
     // หมายเหตุ: generateScormPackage อัปเดต lessons (is_scorm, scorm_entry_point,
@@ -119,17 +127,20 @@ for (const lesson of lessons) {
   }
 
   // อัปเดตสถานะคอร์สเป็น published
-  const { error: courseUpdateError } = await supabase
+  const { data: publishedCourse, error: courseUpdateError } = await supabase
     .from("courses")
-    .update({ status: "published" })
-    .eq("id", courseId);
+    .update({ status: "published", ...(isOwnCourse ? {
+      exam_status: "approved", exam_reviewed_by: user!.id,
+      exam_reviewed_at: new Date().toISOString(), exam_rejection_reason: null,
+    } : {}) })
+    .eq("id", courseId).select("id").maybeSingle();
 
-  if (courseUpdateError) {
+  if (courseUpdateError || !publishedCourse) {
     console.error("[approveCourse] course status update failed:", courseUpdateError);
-    return { error: `อัปเดตสถานะคอร์สไม่สำเร็จ: ${courseUpdateError.message}` };
+    return { error: `อัปเดตสถานะคอร์สไม่สำเร็จ: ${courseUpdateError?.message ?? "ไม่พบคอร์สที่แก้ไขได้"}` };
   }
 
-  if (courseInfo?.created_by) {
+  if (courseInfo?.created_by && !isOwnCourse) {
     await createNotification({
       userId: courseInfo.created_by,
       type: "course_approved",
@@ -146,6 +157,9 @@ for (const lesson of lessons) {
   revalidatePath("/dashboard/admin");
   revalidatePath("/admin/review");
   revalidatePath(`/dashboard/admin/courses/${courseId}/review`);
+  revalidatePath(`/dashboard/admin/courses/${courseId}`);
+  revalidatePath(`/dashboard/admin/courses/${courseId}/exam`);
+  revalidatePath("/courses");
   return {};
 }
 
@@ -321,7 +335,8 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
         return sorted[0]?.status === "approved";
       });
 
-      if (allApproved) {
+      const readiness = allApproved ? await checkCourseReadiness(courseId) : null;
+      if (allApproved && readiness?.ready) {
         const { error: courseUpdateError } = await supabase
           .from("courses")
           .update({ status: "published" })
@@ -406,6 +421,11 @@ export async function rejectLesson(draftId: string, reason: string): Promise<{ e
 export async function approveCourseExam(courseId: string): Promise<{ error?: string }> {
   const { supabase, user, error: authError } = await requireAdmin();
   if (authError) return { error: authError };
+
+  const readiness = await checkCourseReadiness(courseId);
+  if (!readiness.examConfigured || readiness.examIssue) {
+    return { error: readiness.examIssue ?? "กรุณาสร้างบททดสอบท้ายคอร์สก่อนอนุมัติ" };
+  }
 
   const { error } = await supabase
     .from("courses")

@@ -1,6 +1,8 @@
 // app/dashboard/student/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { summarizeStudentProgress } from "@/lib/courses/student-progress";
 import { createClient } from "@/utils/supabase/server";
 import { Award, BookOpen, CheckCircle, GraduationCap, Play, type LucideIcon } from "lucide-react";
 
@@ -19,6 +21,7 @@ interface LessonRef {
   id: string;
   order_index: number;
   title: string;
+  is_published: boolean;
 }
 
 interface ModuleWithLessons {
@@ -30,6 +33,9 @@ interface ModuleWithLessons {
 interface TrackingRow {
   lesson_id: string;
   lesson_status: string | null;
+  video_completed: boolean | null;
+  enrollment_id: string;
+  last_accessed: string | null;
 }
 
 interface CourseCardData {
@@ -46,6 +52,8 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) redirect("/login?redirect=/dashboard/student");
+
   const { data: profile } = user
     ? await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle()
     : { data: null };
@@ -60,7 +68,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
   const { data: enrollmentData } = await supabase
     .from("enrollments")
     .select("id, course_id, courses(id, title)")
-    .eq("student_id", user!.id)
+    .eq("student_id", user.id)
     .eq("status", "approved")
     .order("created_at", { ascending: false });
 
@@ -73,13 +81,13 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
   if (courseIds.length > 0) {
     const { data: modulesData } = await supabase
       .from("modules")
-      .select("id, course_id, order_index, lessons(id, order_index, title)")
+      .select("id, course_id, order_index, lessons(id, order_index, title, is_published)")
       .in("course_id", courseIds)
       .order("order_index", { ascending: true });
 
     const { data: trackingData } = await supabase
       .from("scorm_tracking")
-      .select("lesson_id, lesson_status, enrollment_id")
+      .select("lesson_id, lesson_status, video_completed, enrollment_id, last_accessed")
       .in(
         "enrollment_id",
         enrollments.map((e) => e.id)
@@ -92,11 +100,6 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       modulesByCourse.set(m.course_id, list);
     }
 
-    const trackingByLesson = new Map<string, TrackingRow>();
-    for (const t of (trackingData ?? []) as (TrackingRow & { enrollment_id: string })[]) {
-      trackingByLesson.set(t.lesson_id, t);
-    }
-
     for (const e of enrollments) {
       // e.courses เป็น null ได้ถ้า RLS บล็อกคอร์สนี้ (เช่นสถานะไม่ใช่ published ชั่วคราว)
       if (!e.courses) continue;
@@ -106,24 +109,12 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       );
 
       const allLessons = modules.flatMap((m) =>
-        [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index)
+        [...(m.lessons ?? [])].filter((lesson) => lesson.is_published).sort((a, b) => a.order_index - b.order_index)
       );
 
-      const totalLessons = allLessons.length;
-      const completedLessons = allLessons.filter((l) => {
-        const s = trackingByLesson.get(l.id)?.lesson_status;
-        return s === "completed" || s === "passed";
-      }).length;
-
-      const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
-      if (progress === 100 && totalLessons > 0) completedCourseCount += 1;
-
-      const nextLesson = allLessons.find((l) => {
-        const s = trackingByLesson.get(l.id)?.lesson_status;
-        return s !== "completed" && s !== "passed";
-      });
-
-      const firstLessonId = allLessons[0]?.id ?? null;
+      const summary = summarizeStudentProgress(allLessons, ((trackingData ?? []) as TrackingRow[]).filter((row) => row.enrollment_id === e.id));
+      const { total: totalLessons, percent: progress, resumeLesson: nextLesson } = summary;
+      if (summary.allComplete) completedCourseCount += 1;
 
       cards.push({
         courseId: e.course_id,
@@ -132,12 +123,10 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
         nextLessonLabel:
           totalLessons === 0
             ? "ยังไม่มีบทเรียน"
-            : nextLesson
+            : nextLesson && !summary.allComplete
               ? nextLesson.title
               : "เรียนจบแล้ว",
-        href: firstLessonId
-          ? `/play/${e.course_id}/${nextLesson?.id ?? firstLessonId}`
-          : `/dashboard/student/courses/${e.course_id}`,
+        href: `/dashboard/student/courses/${e.course_id}`,
       });
     }
   }
@@ -145,7 +134,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
   const { count: certificateCount } = await supabase
     .from("certificates")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", user!.id)
+    .eq("user_id", user.id)
     .eq("status", "issued");
 
   return (
@@ -233,7 +222,7 @@ function CourseProgressRow({ course }: { course: CourseCardData }): ReactElement
           href={course.href}
           className="whitespace-nowrap rounded-xl bg-[#0F1B3D] px-4 py-2.5 text-[11.5px] font-bold text-white shadow-sm transition hover:bg-[#3157D5]"
         >
-          {isDone ? "ทบทวน" : "เข้าเรียน"}
+          ดูคอร์ส
         </Link>
       </div>
     </div>

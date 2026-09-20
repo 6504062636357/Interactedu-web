@@ -353,6 +353,15 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
 
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
   if (!input.moduleId) return { error: "ไม่พบหมวดบทเรียนของคอร์สนี้" };
+  const [{ data: actor }, { data: course }, { data: courseModule }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    supabase.from("courses").select("created_by").eq("id", input.courseId).maybeSingle(),
+    supabase.from("modules").select("course_id").eq("id", input.moduleId).maybeSingle(),
+  ]);
+  if (!course || courseModule?.course_id !== input.courseId ||
+    (actor?.role !== "admin" && !(actor?.role === "teacher" && course.created_by === user.id))) {
+    return { error: "ไม่มีสิทธิ์เพิ่มบทเรียนในคอร์สนี้" };
+  }
   if (!input.title.trim()) return { error: "กรุณาใส่ชื่อบทเรียน" };
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
@@ -361,6 +370,10 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
   // client จับได้จริงตอนโหลดวิดีโอ (แล้วเลือกค่าที่มากกว่า) แล้วบันทึกลง lessons.video_duration_seconds
   // — คอลัมน์นี้มีอยู่แล้วในฐานข้อมูล (default 0) แต่ก่อนหน้านี้แทบไม่มีจุดไหนเซ็ตค่าให้จริงเลย
   const videoDurationSeconds = resolveVideoDurationSeconds(preparedSegments.segments, input.videoDurationSeconds);
+
+  const { data: editingCourse, error: courseStatusError } = await supabase.from("courses")
+    .update({ status: "draft" }).eq("id", input.courseId).select("id").maybeSingle();
+  if (courseStatusError || !editingCourse) return { error: "เตรียมคอร์สสำหรับเพิ่มบทเรียนไม่สำเร็จ" };
 
   // 1. หา order_index ถัดไปใน module
   const { data: lastLesson } = await supabase
@@ -433,6 +446,9 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     }
   }
 
+  revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
+  revalidatePath(`/dashboard/teacher/courses/${input.courseId}`);
+  revalidatePath("/courses");
   return { draftId: draft.id, lessonId: lesson.id };
 }
 
@@ -468,16 +484,26 @@ export interface ExistingDraftData {
   }[];
 }
 
-export async function getLessonDraftForEdit(lessonId: string): Promise<{ data?: ExistingDraftData; error?: string }> {
+export async function getLessonDraftForEdit(lessonId: string, courseId?: string): Promise<{ data?: ExistingDraftData; error?: string }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
 
   const { data: lesson, error: lessonError } = await supabase
     .from("lessons")
-    .select("id, title")
+    .select("id, title, course_id")
     .eq("id", lessonId)
     .single();
 
   if (lessonError || !lesson) return { error: "ไม่พบบทเรียนนี้" };
+  if (courseId && lesson.course_id !== courseId) return { error: "บทเรียนไม่อยู่ในคอร์สที่ระบุ" };
+  const [{ data: actor }, { data: course }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    supabase.from("courses").select("created_by").eq("id", lesson.course_id).maybeSingle(),
+  ]);
+  if (!course || (actor?.role !== "admin" && !(actor?.role === "teacher" && course.created_by === user.id))) {
+    return { error: "ไม่มีสิทธิ์แก้ไขบทเรียนนี้" };
+  }
 
   const { data: draft, error: draftError } = await supabase
     .from("lesson_drafts")
@@ -576,14 +602,28 @@ export async function updateLessonDraft(input: {
   } = await supabase.auth.getUser();
 
   if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+  const [{ data: actor }, { data: course }, { data: lesson }, { data: draft }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    supabase.from("courses").select("created_by").eq("id", input.courseId).maybeSingle(),
+    supabase.from("lessons").select("course_id").eq("id", input.lessonId).maybeSingle(),
+    supabase.from("lesson_drafts").select("lesson_id, teacher_id").eq("id", input.draftId).maybeSingle(),
+  ]);
+  if (!course || lesson?.course_id !== input.courseId || draft?.lesson_id !== input.lessonId ||
+    (actor?.role !== "admin" && !(actor?.role === "teacher" && course.created_by === user.id && draft.teacher_id === user.id))) {
+    return { error: "ไม่มีสิทธิ์แก้ไขบทเรียนนี้ หรือบทเรียนไม่อยู่ในคอร์สที่ระบุ" };
+  }
   if (!input.title.trim()) return { error: "กรุณาใส่ชื่อบทเรียน" };
   const preparedSegments = prepareVideoSegments(input.videoSegments);
   if (!preparedSegments.segments) return { error: preparedSegments.error ?? "ข้อมูลช่วงวิดีโอไม่ถูกต้อง" };
 
   const videoDurationSeconds = resolveVideoDurationSeconds(preparedSegments.segments, input.videoDurationSeconds);
 
-  // 1-3. อัปเดต lesson / draft / สถานะคอร์ส พร้อมกัน — ไม่มีอันไหนต้องรอผลอันอื่นก่อน
-  const [{ error: lessonError }, { error: draftError }, { error: courseStatusError }] = await Promise.all([
+  // Stop exposing a published course before changing its lesson content.
+  const { data: editingCourse, error: courseStatusError } = await supabase.from("courses")
+    .update({ status: "draft" }).eq("id", input.courseId).select("id").maybeSingle();
+  if (courseStatusError || !editingCourse) return { error: "อัปเดตสถานะคอร์สเป็นฉบับร่างไม่สำเร็จ" };
+
+  const [{ data: savedLesson, error: lessonError }, { data: savedDraft, error: draftError }] = await Promise.all([
     supabase
       .from("lessons")
       .update({
@@ -591,7 +631,7 @@ export async function updateLessonDraft(input: {
         video_url: input.videoUrl,
         video_duration_seconds: videoDurationSeconds,
       })
-      .eq("id", input.lessonId),
+      .eq("id", input.lessonId).eq("course_id", input.courseId).select("id").maybeSingle(),
     supabase
       .from("lesson_drafts")
       .update({
@@ -600,13 +640,11 @@ export async function updateLessonDraft(input: {
         status: "draft",
       })
       .eq("id", input.draftId)
-      .eq("teacher_id", user.id),
-    supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId),
+      .eq("lesson_id", input.lessonId).select("id").maybeSingle(),
   ]);
 
-  if (lessonError) return { error: "อัปเดตชื่อบทเรียนไม่สำเร็จ" };
-  if (draftError) return { error: "อัปเดตฉบับร่างไม่สำเร็จ" };
-  if (courseStatusError) return { error: "อัปเดตสถานะคอร์สเป็นฉบับร่างไม่สำเร็จ" };
+  if (lessonError || !savedLesson) return { error: "อัปเดตชื่อบทเรียนไม่สำเร็จ" };
+  if (draftError || !savedDraft) return { error: "อัปเดตฉบับร่างไม่สำเร็จ" };
 
   const segmentError = await replaceVideoSegments(
     supabase,
@@ -673,6 +711,9 @@ export async function updateLessonDraft(input: {
     }
   }
 
+  revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
+  revalidatePath(`/dashboard/teacher/courses/${input.courseId}`);
+  revalidatePath("/courses");
   return { draftId: input.draftId, lessonId: input.lessonId };
 }
 

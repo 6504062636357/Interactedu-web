@@ -108,16 +108,16 @@ export async function CourseLessonEditorPage({
   // ให้ retry เงียบ 1 ครั้ง แล้วถ้ายังไม่ได้ให้โชว์หน้า error + ปุ่มลองใหม่ ไม่ตกไปหน้าเพิ่มใหม่
   let initialData: ExistingDraftData | null = null;
   if (lessonId) {
-    let result = await getLessonDraftForEdit(lessonId);
+    let result = await getLessonDraftForEdit(lessonId, courseId);
 
     // transient error → ลองซ้ำอีกครั้งแบบเงียบๆ ก่อนฟันธง
     if (!result.data && result.error && !NO_DRAFT_ERRORS.has(result.error)) {
-      result = await getLessonDraftForEdit(lessonId);
+      result = await getLessonDraftForEdit(lessonId, courseId);
     }
 
     if (result.data) {
       initialData = result.data;
-    } else if (result.error && !NO_DRAFT_ERRORS.has(result.error)) {
+    } else {
       // ยังพลาดอยู่ และไม่ใช่กรณี "ไม่มี draft" ที่ถูกต้องตามกติกา → อย่าเด้งไปหน้าเพิ่มใหม่
       console.error("[lessons/new] load draft failed:", lessonId, result.error);
       return (
@@ -125,7 +125,7 @@ export async function CourseLessonEditorPage({
           <main className="max-w-3xl mx-auto text-center py-20">
             <p className="text-[15px] font-bold text-red-500 mb-2">โหลดบทเรียนที่จะแก้ไขไม่สำเร็จ</p>
             <p className="text-[13.5px] text-[#0F1B3D]/50 mb-6">
-              อาจเกิดจากปัญหาการเชื่อมต่อชั่วคราว กรุณาลองใหม่อีกครั้ง — ข้อมูลบทเรียนเดิมยังอยู่ครบ ไม่ได้หายไป
+              {result.error ?? "ไม่สามารถโหลดฉบับร่างได้ กรุณาลองใหม่อีกครั้ง"}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Link
@@ -145,7 +145,6 @@ export async function CourseLessonEditorPage({
         </div>
       );
     }
-    // result.error เป็น NO_DRAFT_ERRORS → ปล่อย initialData = null ตามเดิม (เข้าโหมดสร้างใหม่ได้)
   }
 
   return (
@@ -163,7 +162,9 @@ export async function CourseLessonEditorPage({
             {initialData ? "แก้ไขบทเรียน" : "เพิ่มบทเรียนใหม่"}
           </h1>
           <p className="mt-1.5 text-[14px] text-[#0F1B3D]/50">
-            {initialData
+            {workspace === "admin"
+              ? "บันทึกเนื้อหาบทเรียนและควิซ จากนั้นจัดทำบททดสอบท้ายคอร์สให้ครบก่อนเผยแพร่คอร์สได้ทันที"
+              : initialData
               ? "แก้ไขข้อมูลบทเรียน วิดีโอ และแบบทดสอบ แล้วส่งให้แอดมินตรวจสอบอีกครั้ง"
               : "กรอกข้อมูลบทเรียนพร้อมวิดีโอและแบบทดสอบ แล้วส่งให้แอดมินตรวจสอบก่อนเผยแพร่"}
           </p>

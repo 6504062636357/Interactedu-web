@@ -626,6 +626,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   function handleExit() {
     router.push(`/dashboard/student/courses/${courseId}`);
+    router.refresh();
   }
 
   const previousCourseLesson = courseLessonIndex > 0 ? courseLessons[courseLessonIndex - 1] : null;
@@ -642,7 +643,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   function handleNext(): void {
     if (nextItem) handleSelectItem(nextItem.href);
     else if (nextCourseLesson) handleSelectLesson(nextCourseLesson.id);
-    else router.push(`/dashboard/student/courses/${courseId}/final-exam`);
+    else handleExit();
   }
 
   function renderMenuItems(items: ScormMenuItem[], depth = 0) {
@@ -910,7 +911,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
               </svg>
-              Back to course
+              กลับหน้าคอร์ส
             </button>
           </div>
         </aside>
@@ -922,7 +923,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button type="button" onClick={handleExit} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3 py-2.5 text-[12px] font-bold text-slate-200 transition hover:bg-white/[0.11] hover:text-white sm:px-4" title="กลับหน้ารายละเอียดคอร์ส">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-              <span className="hidden sm:inline">Back</span>
+              <span className="hidden sm:inline">กลับหน้าคอร์ส</span>
             </button>
             {!sidebarOpen && (
               <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-white/[0.09] bg-white/[0.05] p-2.5 text-slate-300 transition-colors hover:bg-white/[0.11] hover:text-white" title="เปิดเมนูบทเรียน">
@@ -959,7 +960,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             </button>
             <div className="min-w-0 px-3 text-center"><p className="truncate text-[11.5px] font-semibold text-slate-400">{displayLessonTitle ?? currentItem?.title}</p><p className="mt-0.5 text-[10.5px] text-slate-600">บันทึกความคืบหน้าอัตโนมัติ</p></div>
             <button onClick={handleNext} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#FF684D] to-[#FF8066] px-4 py-2.5 text-[12.5px] font-extrabold text-white shadow-lg shadow-orange-950/20 transition hover:brightness-110 sm:px-5">
-              {nextItem ? 'ถัดไป' : nextCourseLesson ? 'บทเรียนถัดไป' : 'ไปทำข้อสอบหลังเรียน'}
+              {nextItem ? 'ถัดไป' : nextCourseLesson ? 'บทเรียนถัดไป' : 'ดูสรุปการเรียน'}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
             </button>
           </footer>

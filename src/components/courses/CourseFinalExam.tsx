@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface Question {
@@ -31,6 +32,7 @@ interface Result {
 }
 
 export default function CourseFinalExam({ courseId }: { courseId: string }) {
+  const router = useRouter();
   const [exam, setExam] = useState<ExamData | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [result, setResult] = useState<Result | null>(null);
@@ -71,6 +73,7 @@ export default function CourseFinalExam({ courseId }: { courseId: string }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "ส่งข้อสอบไม่สำเร็จ");
       setResult(data as Result);
+      router.refresh();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "ส่งข้อสอบไม่สำเร็จ");

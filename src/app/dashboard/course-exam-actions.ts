@@ -64,6 +64,11 @@ export async function saveCourseFinalExam(input: {
   const targetDraft = drafts.find((draft) => draft.lesson_id === lastLessonWithDraft?.id);
   if (!targetDraft) return { error: "ไม่พบฉบับร่างสำหรับจัดเก็บบททดสอบ" };
 
+  const { data: editingCourse, error: stateError } = await supabase.from("courses")
+    .update({ status: isAdmin ? "draft" : "pending", exam_status: "pending", exam_reviewed_by: null, exam_reviewed_at: null, exam_rejection_reason: null })
+    .eq("id", input.courseId).select("id").maybeSingle();
+  if (stateError || !editingCourse) return { error: "เตรียมคอร์สสำหรับแก้ไขบททดสอบไม่สำเร็จ" };
+
     const draftIds = drafts.map((draft) => draft.id);
   const { error: deleteError } = await supabase
     .from("quiz_questions")
@@ -108,7 +113,6 @@ export async function saveCourseFinalExam(input: {
     if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
   }
 
-  if (!isAdmin) await supabase.from("courses").update({ status: "pending" }).eq("id", input.courseId);
   // if (!isAdmin) {
   //   await supabase.from("courses").update({ status: "draft" }).eq("id", input.courseId);
 
@@ -136,6 +140,7 @@ export async function saveCourseFinalExam(input: {
   revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}/exam`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}/review`);
+  revalidatePath("/courses");
   return {};
 }
 
@@ -196,6 +201,11 @@ export async function saveCourseExamConfig(input: SaveCourseExamConfigInput): Pr
   // งงบ่อยว่าทำไมกรอกครบแล้วยังเซฟไม่ผ่าน) ตอนนี้คำนวณจากผลรวมให้เลย ไม่ต้องมีช่องให้กรอกซ้ำอีกแล้ว
   const totalQuestions = input.customConstraints.reduce((total, constraint) => total + constraint.count, 0);
 
+  const { data: editingCourse, error: stateError } = await supabase.from("courses")
+    .update({ status: isAdmin ? "draft" : "pending", exam_status: "pending", exam_reviewed_by: null, exam_reviewed_at: null, exam_rejection_reason: null })
+    .eq("id", input.courseId).select("id").maybeSingle();
+  if (stateError || !editingCourse) return { error: "เตรียมคอร์สสำหรับแก้ไขบททดสอบไม่สำเร็จ" };
+
   const { error: upsertError } = await supabase.from("course_exam_configs").upsert(
     {
       course_id: input.courseId,
@@ -210,6 +220,10 @@ export async function saveCourseExamConfig(input: SaveCourseExamConfigInput): Pr
   );
   if (upsertError) return { error: upsertError.message };
 
+  revalidatePath(`/dashboard/teacher/courses/${input.courseId}`);
+  revalidatePath(`/dashboard/admin/courses/${input.courseId}`);
+  revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/courses");
   revalidatePath(`/dashboard/teacher/courses/${input.courseId}/exam`);
   revalidatePath(`/dashboard/admin/courses/${input.courseId}/exam`);
   return {};

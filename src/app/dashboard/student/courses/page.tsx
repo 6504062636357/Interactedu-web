@@ -1,6 +1,8 @@
 // app/dashboard/student/courses/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { summarizeStudentProgress } from "@/lib/courses/student-progress";
 import { createClient } from "@/utils/supabase/server";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
@@ -19,6 +21,7 @@ interface EnrollmentRow {
 interface LessonRef {
   id: string;
   order_index: number;
+  is_published: boolean;
 }
 
 interface ModuleWithLessons {
@@ -31,6 +34,7 @@ interface ModuleWithLessons {
 interface TrackingRow {
   lesson_id: string;
   lesson_status: string | null;
+  video_completed: boolean | null;
   enrollment_id: string;
 }
 
@@ -76,7 +80,7 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
           {course.title}
         </p>
         <p className="text-[12.5px] text-[#0F1B3D]/50 font-medium mb-1.5">
-          {isDone ? "เรียนจบแล้ว" : `เรียนไปแล้ว ${course.progress}%`}
+          {isDone ? "เรียนครบทุกบทแล้ว" : `เรียนไปแล้ว ${course.progress}%`}
         </p>
         <div className="h-1.5 w-full bg-[#0F1B3D]/[0.06] rounded-full overflow-hidden">
           <div
@@ -84,6 +88,7 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
             style={{ width: `${course.progress}%` }}
           />
         </div>
+        <p className="mt-3 text-xs font-bold text-[#3157D5]">ดูรายละเอียดและบทเรียน →</p>
       </div>
     </Link>
   );
@@ -95,10 +100,12 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) redirect("/login?redirect=/dashboard/student/courses");
+
   const { data } = await supabase
     .from("enrollments")
     .select("id, course_id, courses(id, title, cover_image_url)")
-    .eq("student_id", user!.id)
+    .eq("student_id", user.id)
     .eq("status", "approved")
     .order("created_at", { ascending: false });
 
@@ -109,7 +116,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
     ? await supabase
         .from("certificates")
         .select("course_id")
-        .eq("user_id", user!.id)
+        .eq("user_id", user.id)
         .eq("status", "issued")
         .in("course_id", courseIds)
     : { data: [] };
@@ -120,13 +127,13 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
   if (courseIds.length > 0) {
     const { data: modulesData } = await supabase
       .from("modules")
-      .select("id, course_id, order_index, lessons(id, order_index)")
+      .select("id, course_id, order_index, lessons(id, order_index, is_published)")
       .in("course_id", courseIds)
       .order("order_index", { ascending: true });
 
     const { data: trackingData } = await supabase
       .from("scorm_tracking")
-      .select("lesson_id, lesson_status, enrollment_id")
+      .select("lesson_id, lesson_status, video_completed, enrollment_id")
       .in(
         "enrollment_id",
         enrollments.map((e) => e.id)
@@ -139,45 +146,6 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
       modulesByCourse.set(m.course_id, list);
     }
 
-    const trackingByLesson = new Map<string, TrackingRow>();
-    for (const t of (trackingData ?? []) as TrackingRow[]) {
-      trackingByLesson.set(t.lesson_id, t);
-    }
-
-    // for (const e of enrollments) {
-    //   const modules = [...(modulesByCourse.get(e.course_id) ?? [])].sort(
-    //     (a, b) => a.order_index - b.order_index
-    //   );
-    //   const allLessons = modules.flatMap((m) =>
-    //     [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index)
-    //   );
-
-    //   const totalLessons = allLessons.length;
-    //   const completedLessons = allLessons.filter((l) => {
-    //     const s = trackingByLesson.get(l.id)?.lesson_status;
-    //     return s === "completed" || s === "passed";
-    //   }).length;
-
-    //   const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
-
-    //   // บทเรียนถัดไปที่ยังไม่จบ -> ถ้าจบหมดแล้วกลับไปบทแรก, ถ้ายังไม่มีบทเรียนเลยไปหน้ารายละเอียดคอร์สแทน
-    //   const nextLesson = allLessons.find((l) => {
-    //     const s = trackingByLesson.get(l.id)?.lesson_status;
-    //     return s !== "completed" && s !== "passed";
-    //   });
-    //   const targetLessonId = nextLesson?.id ?? allLessons[0]?.id ?? null;
-
-    //   cards.push({
-    //     enrollmentId: e.id,
-    //     courseId: e.course_id,
-    //     title: e.courses.title,
-    //     coverImageUrl: e.courses.cover_image_url,
-    //     progress,
-    //     href: targetLessonId
-    //       ? `/play/${e.course_id}/${targetLessonId}`
-    //       : `/dashboard/student/courses/${e.course_id}`,
-    //   });
-    // }
     for (const e of enrollments) {
       // e.courses เป็น null ได้ถ้า RLS ของตาราง courses บล็อกแถวนี้
       // (เช่น คอร์สถูกแก้ไขจน status ไม่ใช่ published ชั่วคราว) ข้ามไปเพื่อไม่ให้หน้าพัง
@@ -187,23 +155,10 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         (a, b) => a.order_index - b.order_index
       );
       const allLessons = modules.flatMap((m) =>
-        [...(m.lessons ?? [])].sort((a, b) => a.order_index - b.order_index)
+        [...(m.lessons ?? [])].filter((lesson) => lesson.is_published).sort((a, b) => a.order_index - b.order_index)
       );
 
-      const totalLessons = allLessons.length;
-      const completedLessons = allLessons.filter((l) => {
-        const s = trackingByLesson.get(l.id)?.lesson_status;
-        return s === "completed" || s === "passed";
-      }).length;
-
-      const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
-
-      // บทเรียนถัดไปที่ยังไม่จบ -> ถ้าจบหมดแล้วกลับไปบทแรก, ถ้ายังไม่มีบทเรียนเลยไปหน้ารายละเอียดคอร์สแทน
-      const nextLesson = allLessons.find((l) => {
-        const s = trackingByLesson.get(l.id)?.lesson_status;
-        return s !== "completed" && s !== "passed";
-      });
-      const targetLessonId = nextLesson?.id ?? allLessons[0]?.id ?? null;
+      const { percent: progress } = summarizeStudentProgress(allLessons, ((trackingData ?? []) as TrackingRow[]).filter((row) => row.enrollment_id === e.id));
 
       cards.push({
         enrollmentId: e.id,
@@ -212,9 +167,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         coverImageUrl: e.courses.cover_image_url,
         progress,
         certified: certifiedCourseIds.has(e.course_id),
-        href: targetLessonId
-          ? `/play/${e.course_id}/${targetLessonId}`
-          : `/dashboard/student/courses/${e.course_id}`,
+        href: `/dashboard/student/courses/${e.course_id}`,
       });
     }
   }
