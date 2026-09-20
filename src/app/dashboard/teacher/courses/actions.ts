@@ -148,7 +148,7 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
   const supabase = await createClient();
 
   // ดึง lessons + exam config พร้อมกัน ไม่ต้องรอทีละอย่าง
-  const [{ data: lessonsData }, { data: examConfig }, { data: courseLessonIdsData }] = await Promise.all([
+  const [{ data: lessonsData, error: lessonsError }, { data: examConfig, error: examError }] = await Promise.all([
     supabase
       .from("lessons")
       .select(
@@ -165,8 +165,11 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
       .select("custom_constraints")
       .eq("course_id", courseId)
       .maybeSingle(),
-    supabase.from("lessons").select("id").eq("course_id", courseId),
   ]);
+
+  if (lessonsError || examError) {
+    return { ready: false, hasLessons: false, lessonIssues: [], examConfigured: false, examIssue: "ตรวจสอบความพร้อมของคอร์สไม่สำเร็จ กรุณาลองใหม่" };
+  }
 
   const lessons = (lessonsData ?? []) as unknown as ReadinessLessonRow[];
 
@@ -222,37 +225,43 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
   // (saveCourseFinalExam ลบ config เดิมทิ้งเสมอ) เพราะคำถามจริงถูกเก็บตรงเป็น
   // quiz_questions ที่ lesson_draft_id ของบทใดบทหนึ่ง และ video_timestamp_seconds เป็น null
   // (แยกจากควิซแทรกวิดีโอที่มี timestamp) — ต้องเช็คจุดนี้ก่อนสรุปว่า "ยังไม่ได้ตั้งค่า"
-  const courseLessonIds = (courseLessonIdsData ?? []).map((l) => l.id);
+  const latestDraftIds = lessons.flatMap((lesson) => {
+    const latest = [...(lesson.lesson_drafts ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    return latest ? [latest.id] : [];
+  });
   let hasCustomExamQuestions = false;
-  if (courseLessonIds.length > 0) {
-    const { data: draftsForCourse } = await supabase
-      .from("lesson_drafts")
-      .select("id")
-      .in("lesson_id", courseLessonIds);
-    const draftIds = (draftsForCourse ?? []).map((d) => d.id);
-    if (draftIds.length > 0) {
-      const { count } = await supabase
+  let customExamIssue: string | null = null;
+  if (latestDraftIds.length > 0 && !examConfig) {
+      const { data: questions, error: questionsError } = await supabase
         .from("quiz_questions")
-        .select("id", { count: "exact", head: true })
-        .in("lesson_draft_id", draftIds)
+        .select("id, question_text, quiz_choices(choice_text, is_correct)")
+        .in("lesson_draft_id", latestDraftIds)
         .is("video_timestamp_seconds", null);
-      hasCustomExamQuestions = (count ?? 0) > 0;
-    }
+      hasCustomExamQuestions = (questions?.length ?? 0) > 0;
+      if (questionsError) customExamIssue = "ตรวจสอบบททดสอบท้ายคอร์สไม่สำเร็จ กรุณาลองใหม่";
+      else if (questions?.some((question) => !question.question_text?.trim() ||
+        question.quiz_choices.filter((choice) => choice.choice_text?.trim()).length < 2 ||
+        question.quiz_choices.filter((choice) => choice.is_correct && choice.choice_text?.trim()).length !== 1)) {
+        customExamIssue = "บททดสอบท้ายคอร์สยังมีคำถามหรือตัวเลือกไม่ครบ กรุณาแก้ไขก่อนเผยแพร่";
+      }
   }
 
   let examIssue: string | null = null;
-  if (hasCustomExamQuestions) {
+  if (customExamIssue) {
+    examIssue = customExamIssue;
+  } else if (hasCustomExamQuestions) {
     // โหมดพิมพ์เอง มีคำถามจริงบันทึกไว้แล้ว ถือว่าพร้อม ไม่ต้องเช็คคลังข้อสอบเพิ่ม
     examIssue = null;
   } else if (!examConfig) {
     examIssue = "ยังไม่ได้เพิ่มบททดสอบท้ายคอร์ส";
   } else {
     try {
-      await loadSampledFinalExamQuestions(supabase, {
+      const questions = await loadSampledFinalExamQuestions(supabase, {
         courseId,
         seed: `readiness-check-${courseId}`,
         customConstraints: examConfig.custom_constraints ?? [],
       });
+      if (questions.length === 0) examIssue = "กรุณาตั้งค่าบททดสอบท้ายคอร์สอย่างน้อย 1 ข้อ";
     } catch (err) {
       examIssue = err instanceof Error ? err.message : "คลังข้อสอบท้ายคอร์สไม่เพียงพอ";
     }

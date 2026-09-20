@@ -100,9 +100,9 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
           examConfig ? { customConstraints: examConfig.custom_constraints } : null
         }
         workspace={workspace}
-        readOnly={workspace === "admin"}
+        readOnly={workspace === "admin" && course.created_by !== user.id}
       />
-      {workspace === "admin" && (
+      {workspace === "admin" && course.created_by !== user.id && (
         <div className="mt-8">
           <CourseExamReviewActions
             courseId={courseId}

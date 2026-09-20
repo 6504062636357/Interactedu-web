@@ -1,6 +1,7 @@
 // src/app/api/courses/[courseId]/lessons/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { isLessonComplete } from '@/lib/courses/student-progress';
 
 interface LessonRow {
   id: string;
@@ -63,22 +64,21 @@ export async function GET(
 
   const { data: tracking } = await supabase
     .from('scorm_tracking')
-    .select('lesson_id, lesson_status')
+    .select('lesson_id, lesson_status, video_completed')
     .eq('enrollment_id', enrollment.id);
 
-  const statusByLesson = new Map<string, string | null>();
+  const completedByLesson = new Map<string, boolean>();
   for (const t of tracking ?? []) {
-    statusByLesson.set(t.lesson_id, t.lesson_status);
+    completedByLesson.set(t.lesson_id, isLessonComplete(t));
   }
 
   return NextResponse.json({
     lessons: lessons.map((l) => {
-      const status = statusByLesson.get(l.id) ?? null;
       return {
         id: l.id,
         title: l.title,
         moduleTitle: l.moduleTitle,
-        completed: status === 'completed' || status === 'passed',
+        completed: completedByLesson.get(l.id) ?? false,
       };
     }),
   });

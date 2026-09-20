@@ -8,7 +8,7 @@ import {
   type DraftQuestionInput,
   type ExistingDraftData,
 } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
-import { approveLesson } from "@/app/dashboard/admin/courses/[courseId]/review/actions";
+import { useRouter } from "next/navigation";
 import { uploadVideoToR2 } from "@/lib/uploadVideoToR2";
 import { genId } from "@/lib/uuid";
 import VideoSegmenter, { type VideoSegment } from "@/components/teacher/VideoSegmenter";
@@ -90,6 +90,7 @@ export default function LessonDraftForm({
   workspace = "teacher",
 }: LessonDraftFormProps): ReactElement {
   const isAdmin = workspace === "admin";
+  const router = useRouter();
   const isEditMode = !!initialData;
 
   const [activeTab, setActiveTab] = useState<TabKey>("info");
@@ -498,28 +499,19 @@ export default function LessonDraftForm({
     setSavedDraftId(savedResult.draftId);
     setSavedLessonId(savedResult.lessonId);
 
+    if (isAdmin) {
+      setSubmitting(false);
+      router.push(`/dashboard/admin/courses/${courseId}`);
+      router.refresh();
+      return;
+    }
+
     const result = await submitDraftForReview(savedResult.draftId, courseId);
 
     if (result?.error) {
       console.error("[LessonDraftForm] submitDraftForReview failed:", result.error);
       setSubmitError(result.error);
       setSubmitting(false);
-      return;
-    }
-
-    // แอดมินสร้างเอง ไม่ต้องมีใครมาตรวจสอบ -> approve ต่อทันทีในคราวเดียว
-    // (approveDraft จะสร้าง SCORM package ให้ด้วยในตัว เหมือนตอนแอดมินกด "อนุมัติเพื่อเผยแพร่" ปกติ)
-    if (isAdmin) {
-      const approveResult = await approveLesson(savedResult.draftId, savedResult.lessonId);
-      setSubmitting(false);
-
-      if (approveResult?.error) {
-        console.error("[LessonDraftForm] approveDraft failed:", approveResult.error);
-        setSubmitError(approveResult.error);
-        return;
-      }
-
-      setSubmitted(true);
       return;
     }
 
@@ -987,11 +979,11 @@ export default function LessonDraftForm({
                   ที่หน้าคอร์สด้วย (เว้นแต่คอร์ส publish แล้วและกำลังแก้บทที่ publish ไปแล้ว กรณีนั้น
                   ระบบจะดึงคอร์สกลับเข้าคิว pending ให้อัตโนมัติ) */}
               <p className="text-[13.5px] font-semibold text-[#00885F]">
-                {isAdmin ? "เผยแพร่บทเรียนเรียบร้อยแล้ว" : "บันทึกบทเรียนนี้เรียบร้อยแล้ว"}
+                บันทึกบทเรียนนี้เรียบร้อยแล้ว
               </p>
               <p className="mt-1 text-[12px] text-[#00885F]/70">
                 {isAdmin
-                  ? "หากกลับมาแก้ไข ต้องบันทึกและเผยแพร่ใหม่อีกครั้ง"
+                  ? "จัดทำบททดสอบท้ายคอร์สให้ครบ แล้วเผยแพร่จากหน้าจัดการคอร์ส"
                   : "ทำครบทุกบทแล้วอย่าลืมกด \"ส่งคอร์สเข้าตรวจ\" ที่หน้าหลักของคอร์ส คอร์สถึงจะไปถึงแอดมิน (หากกลับมาแก้ไขบทนี้ ต้องบันทึกและส่งตรวจใหม่อีกครั้ง)"}
               </p>
             </div>
@@ -1022,7 +1014,7 @@ export default function LessonDraftForm({
               </p>
               <p className="mt-1 text-[12px] text-[#0F1B3D]/45">
                 {isAdmin
-                  ? "เมื่อกดเผยแพร่ ระบบจะบันทึกเนื้อหาและควิซในวิดีโอล่าสุดให้อัตโนมัติ"
+                  ? "บันทึกบทเรียนก่อน แล้วจัดทำบททดสอบท้ายคอร์สให้ครบก่อนเผยแพร่ทั้งคอร์ส"
                   : "บันทึกร่างไว้แก้ต่อได้ เมื่อครบทุกบทให้ไปกดส่งตรวจที่หน้าหลัก"}
               </p>
               {submitError && <p className="mt-2 text-[13px] font-semibold text-[#EB4A2D]">{submitError}</p>}
@@ -1058,7 +1050,7 @@ export default function LessonDraftForm({
                   : submitting
                   ? "กำลังบันทึก..."
                   : isAdmin
-                    ? "เผยแพร่"
+                    ? "บันทึกและกลับไปที่คอร์ส"
                     : "บันทึกบทเรียน"}
               </button>
             </div>

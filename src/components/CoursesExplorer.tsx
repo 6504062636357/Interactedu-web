@@ -78,7 +78,7 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
             href={isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
             className="relative z-20 text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
-            {isEnrolled ? "เข้าเรียนต่อ" : "ลงทะเบียน"}
+            {isEnrolled ? "เข้าคอร์สเรียน" : "ลงทะเบียน"}
           </Link>
         </div>
       </div>

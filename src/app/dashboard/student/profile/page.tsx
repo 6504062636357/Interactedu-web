@@ -1,6 +1,7 @@
 // app/dashboard/student/profile/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
+import { summarizeStudentProgress } from "@/lib/courses/student-progress";
 import StudentProfileClient from "@/components/StudentProfileClient";
 import { ArrowUpRight, Award, BookOpenText, GraduationCap, Play } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
@@ -68,49 +69,16 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
 
   const tracking = (trackingRaw ?? []) as ScormTrackingRow[];
 
-  // // นับจำนวนบทเรียนจริงต่อคอร์ส จากตาราง lessons แทนการพึ่ง courses.total_lessons (ค้างเป็น 0 ไม่ถูกอัปเดต)
-  // const { data: lessonsRaw } = courseIds.length
-  //   ? await supabase.from("lessons").select("id, course_id").in("course_id", courseIds)
-  //   : { data: [] };
-
-  // const totalLessonsByCourse = new Map<string, number>();
-  // for (const l of lessonsRaw ?? []) {
-  //   totalLessonsByCourse.set(l.course_id, (totalLessonsByCourse.get(l.course_id) ?? 0) + 1);
-  // }
-  // นับจำนวนบทเรียนจริงต่อคอร์ส จากตาราง lessons แทนการพึ่ง courses.total_lessons (ค้างเป็น 0 ไม่ถูกอัปเดต)
   const { data: lessonsRaw } = courseIds.length
-    ? await supabase.from("lessons").select("id, course_id, order_index").in("course_id", courseIds)
+    ? await supabase.from("lessons").select("id, course_id, order_index").in("course_id", courseIds).eq("is_published", true)
     : { data: [] };
 
-  const totalLessonsByCourse = new Map<string, number>();
-  const lessonsByCourse = new Map<string, { id: string; order_index: number }[]>();
-  for (const l of lessonsRaw ?? []) {
-    totalLessonsByCourse.set(l.course_id, (totalLessonsByCourse.get(l.course_id) ?? 0) + 1);
-    if (!lessonsByCourse.has(l.course_id)) lessonsByCourse.set(l.course_id, []);
-    lessonsByCourse.get(l.course_id)!.push(l);
-  }
-
-  const firstLessonByCourse = new Map<string, string>();
-  for (const [courseId, lessons] of lessonsByCourse) {
-    const sorted = [...lessons].sort((a, b) => a.order_index - b.order_index);
-    if (sorted[0]) firstLessonByCourse.set(courseId, sorted[0].id);
-  }
-  // นับจำนวนบทเรียนที่ "จบแล้ว" ต่อ enrollment (ไม่นับซ้ำ lesson เดียวกัน)
-  const completedLessonsByEnrollment = new Map<string, Set<string>>();
-  for (const t of tracking) {
-    const isDone = t.lesson_status === "completed" || t.lesson_status === "passed" || t.video_completed === true;
-    if (!isDone) continue;
-    if (!completedLessonsByEnrollment.has(t.enrollment_id)) {
-      completedLessonsByEnrollment.set(t.enrollment_id, new Set());
-    }
-    completedLessonsByEnrollment.get(t.enrollment_id)!.add(t.lesson_id);
-  }
-
-  const coursesWithProgress = enrollments.map((e) => {
-    const completed = completedLessonsByEnrollment.get(e.id)?.size ?? 0;
-    const total = totalLessonsByCourse.get(e.course_id) ?? 0;
-    const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
-    return { ...e, completed, total, percent };
+  const coursesWithProgress = enrollments.filter((enrollment) => enrollment.courses).map((enrollment) => {
+    const summary = summarizeStudentProgress(
+      (lessonsRaw ?? []).filter((lesson) => lesson.course_id === enrollment.course_id),
+      tracking.filter((row) => row.enrollment_id === enrollment.id)
+    );
+    return { ...enrollment, completed: summary.completed, total: summary.total, percent: summary.percent };
   });
 
   const inProgress = coursesWithProgress.filter((c) => c.percent < 100);
@@ -198,14 +166,10 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
                 </div>
 
                 <Link
-                  href={
-                    firstLessonByCourse.get(e.courses.id)
-                      ? `/play/${e.courses.id}/${firstLessonByCourse.get(e.courses.id)}`
-                      : `/play/${e.courses.id}`
-                  }
+                  href={`/dashboard/student/courses/${e.courses.id}`}
                   className="inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-[#0F1B3D] px-4 py-2.5 text-[12px] font-bold text-white transition-colors hover:bg-[#3157D5]"
                 >
-                  <Play size={13} fill="currentColor" /> เรียนต่อ
+                  <Play size={13} fill="currentColor" /> ดูคอร์ส
                 </Link>
               </div>
             ))}

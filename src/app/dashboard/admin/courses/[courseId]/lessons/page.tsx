@@ -74,6 +74,8 @@ export default async function AdminCourseLessonsPage({
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/dashboard/admin/courses/${courseId}/lessons/new?lessonId=${lesson.id}`} className="rounded-full border border-slate-200 px-4 py-2 text-[12.5px] font-bold text-blue-950 hover:bg-slate-50">แก้ไขบทเรียน</Link>
                {lesson.is_scorm && (
   <div className="flex items-center gap-2 shrink-0">
     <Link
@@ -86,6 +88,7 @@ export default async function AdminCourseLessonsPage({
     <RegenerateScormButton lessonId={lesson.id} />
   </div>
 )}
+                </div>
               </div>
             ))
           ) : (

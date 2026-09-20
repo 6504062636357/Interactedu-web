@@ -6,6 +6,8 @@ import AdminLessonOverview, { type AdminLesson } from "@/components/admin/AdminL
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
 import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import { createClient } from "@/utils/supabase/server";
+import { checkCourseReadiness } from "@/app/dashboard/teacher/courses/actions";
+import PublishCourseButton from "@/components/admin/PublishCourseButton";
 
 interface CertificateSettings {
   certificate_enabled: boolean;
@@ -43,6 +45,9 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
   if (!courseRes.data) notFound();
 
   const course = courseRes.data;
+  const { data: { user } } = await supabase.auth.getUser();
+  const isOwnCourse = course.created_by === user?.id;
+  const readiness = isOwnCourse ? await checkCourseReadiness(courseId) : null;
   const certificate = certificateRes.data as CertificateSettings | null;
   const lessons = (lessonsRes.data ?? []) as unknown as AdminLesson[];
 
@@ -56,12 +61,25 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
           <p className="mt-1 text-[12.5px] text-slate-500">{course.course_code ?? "ไม่ระบุรหัส"} · สถานะ {course.status}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {course.status === "pending" && <Link href={`/dashboard/admin/courses/${course.id}/review`} className="rounded-full bg-amber-500 px-4 py-2.5 text-[12.5px] font-bold text-white">ตรวจและอนุมัติ</Link>}
+          {!isOwnCourse && course.status === "pending" && <Link href={`/dashboard/admin/courses/${course.id}/review`} className="rounded-full bg-amber-500 px-4 py-2.5 text-[12.5px] font-bold text-white">ตรวจและอนุมัติ</Link>}
           <Link href={`/dashboard/admin/courses/${course.id}/materials`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2.5 text-[12.5px] font-bold text-[#0F1B3D]">เอกสารประกอบ</Link>
           <Link href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2.5 text-[12.5px] font-bold text-[#0F1B3D]">บททดสอบท้ายคอร์ส</Link>
           <Link href={`/dashboard/admin/courses/${course.id}/lessons/new`} className="rounded-full bg-[#FF5A3C] px-4 py-2.5 text-[12.5px] font-bold text-white">+ เพิ่มบทเรียน</Link>
         </div>
       </div>
+
+      {readiness && course.status !== "published" && (
+        <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50 p-5">
+          <h2 className="font-bold text-[#0F1B3D]">เตรียมคอร์สก่อนเผยแพร่</h2>
+          <p className="mt-1 text-sm text-slate-600">บันทึกบทเรียนและบททดสอบท้ายคอร์สให้ครบ จากนั้นเผยแพร่ได้ทันทีโดยไม่ต้องส่งอนุมัติ</p>
+          {!readiness.ready && <ul className="my-3 list-inside list-disc space-y-1 text-sm text-amber-800">
+            {!readiness.hasLessons && <li>ยังไม่มีบทเรียน</li>}
+            {readiness.lessonIssues.map((issue) => <li key={issue.lessonId}>{issue.title}: {issue.missingVideo ? "ยังไม่มีวิดีโอ" : "คลังคำถามสำหรับควิซไม่เพียงพอ"}</li>)}
+            {readiness.examIssue && <li>{readiness.examIssue} — <Link href={`/dashboard/admin/courses/${course.id}/exam`} className="font-bold underline">จัดการบททดสอบท้ายคอร์ส</Link></li>}
+          </ul>}
+          <div className="mt-4"><PublishCourseButton courseId={course.id} ready={readiness.ready} /></div>
+        </section>
+      )}
 
       <CourseManagementTabs tabs={[
         { id: "lessons", label: `บทเรียน (${lessons.length})`, description: "เนื้อหาและคำถาม", content: (

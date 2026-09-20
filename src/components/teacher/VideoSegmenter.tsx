@@ -69,6 +69,57 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
+function formatEditableTime(seconds: number): string {
+  const tenths = Math.round(Math.max(0, seconds) * 10);
+  const minutes = Math.floor(tenths / 600);
+  const remainder = ((tenths % 600) / 10).toFixed(1).replace(/\.0$/, "");
+  return `${minutes}:${Number(remainder) < 10 ? "0" : ""}${remainder}`;
+}
+
+function SegmentTimeInput({ label, value, min, max, onChange }: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (seconds: number) => void;
+}): ReactElement {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function commit() {
+    if (draft === null) return;
+    const match = /^(\d+):([0-5]\d)(?:\.(\d))?$/.exec(draft.trim());
+    const seconds = match ? Number(match[1]) * 60 + Number(match[2]) + Number(match[3] ?? 0) / 10 : NaN;
+    if (!Number.isFinite(seconds) || seconds < min || seconds > max) {
+      setError(`กรอกเวลา ${formatEditableTime(min)}–${formatEditableTime(max)} เช่น 4:57`);
+    } else {
+      onChange(seconds);
+      setError(null);
+    }
+    setDraft(null);
+  }
+
+  return (
+    <label className="rounded-xl bg-[#F8F9FB] px-3 py-2">
+      <span className="block text-[9.5px] font-bold text-[#0F1B3D]/35">{label} (นาที:วินาที)</span>
+      <input
+        type="text"
+        value={draft ?? formatEditableTime(value)}
+        placeholder="0:00"
+        aria-invalid={!!error}
+        onChange={(event) => { setDraft(event.target.value); setError(null); }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+          if (event.key === "Escape") { setDraft(null); setError(null); }
+        }}
+        className="mt-1 w-full min-w-0 bg-transparent text-[12px] font-bold tabular-nums text-[#0F1B3D] outline-none focus:ring-2 focus:ring-[#7C5CFF]/30"
+      />
+      {error && <span role="alert" className="mt-1 block text-[10px] text-red-600">{error}</span>}
+    </label>
+  );
+}
+
 function createSegment(
   index: number,
   start: number,
@@ -596,36 +647,10 @@ export default function VideoSegmenter({
                 </div>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                  <label className="rounded-xl bg-[#F8F9FB] px-3 py-2">
-                    <span className="block text-[9.5px] font-bold text-[#0F1B3D]/35">เริ่ม (วินาที)</span>
-                    <span className="mt-1 flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={segment.end}
-                        step={0.1}
-                        value={segment.start}
-                        onChange={(event) => updateSegment(segment.id, { start: Number(event.target.value) })}
-                        className="min-w-0 flex-1 bg-transparent text-[12px] font-bold text-[#0F1B3D] outline-none"
-                      />
-                      <span className="text-[10.5px] font-semibold text-[#7C5CFF]">{formatTime(segment.start)}</span>
-                    </span>
-                  </label>
-                  <label className="rounded-xl bg-[#F8F9FB] px-3 py-2">
-                    <span className="block text-[9.5px] font-bold text-[#0F1B3D]/35">จบ (วินาที)</span>
-                    <span className="mt-1 flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={segment.start}
-                        max={duration}
-                        step={0.1}
-                        value={segment.end}
-                        onChange={(event) => updateSegment(segment.id, { end: Number(event.target.value) })}
-                        className="min-w-0 flex-1 bg-transparent text-[12px] font-bold text-[#0F1B3D] outline-none"
-                      />
-                      <span className="text-[10.5px] font-semibold text-[#7C5CFF]">{formatTime(segment.end)}</span>
-                    </span>
-                  </label>
+                  <SegmentTimeInput label="เริ่ม" value={segment.start} min={0} max={segment.end}
+                    onChange={(start) => updateSegment(segment.id, { start })} />
+                  <SegmentTimeInput label="จบ" value={segment.end} min={segment.start} max={duration || segment.end}
+                    onChange={(end) => updateSegment(segment.id, { end })} />
                   <button
                     type="button"
                     onClick={() => jumpTo(segment.start)}
