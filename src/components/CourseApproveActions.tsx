@@ -60,7 +60,7 @@ export default function CourseApproveActions({
     <div className="mb-6 rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5">
       <h2 className="mb-1 text-[15px] font-bold text-[#0F1B3D]">อนุมัติคอร์สทั้งหมด</h2>
       <p className="mb-4 text-[12.5px] text-[#0F1B3D]/50">
-        ต้องมีบทเรียนทุกบทส่ง draft พร้อมตรวจแล้ว (สถานะ "รอตรวจ") ถึงจะอนุมัติทั้งคอร์สได้ — เมื่ออนุมัติแล้วคอร์สจะเปิดให้นักเรียนเข้าเรียนทันที
+        ต้องมีบทเรียนทุกบทส่งฉบับร่างและตรวจผ่านสถานะ "รอตรวจ" แล้ว จึงอนุมัติทั้งคอร์สได้ อนุมัติแล้วนักเรียนเข้าเรียนได้ทันที
       </p>
 
       {error && (
@@ -77,7 +77,7 @@ export default function CourseApproveActions({
             disabled={approving}
             className="flex-1 inline-flex items-center justify-center text-[13.5px] font-bold text-white bg-[#00B37E] hover:bg-[#00996b] px-5 py-2.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {approving ? "กำลังอนุมัติ..." : "อนุมัติคอร์ส (Publish)"}
+            {approving ? "กำลังอนุมัติ..." : "อนุมัติคอร์ส"}
           </button>
           <button
             type="button"

@@ -340,6 +340,7 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
                 aria-describedby={fieldErrors.price ? "price-error" : undefined}
                 className={`${inputClass} ${fieldErrors.price ? "!border-red-400 focus:!border-red-500" : ""}`}
               />
+              <p className="mt-1.5 text-[12.5px] font-semibold text-red-600">ราคาคอร์สขั้นต่ำ 20 บาท</p>
               {fieldErrors.price && (
                 <p id="price-error" className="mt-1.5 text-[12.5px] font-medium text-red-600">{fieldErrors.price}</p>
               )}

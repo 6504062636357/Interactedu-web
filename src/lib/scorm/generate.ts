@@ -552,12 +552,21 @@ function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
     });
 }
 
+// [แก้บั๊ก: กดปิด (×) แล้ว modal เด้งขึ้นวนไม่จบ] เดิมฟังก์ชันนี้สั่ง video.play() เสมอไม่ว่าจะตอบ
+// คำถามแล้วหรือยัง — พอกดปิดโดยยังไม่ตอบ วิดีโอจะเล่นต่อทันที แต่ currentTime แทบไม่ขยับเลย ยังคง
+// >= timestamp ของคำถามเดิม (findNextUnansweredAt เช็คแบบ "ทุกจุดที่ผ่านมาแล้วแต่ยังไม่ตอบ" ไม่ใช่
+// แค่จุดปัจจุบัน) ทำให้ timeupdate ยิงอีกครั้งแล้วเจอคำถามเดิมที่ยังไม่ตอบ พาไป pause + เปิด modal ซ้ำ
+// ทันที กลายเป็น loop เปิด-ปิดไม่จบ — ตอนนี้ถ้ายังไม่ตอบ ปิดแล้วจะไม่เล่นวิดีโอต่ออัตโนมัติ (บล็อกไว้
+// ไม่ให้เรียนต่อจนกว่าจะตอบ) ผู้เรียนต้องกด "เล่น" เองอีกทีถึงจะเจอคำถามเดิมขึ้นมาให้ตอบใหม่ ส่วนกรณี
+// ตอบแล้ว (กดจากปุ่ม "เรียนต่อ") ยังคงเล่นวิดีโอต่อให้อัตโนมัติเหมือนเดิม ไม่กระทบพฤติกรรมเดิม
 function closeQuizModal() {
   var overlay = document.getElementById("quiz-overlay");
   overlay.classList.remove("open");
+  var question = pendingQuestion;
   pendingQuestion = null;
   var video = document.getElementById("lesson-video");
-  if (video) video.play();
+  var wasAnswered = !question || answeredQuestionIds[question.id];
+  if (video && wasAnswered) video.play();
 }
 
 /* ---------------- Progress bar + markers ---------------- */
@@ -955,12 +964,17 @@ const LESSON_HTML = `<!DOCTYPE html>
   </div>
 
   <!-- Resume confirm modal -->
+  <!-- [ปรับดีไซน์] เดิมใช้ปุ่ม/ข้อความชุดเดียวกับ modal คำถาม (quiz-modal-continue-btn,
+       quiz-modal-choice-btn) ทำให้ดูเป็นกล่องตัวเลือกคำถามมากกว่า dialog ยืนยันสั้นๆ — แยกสไตล์
+       ของตัวเองออกมาให้เรียบ กระชับ ตัดกรอบ/ไอคอนที่ไม่จำเป็นออก เหลือแค่หัวข้อ, เวลาที่ค้างไว้
+       เป็นข้อความรอง, ปุ่มหลักตันสีเดียว และปุ่มรอง (เริ่มใหม่) เป็นแค่ข้อความขีดเส้นใต้ -->
   <div id="resume-overlay" class="quiz-overlay">
     <div class="quiz-modal resume-modal">
-      <p class="resume-text">ต้องการเล่นต่อจากนาทีที่ <span id="resume-time-label"></span> หรือไม่?</p>
+      <p class="resume-title">เล่นต่อจากที่ค้างไว้ไหม?</p>
+      <p class="resume-subtext">ครั้งที่แล้วดูถึงนาทีที่ <span id="resume-time-label"></span></p>
       <div class="resume-actions">
-        <button id="btn-resume-yes" type="button" class="quiz-modal-continue-btn">เล่นต่อ</button>
-        <button id="btn-resume-no" type="button" class="quiz-modal-choice-btn">เริ่มใหม่ตั้งแต่ต้น</button>
+        <button id="btn-resume-yes" type="button" class="resume-primary-btn">เล่นต่อ</button>
+        <button id="btn-resume-no" type="button" class="resume-secondary-btn">เริ่มใหม่ตั้งแต่ต้น</button>
       </div>
     </div>
   </div>
@@ -1272,9 +1286,14 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   cursor: pointer;
 }
 
-.resume-modal { text-align: center; }
-.resume-text { font-size: 15px; font-weight: 600; margin: 0 0 20px; color: #0F1B3D; }
+.resume-modal { text-align: center; max-width: 300px; padding: 28px 24px 22px; border-radius: 16px; }
+.resume-title { font-size: 15px; font-weight: 700; margin: 0 0 6px; color: #0F1B3D; }
+.resume-subtext { font-size: 13px; margin: 0 0 22px; color: #94A3B8; }
 .resume-actions { display: flex; flex-direction: column; gap: 10px; }
+.resume-primary-btn { width: 100%; background: #0F1B3D; color: #fff; border: none; padding: 12px 20px; border-radius: 999px; font-family: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer; }
+.resume-primary-btn:hover { background: #1a2a52; }
+.resume-secondary-btn { background: none; border: none; color: #94A3B8; font-family: inherit; font-weight: 600; font-size: 12.5px; cursor: pointer; padding: 8px; text-decoration: underline; text-underline-offset: 2px; }
+.resume-secondary-btn:hover { color: #64748B; }
 
 /* ---------- Quiz page (ท้ายบท) เดิม ---------- */
 .quiz-section { margin-top: 0; padding: 28px 24px; background: #fff; border-radius: 20px; box-shadow: 0 1px 3px rgba(15, 27, 61, 0.06); }

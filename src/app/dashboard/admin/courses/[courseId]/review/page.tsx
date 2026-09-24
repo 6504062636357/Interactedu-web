@@ -7,6 +7,15 @@ import CourseOverview from "@/components/admin/CourseOverview";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
 import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import CourseApproveActions from "@/components/CourseApproveActions";
+
+const COURSE_STATUS_LABEL: Record<string, string> = {
+  draft: "ฉบับร่าง",
+  pending: "รออนุมัติ",
+  published: "เผยแพร่แล้ว",
+  rejected: "ตีกลับ",
+  archived: "เก็บถาวร",
+};
+
 interface QuizChoiceRow {
   choice_text: string;
   is_correct: boolean;
@@ -252,7 +261,7 @@ export default async function AdminCourseReviewPage({
               {course.title}
             </h1>
             <p className="text-[13px] text-[#0F1B3D]/50">
-              {lessonsWithDraft.length} บทเรียน — สถานะคอร์ส: {course.status}
+              {lessonsWithDraft.length} บทเรียน สถานะคอร์ส: {COURSE_STATUS_LABEL[course.status] ?? course.status}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
