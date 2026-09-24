@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import { enrollFreeCourse } from "./actions";
@@ -122,7 +123,9 @@ export default async function EnrollPage({
 
               <p className="text-[12px] text-[#0F1B3D]/50 leading-relaxed mb-5">
                 เมื่อชำระเงิน ถือว่าท่านได้ยอมรับ{" "}
-                <span className="text-[#FF5A3C] font-semibold">ข้อตกลงและเงื่อนไขการใช้บริการ</span>{" "}
+                <Link href="/terms" target="_blank" rel="noopener noreferrer" className="text-[#FF5A3C] font-semibold hover:underline">
+                  ข้อตกลงและเงื่อนไขการใช้บริการ
+                </Link>{" "}
                 เรียบร้อยแล้ว
               </p>
 

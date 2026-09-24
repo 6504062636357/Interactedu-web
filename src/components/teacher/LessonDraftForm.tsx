@@ -622,7 +622,17 @@ export default function LessonDraftForm({
                     ไปแบ่งช่วงวิดีโอ →
                   </button>
                 </div>
-                <video src={videoPreviewUrl ?? videoUrl ?? undefined} controls className="w-full rounded-xl bg-black max-h-80" />
+                <video
+                  src={videoPreviewUrl ?? videoUrl ?? undefined}
+                  controls
+                  className="w-full rounded-xl bg-black max-h-80"
+                  // ★ บั๊กที่แก้: เดิมจับความยาววิดีโอ (videoDuration) จาก <video> ในแท็บ
+                  // "In-Video Quiz" เท่านั้น ถ้าครูแก้บทเรียนแล้วบันทึกโดยไม่เคยเปิดแท็บนั้นเลย
+                  // videoDuration จะค้างที่ 0 (ค่าเริ่มต้น) แล้ว handleSave ส่ง 0 ไปทับค่าที่ถูกต้อง
+                  // เดิมใน DB ทุกครั้ง — เพิ่ม onLoadedMetadata ที่นี่ด้วย เพราะวิดีโอตัวนี้โหลดทันที
+                  // ที่เปิดแท็บ "รายละเอียดบทเรียน" (แท็บ default) จึงจับความยาวได้เร็วกว่าและชัวร์กว่า
+                  onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+                />
               </>
             )}
           </div>

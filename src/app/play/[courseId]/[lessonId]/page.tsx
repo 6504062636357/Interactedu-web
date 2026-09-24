@@ -34,11 +34,32 @@ interface CourseMaterial {
   file_url: string;
 }
 
+// เบราว์เซอร์ preview ให้ในตัวได้จริงๆ แค่ไฟล์กลุ่มนี้ (ผ่าน iframe/img) — .doc/.docx/.ppt/.pptx
+// เปิดในแท็บใหม่/ดาวน์โหลดเหมือนเดิม เพราะเบราว์เซอร์ไม่มี renderer ในตัวให้
+function isPreviewableFile(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return lower.endsWith('.pdf') || /\.(png|jpe?g|gif|webp|svg)$/.test(lower);
+}
+function isImageFile(fileName: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/.test(fileName.toLowerCase());
+}
+
 interface CourseLessonRef {
   id: string;
   title: string;
   moduleTitle: string;
   completed: boolean;
+  videoDurationSeconds?: number | null;
+}
+
+// แปลงวินาทีเป็นป้ายเวลาแบบสั้น เช่น 3 m, 1 h 26 m — ให้ตรงกับที่โชว์รวมของคอร์สในหน้าอื่น
+function formatLessonDuration(seconds?: number | null): string | null {
+  if (!seconds || seconds <= 0) return null;
+  const totalMinutes = Math.round(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return minutes > 0 ? `${hours} h ${minutes} m` : `${hours} h`;
+  return `${Math.max(minutes, 1)} m`;
 }
 
 interface ScormApiLike {
@@ -110,6 +131,8 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   // เอกสารประกอบ
   const [materials, setMaterials] = useState<CourseMaterial[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
+  // เอกสารที่กำลังเปิดดูแบบ preview ในหน้านี้ (modal ฝัง iframe) — null = ไม่ได้เปิด
+  const [previewMaterial, setPreviewMaterial] = useState<CourseMaterial | null>(null);
 
   // รายชื่อบทเรียนทั้งหมดในคอร์ส (ไว้สลับเลสสันโดยไม่ต้องออกจากห้องเรียน)
   const [courseLessons, setCourseLessons] = useState<CourseLessonRef[]>([]);
@@ -612,6 +635,17 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   // ลำดับบทเรียนถัดไป/ก่อนหน้าในคอร์ส (ไว้ทำปุ่มข้ามเลสสันในอนาคตถ้าต้องการ)
   const courseLessonIndex = courseLessons.findIndex((l) => l.id === lessonId);
 
+  // ผลรวมความยาวทั้งคอร์ส โชว์ข้างจำนวนบท เช่น "4/11 · 1 h 26 m" — เอาไปต่อท้ายหัวข้อ "บทเรียนในคอร์สนี้"
+  const courseTotalDurationLabel = formatLessonDuration(
+    courseLessons.reduce((sum, l) => sum + (l.videoDurationSeconds ?? 0), 0)
+  );
+
+  // ระยะเวลาของบทเรียนปัจจุบัน — โชว์ใต้ชื่อบทเรียนเสมอ ไม่ว่าคอร์สจะมีกี่บทก็ตาม (ต่างจาก
+  // courseTotalDurationLabel ที่โชว์เฉพาะตอนมี >1 บทเรียนในรายการ "บทเรียนในคอร์สนี้")
+  const currentLessonDurationLabel = formatLessonDuration(
+    courseLessons[courseLessonIndex]?.videoDurationSeconds
+  );
+
   function handleSelectItem(href: string | null) {
     if (!href || href === currentPath) return;
     setCurrentPath(href);
@@ -656,7 +690,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               <button
                 onClick={() => handleSelectItem(item.href)}
                 disabled={!item.href}
-                className={`w-full flex items-center gap-2 text-left text-[12.5px] px-2.5 py-2 rounded-lg transition-colors ${
+                className={`w-full flex items-start gap-2 text-left text-[12.5px] px-2.5 py-2 rounded-lg transition-colors ${
                   item.href
                     ? isActive
                       ? 'bg-blue-500/15 text-white font-semibold border-l-2 border-blue-400 -ml-[2px] pl-[12px]'
@@ -665,7 +699,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                 }`}
               >
                 {item.href && (
-                  <span className="shrink-0 w-4 h-4 rounded-full flex items-center justify-center">
+                  <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full flex items-center justify-center">
                     {item.completed ? (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M5 12l5 5L20 7" />
@@ -675,7 +709,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                     )}
                   </span>
                 )}
-                <span className="truncate">{item.title}</span>
+                <span className="min-w-0 flex-1 break-words">{item.title}</span>
               </button>
               {item.children && item.children.length > 0 && renderMenuItems(item.children, depth + 1)}
             </li>
@@ -724,7 +758,12 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               {displayCourseTitle}
             </p>
             {displayLessonTitle && (
-              <p className="text-[12px] text-slate-400 truncate mb-3">{displayLessonTitle}</p>
+              <p className="text-[12px] text-slate-400 break-words mb-3">
+                {displayLessonTitle}
+                {currentLessonDurationLabel && (
+                  <span className="text-slate-500"> · {currentLessonDurationLabel}</span>
+                )}
+              </p>
             )}
 
             {flatItems.length > 0 && (
@@ -744,14 +783,91 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
-            {/* โซนที่ 0: บทเรียนทั้งหมดในคอร์ส — สลับได้เลยไม่ต้องออกจากห้องเรียน */}
+            {/* โซนที่ 0: เอกสารประกอบ — ย้ายมาไว้บนสุด ให้เจอง่ายก่อนเข้าเนื้อหา (สีปรับเป็น slate-400
+                ให้อ่านง่ายขึ้นบนพื้นกรมท่า เดิม slate-500 จางเกินไปจนแทบมองไม่เห็น) */}
+            {materials.length > 0 && (
+              <div className="mb-4 pb-3 border-b border-white/[0.06]">
+                <button
+                  onClick={() => setMaterialsOpen((v) => !v)}
+                  className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-400 px-2 py-2"
+                >
+                  <span>เอกสารประกอบ</span>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`transition-transform ${materialsOpen ? 'rotate-180' : ''}`}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+
+                {materialsOpen && (
+                  <ul className="px-1">
+                    {materials.map((m) => {
+                      const previewable = isPreviewableFile(m.file_name);
+                      const icon = (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="shrink-0 text-slate-400"
+                        >
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                          <path d="M14 2v6h6" />
+                        </svg>
+                      );
+                      return (
+                        <li key={m.id} className="my-0.5">
+                          {previewable ? (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewMaterial(m)}
+                              className="w-full flex items-center gap-2 text-left text-[12.5px] text-slate-300/80 hover:bg-white/5 hover:text-white px-2.5 py-2 rounded-lg transition-colors"
+                            >
+                              {icon}
+                              <span className="truncate">{m.file_name}</span>
+                            </button>
+                          ) : (
+                            <a
+                              href={m.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-[12.5px] text-slate-300/80 hover:bg-white/5 hover:text-white px-2.5 py-2 rounded-lg transition-colors"
+                            >
+                              {icon}
+                              <span className="truncate">{m.file_name}</span>
+                            </a>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* โซนที่ 1: บทเรียนทั้งหมดในคอร์ส — สลับได้เลยไม่ต้องออกจากห้องเรียน */}
             {courseLessons.length > 1 && (
               <div className="mb-4 pb-3 border-b border-white/[0.06]">
                 <button
                   onClick={() => setLessonListOpen((v) => !v)}
-                  className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-500 px-2 py-2"
+                  className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-400 px-2 py-2"
                 >
-                  <span>บทเรียนในคอร์สนี้ ({courseLessonIndex >= 0 ? courseLessonIndex + 1 : '–'}/{courseLessons.length})</span>
+                  <span>
+                    บทเรียนในคอร์สนี้ ({courseLessonIndex >= 0 ? courseLessonIndex + 1 : '–'}/{courseLessons.length})
+                    {courseTotalDurationLabel && <span className="ml-1 normal-case tracking-normal text-slate-500">· {courseTotalDurationLabel}</span>}
+                  </span>
                   <svg
                     width="12"
                     height="12"
@@ -771,17 +887,18 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                   <ul className="px-1">
                     {courseLessons.map((l, idx) => {
                       const isCurrentLesson = l.id === lessonId;
+                      const durationLabel = formatLessonDuration(l.videoDurationSeconds);
                       return (
                         <li key={l.id} className="my-0.5">
                           <button
                             onClick={() => handleSelectLesson(l.id)}
-                            className={`w-full flex items-center gap-2.5 text-left text-[12.5px] px-2.5 py-2.5 rounded-lg transition-colors ${
+                            className={`w-full flex items-start gap-2.5 text-left text-[12.5px] px-2.5 py-2.5 rounded-lg transition-colors ${
                               isCurrentLesson
                                 ? 'bg-blue-500/15 text-white font-semibold border-l-2 border-blue-400 -ml-[2px] pl-[12px]'
                                 : 'text-slate-300/80 hover:bg-white/5 hover:text-white'
                             }`}
                           >
-                            <span className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center bg-white/[0.06] text-[10.5px] font-bold">
+                            <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center bg-white/[0.06] text-[10.5px] font-bold">
                               {l.completed ? (
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                   <path d="M5 12l5 5L20 7" />
@@ -790,7 +907,12 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                                 idx + 1
                               )}
                             </span>
-                            <span className="truncate">{l.title}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block break-words">{l.title}</span>
+                              {durationLabel && (
+                                <span className="block mt-0.5 text-[11px] font-medium text-slate-500">{durationLabel}</span>
+                              )}
+                            </span>
                           </button>
                         </li>
                       );
@@ -800,14 +922,14 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               </div>
             )}
 
-            {/* โซนที่ 1: รายการ SCO ของบทเรียนปัจจุบัน */}
+            {/* โซนที่ 2: รายการ SCO ของบทเรียนปัจจุบัน */}
             {lessonItems.length > 0 ? (
               renderMenuItems(lessonItems)
             ) : (
               <p className="text-[12.5px] text-slate-500 px-2 py-4">ไม่มีเมนูสำหรับบทเรียนนี้</p>
             )}
 
-            {/* โซนที่ 2: บล็อกควิซแยก (ถ้ามี SCO ควิซ) */}
+            {/* โซนที่ 3: บล็อกควิซแยก (ถ้ามี SCO ควิซ) */}
             {quizItems.length > 0 && (
               <div className="mt-4 pt-3 border-t border-white/[0.06]">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 px-2.5 mb-2">
@@ -843,62 +965,6 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                     </button>
                   );
                 })}
-              </div>
-            )}
-
-            {/* โซนที่ 3: เอกสารประกอบ */}
-            {materials.length > 0 && (
-              <div className="mt-4 pt-3 border-t border-white/[0.06]">
-                <button
-                  onClick={() => setMaterialsOpen((v) => !v)}
-                  className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-500 px-2 py-2"
-                >
-                  <span>เอกสารประกอบ</span>
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className={`transition-transform ${materialsOpen ? 'rotate-180' : ''}`}
-                  >
-                    <path d="M6 9l6 6 6-6" />
-                  </svg>
-                </button>
-
-                {materialsOpen && (
-                  <ul className="px-1">
-                    {materials.map((m) => (
-                      <li key={m.id} className="my-0.5">
-                        <a
-                          href={m.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-[12.5px] text-slate-300/80 hover:bg-white/5 hover:text-white px-2.5 py-2 rounded-lg transition-colors"
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="shrink-0 text-slate-500"
-                          >
-                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                            <path d="M14 2v6h6" />
-                          </svg>
-                          <span className="truncate">{m.file_name}</span>
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </div>
             )}
           </div>
@@ -966,6 +1032,55 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
           </footer>
         )}
       </div>
+
+      {previewMaterial && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewMaterial.file_name}
+          className="fixed inset-0 z-[70] flex flex-col bg-black/80 backdrop-blur-sm"
+          onClick={() => setPreviewMaterial(null)}
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#0B1528] px-4 py-3 sm:px-6">
+            <p className="truncate text-[13px] font-semibold text-white">{previewMaterial.file_name}</p>
+            <div className="flex shrink-0 items-center gap-2">
+              <a
+                href={previewMaterial.file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => event.stopPropagation()}
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-slate-200 hover:bg-white/10"
+              >
+                เปิดแท็บใหม่
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewMaterial(null)}
+                aria-label="ปิด"
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] font-semibold text-slate-200 hover:bg-white/10"
+              >
+                ปิด ✕
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-3 sm:p-6" onClick={(event) => event.stopPropagation()}>
+            {isImageFile(previewMaterial.file_name) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewMaterial.file_url}
+                alt={previewMaterial.file_name}
+                className="mx-auto max-h-full max-w-full rounded-lg object-contain"
+              />
+            ) : (
+              <iframe
+                src={previewMaterial.file_url}
+                title={previewMaterial.file_name}
+                className="mx-auto h-full w-full max-w-4xl rounded-lg border-0 bg-white"
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

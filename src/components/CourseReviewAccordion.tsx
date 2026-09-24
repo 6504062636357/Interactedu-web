@@ -236,7 +236,7 @@ export default function CourseReviewAccordion({
                 <span className="text-[15px] font-bold text-[#0F1B3D]">{lesson.title}</span>
                 {!hasDraft && (
                   <span className="text-[11px] font-bold text-[#EB4A2D] bg-[#EB4A2D]/10 px-2 py-0.5 rounded-full">
-                    ยังไม่ส่ง draft
+                    ยังไม่ส่งร่าง
                   </span>
                 )}
                 {hasDraft && draft.status === "approved" && (
@@ -261,7 +261,7 @@ export default function CourseReviewAccordion({
             {isOpen && (
               <div className="px-6 pb-6 border-t border-[#0F1B3D]/[0.06] pt-4">
                 {!hasDraft ? (
-                  <p className="text-[13.5px] text-[#0F1B3D]/50">บทเรียนนี้ยังไม่มี draft ส่งเข้ามา</p>
+                  <p className="text-[13.5px] text-[#0F1B3D]/50">บทเรียนนี้ยังไม่มีร่างส่งเข้ามา</p>
                 ) : (
                   <>
                     {draft.video_url && (

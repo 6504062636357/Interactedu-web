@@ -64,7 +64,7 @@ export default function CourseExamReviewActions({
     <div className="rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5">
       <h3 className="mb-1 text-[14px] font-bold text-[#0F1B3D]">อนุมัติบททดสอบท้ายคอร์ส</h3>
       <p className="mb-4 text-[12.5px] text-[#0F1B3D]/50">
-        อนุมัติเฉพาะบททดสอบท้ายคอร์สนี้เท่านั้น ไม่กระทบสถานะคอร์สโดยรวม — คอร์สจะ publish ให้นักเรียนเรียนได้ก็ต่อเมื่อบทเรียนทุกบทถูกอนุมัติครบด้วย
+        อนุมัติเฉพาะบททดสอบท้ายคอร์สนี้เท่านั้น ไม่กระทบสถานะคอร์สโดยรวม คอร์สจะ เผยแพร่ ให้นักเรียนเรียนได้ก็ต่อเมื่อบทเรียนทุกบทถูกอนุมัติครบด้วย
       </p>
 
       {error && (
@@ -81,7 +81,7 @@ export default function CourseExamReviewActions({
             disabled={approving}
             className="flex-1 inline-flex items-center justify-center text-[13.5px] font-bold text-white bg-[#00B37E] hover:bg-[#00996b] px-5 py-2.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {approving ? "กำลังอนุมัติ..." : "อนุมัติคอร์ส"}
+            {approving ? "กำลังอนุมัติ..." : "อนุมัติบททดสอบนี้"}
           </button>
           <button
             type="button"

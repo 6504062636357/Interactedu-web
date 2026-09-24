@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitCourseForReview } from "@/app/dashboard/teacher/courses/actions";
 
@@ -12,16 +12,26 @@ interface SubmitCourseButtonProps {
 export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButtonProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const router = useRouter();
+
+  // แจ้งเตือนความสำเร็จให้หายไปเองหลังจากแสดงสักครู่ ไม่ต้องรอผู้ใช้กดปิด
+  useEffect(() => {
+    if (!submitted) return;
+    const timer = setTimeout(() => setSubmitted(false), 4000);
+    return () => clearTimeout(timer);
+  }, [submitted]);
 
   function handleClick() {
     setError(null);
+    setSubmitted(false);
     startTransition(async () => {
       try {
         const result = await submitCourseForReview(courseId);
         if (result.error) {
           setError(result.error);
         } else {
+          setSubmitted(true);
           router.refresh();
         }
       } catch (caughtError) {
@@ -52,6 +62,11 @@ export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButt
       </button>
       {error && (
         <p className="max-w-xs text-right text-[11.5px] font-semibold text-red-600">{error}</p>
+      )}
+      {submitted && (
+        <p className="max-w-xs text-right text-[11.5px] font-semibold text-[#00B37E]">
+          ส่งคอร์สเข้าตรวจเรียบร้อยแล้ว
+        </p>
       )}
     </span>
   );

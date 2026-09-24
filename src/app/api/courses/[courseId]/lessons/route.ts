@@ -8,6 +8,7 @@ interface LessonRow {
   title: string;
   order_index: number;
   is_published: boolean;
+  video_duration_seconds: number | null;
 }
 
 export async function GET(
@@ -22,7 +23,7 @@ export async function GET(
 
   const { data: modules } = await supabase
     .from('modules')
-    .select('id, title, order_index, lessons(id, title, order_index, is_published)')
+    .select('id, title, order_index, lessons(id, title, order_index, is_published, video_duration_seconds)')
     .eq('course_id', courseId)
     .order('order_index', { ascending: true });
 
@@ -38,8 +39,9 @@ export async function GET(
   // ไม่ publish) เพราะแอดมินต้องใช้หน้านี้ตรวจสอบ/จัดการคอร์สได้ ไม่ใช่มุมมองของผู้เรียน
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
   if (profile?.role === 'admin') {
+    // แอดมินตรวจสอบเนื้อหาได้ ไม่ล็อคลำดับ — locked เป็น false เสมอ
     return NextResponse.json({
-      lessons: allLessons.map((l) => ({ id: l.id, title: l.title, moduleTitle: l.moduleTitle, completed: false })),
+      lessons: allLessons.map((l) => ({ id: l.id, title: l.title, moduleTitle: l.moduleTitle, completed: false, locked: false, videoDurationSeconds: l.video_duration_seconds ?? null })),
     });
   }
 
@@ -72,14 +74,22 @@ export async function GET(
     completedByLesson.set(t.lesson_id, isLessonComplete(t));
   }
 
-  return NextResponse.json({
-    lessons: lessons.map((l) => {
-      return {
-        id: l.id,
-        title: l.title,
-        moduleTitle: l.moduleTitle,
-        completed: completedByLesson.get(l.id) ?? false,
-      };
-    }),
+  // เรียนบทถัดไปได้ก็ต่อเมื่อบทก่อนหน้า "ทุกบท" เรียนจบแล้วเท่านั้น (ล็อคเป็นทอดๆ ตามลำดับ) —
+  // allPriorCompleted จะเป็น false ทันทีที่เจอบทที่ยังไม่จบ แล้วทุกบทหลังจากนั้นจะ locked หมด
+  let allPriorCompleted = true;
+  const lessonsWithLock = lessons.map((l) => {
+    const completed = completedByLesson.get(l.id) ?? false;
+    const locked = !allPriorCompleted;
+    allPriorCompleted = allPriorCompleted && completed;
+    return {
+      id: l.id,
+      title: l.title,
+      moduleTitle: l.moduleTitle,
+      completed,
+      locked,
+      videoDurationSeconds: l.video_duration_seconds ?? null,
+    };
   });
+
+  return NextResponse.json({ lessons: lessonsWithLock });
 }
