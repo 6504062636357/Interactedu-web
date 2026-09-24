@@ -59,6 +59,10 @@ export async function createCourse(input: CreateCourseInput): Promise<CreateCour
   if (Number.isNaN(priceValue) || priceValue < 0) {
     return { error: "ราคาต้องเป็นตัวเลขที่มากกว่าหรือเท่ากับ 0" };
   }
+  // บังคับราคาขั้นต่ำ 20 บาทฝั่งเซิร์ฟเวอร์ (เผื่อ request ยิงตรงข้าม client validation) — ไม่ใช้กับคอร์สฟรี
+  if (!input.isFree && priceValue < 20) {
+    return { error: "ราคาคอร์สขั้นต่ำ 20 บาท" };
+  }
   if (
     !Number.isFinite(input.certificatePassPercentage) ||
     input.certificatePassPercentage < 0 ||
