@@ -53,7 +53,7 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
   return (
     <Link
       href={course.href}
-      className="group rounded-2xl border border-[#0F1B3D]/[0.06] overflow-hidden hover:shadow-[0_15px_35px_-15px_rgba(15,27,61,0.2)] transition-shadow bg-white"
+      className="group flex h-full flex-col overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.06] bg-white transition-shadow hover:shadow-[0_15px_35px_-15px_rgba(15,27,61,0.2)]"
     >
       <div className="relative h-36 bg-gradient-to-br from-[#0F1B3D] to-[#182852]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -75,7 +75,7 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
           </div>
         </div>
       </div>
-      <div className="p-4">
+      <div className="flex flex-1 flex-col p-4">
         <p className="text-[14.5px] font-bold text-[#0F1B3D] group-hover:text-[#FF5A3C] transition-colors line-clamp-2 mb-3">
           {course.title}
         </p>
@@ -88,7 +88,9 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
             style={{ width: `${course.progress}%` }}
           />
         </div>
-        <p className="mt-3 text-xs font-bold text-[#3157D5]">ดูรายละเอียดและบทเรียน →</p>
+        <p className="mt-auto self-end pt-3 text-right text-xs font-bold text-[#3157D5]">
+          ดูรายละเอียดและบทเรียน
+        </p>
       </div>
     </Link>
   );
