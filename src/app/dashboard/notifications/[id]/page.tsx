@@ -28,6 +28,8 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   course_review_pending: "คอร์สรอตรวจสอบ",
   certificate_generation_failed: "สร้างใบรับรองไม่สำเร็จ",
   course_approved: "คอร์สผ่านการอนุมัติ",
+  lesson_approved: "บทเรียนผ่านการอนุมัติ",
+  lesson_rejected: "บทเรียนต้องแก้ไข",
   course_rejected: "คอร์สต้องแก้ไข",
   student_completed_course: "ผู้เรียนจบคอร์ส",
 };
@@ -121,6 +123,13 @@ export default async function NotificationDetailPage({
   }
 
   const actionUrl = internalActionUrl(notification.action_url);
+  const actionLabel =
+    notification.type === "course_approved" ||
+    notification.type === "lesson_approved" ||
+    notification.type === "course_rejected" ||
+    notification.type === "lesson_rejected"
+      ? "เปิดหน้าคอร์ส"
+      : "ไปยังรายการที่เกี่ยวข้อง";
 
   return (
     <div className="app-canvas min-h-screen">
@@ -160,7 +169,7 @@ export default async function NotificationDetailPage({
                 href={actionUrl}
                 className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#3157D5]/15 transition-all hover:-translate-y-0.5 hover:bg-[#2748B8]"
               >
-                ไปยังรายการที่เกี่ยวข้อง
+                {actionLabel}
                 <span aria-hidden="true">→</span>
               </Link>
             )}

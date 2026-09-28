@@ -130,19 +130,19 @@ function createSegment(
     id: genId(),
     start: Number(start.toFixed(1)),
     end: Number(end.toFixed(1)),
-    title: `บทที่ ${index + 1}`,
+    title: `หัวข้อย่อยที่ ${index + 1}`,
     source,
   };
 }
 
-const GENERATED_CHAPTER_TITLE = /^(?:ช่วง|บท)ที่\s+\d+(?:\s*\(ต่อ\))*(?::\s*(.+))?$/;
+const GENERATED_CHAPTER_TITLE = /^(?:ช่วง|บท|หัวข้อ(?:ย่อย)?)ที่\s*\d+(?:\s*\(ต่อ\))*(?::\s*(.+))?$/;
 
-function renumberDefaultChapterTitles(items: VideoSegment[]): VideoSegment[] {
+export function normalizeDefaultSegmentTitles(items: VideoSegment[]): VideoSegment[] {
   return items.map((segment, index) => {
     const generatedTitle = segment.title.trim().match(GENERATED_CHAPTER_TITLE);
     if (!generatedTitle) return segment;
     const topic = generatedTitle[1]?.trim();
-    return { ...segment, title: `บทที่ ${index + 1}${topic ? `: ${topic}` : ""}` };
+    return { ...segment, title: `หัวข้อย่อยที่ ${index + 1}${topic ? `: ${topic}` : ""}` };
   });
 }
 
@@ -215,7 +215,7 @@ export default function VideoSegmenter({
       id: genId(),
       start: segment.start,
       end: segment.end,
-      title: `บทที่ ${index + 1}: ${segment.title}`,
+      title: `หัวข้อย่อยที่ ${index + 1}: ${segment.title}`,
       summary: segment.summary,
       confidence: segment.confidence,
       source: "ai",
@@ -264,7 +264,7 @@ export default function VideoSegmenter({
       nextSegment,
       ...segments.slice(targetIndex + 1),
     ];
-    onSegmentsChange(renumberDefaultChapterTitles(nextSegments));
+    onSegmentsChange(normalizeDefaultSegmentTitles(nextSegments));
   }
 
   function addChapterFromList(): void {
@@ -310,7 +310,7 @@ export default function VideoSegmenter({
   }
 
   function removeSegment(id: string): void {
-    onSegmentsChange(renumberDefaultChapterTitles(segments.filter((segment) => segment.id !== id)));
+    onSegmentsChange(normalizeDefaultSegmentTitles(segments.filter((segment) => segment.id !== id)));
   }
 
   function jumpTo(seconds: number): void {
@@ -605,7 +605,7 @@ export default function VideoSegmenter({
                   <div className="min-w-0 flex-1">
                     <div className="mb-1.5 flex items-center justify-between gap-3">
                       <label className="block text-[10.5px] font-bold text-[#0F1B3D]/40" htmlFor={`segment-title-${segment.id}`}>
-                        ชื่อบท
+                        ชื่อหัวข้อย่อย
                       </label>
                       {segment.source === "ai" && (
                         <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-1 text-[9.5px] font-bold text-[#5D45C7]">
@@ -622,14 +622,14 @@ export default function VideoSegmenter({
                       id={`segment-title-${segment.id}`}
                       value={segment.title}
                       onChange={(event) => updateSegment(segment.id, { title: event.target.value })}
-                      placeholder={`เช่น บทที่ ${index + 1}`}
+                      placeholder={`เช่น หัวข้อย่อยที่ ${index + 1}`}
                       className="w-full rounded-lg border border-[#0F1B3D]/[0.08] bg-[#F8F9FB] px-3 py-2 text-[12.5px] font-semibold text-[#0F1B3D] outline-none transition focus:border-[#0F1B3D]/25 focus:bg-white"
                     />
                     {segment.summary !== undefined && (
                       <textarea
                         value={segment.summary}
                         onChange={(event) => updateSegment(segment.id, { summary: event.target.value })}
-                        aria-label={`คำอธิบาย${segment.title || `บทที่ ${index + 1}`}`}
+                        aria-label={`คำอธิบาย${segment.title || `หัวข้อย่อยที่ ${index + 1}`}`}
                         rows={2}
                         placeholder="คำอธิบายสั้น ๆ ของช่วงนี้"
                         className="mt-2 w-full resize-y rounded-lg border border-[#0F1B3D]/[0.08] bg-[#F8F9FB] px-3 py-2 text-[11.5px] leading-5 text-[#0F1B3D]/65 outline-none transition focus:border-[#0F1B3D]/25 focus:bg-white"
@@ -639,7 +639,7 @@ export default function VideoSegmenter({
                   <button
                     type="button"
                     onClick={() => removeSegment(segment.id)}
-                    aria-label={`ลบ${segment.title || `บทที่ ${index + 1}`}`}
+                    aria-label={`ลบ${segment.title || `หัวข้อย่อยที่ ${index + 1}`}`}
                     className="mt-5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#0F1B3D]/30 transition hover:bg-red-50 hover:text-red-500"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -675,19 +675,19 @@ export default function VideoSegmenter({
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#7C5CFF] text-white">
               <Plus className="h-4 w-4" />
             </span>
-            {segments.length > 0 ? `เพิ่มบทใหม่ตรง ${formatTime(currentTime)}` : "เพิ่มบทแรก"}
+            {segments.length > 0 ? `เพิ่มหัวข้อย่อยตรง ${formatTime(currentTime)}` : "เพิ่มหัวข้อย่อยแรก"}
           </button>
           <p className="mt-2 text-center text-[10.5px] text-[#0F1B3D]/40">
             {segments.length > 0
               ? canSplitAtCurrentTime
-                ? `พร้อมเพิ่มบทใหม่ที่เวลา ${formatTime(currentTime)}`
-                : "เลื่อนวิดีโอไปกลางบทที่ต้องการแบ่ง แล้วกดปุ่ม + เพื่อเพิ่มบทใหม่"
-              : "ระบบจะสร้างบทที่ 1 ครอบคลุมวิดีโอทั้งหมด จากนั้นครูแบ่งเพิ่มได้"}
+                ? `พร้อมเพิ่มหัวข้อย่อยที่เวลา ${formatTime(currentTime)}`
+                : "เลื่อนวิดีโอไปยังตำแหน่งที่ต้องการแบ่ง แล้วกดปุ่ม + เพื่อเพิ่มหัวข้อย่อย"
+              : "ระบบจะสร้างหัวข้อย่อยแรกให้ครอบคลุมวิดีโอทั้งหมด จากนั้นครูแบ่งเพิ่มได้"}
           </p>
         </div>
 
         <p className="mt-4 text-[10.5px] leading-5 text-[#0F1B3D]/35">
-          ครูแก้ไขชื่อและเวลาได้ทุกช่วง ไม่ว่าจะสร้างด้วย AI อัตโนมัติ หรือกำหนดเอง • ข้อมูลบทจะถูกบันทึกพร้อมฉบับร่างบทเรียน
+          ครูแก้ไขชื่อและเวลาได้ทุกช่วง ไม่ว่าจะสร้างด้วย AI อัตโนมัติ หรือกำหนดเอง • หัวข้อย่อยจะถูกบันทึกภายใต้บทเรียนนี้
         </p>
       </div>
     </section>

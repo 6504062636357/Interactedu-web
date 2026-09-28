@@ -82,6 +82,24 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
   
   const examConfig = examConfigData as StoredExamConfig | null;
 
+  if (lessonsError) {
+    console.error("[course/exam] failed to load lessons:", courseId, lessonsError.message);
+    return (
+      <div className="mx-auto max-w-3xl py-20 text-center">
+        <p className="mb-2 text-[15px] font-bold text-red-500">โหลดข้อมูลบทเรียนและคำถามไม่สำเร็จ</p>
+        <p className="mb-6 text-[13.5px] text-[#0F1B3D]/50">
+          การเชื่อมต่อฐานข้อมูลขัดข้องชั่วคราว ข้อมูลบทเรียนของคุณยังไม่หาย กรุณาลองเปิดหน้านี้อีกครั้ง
+        </p>
+        <Link
+          href={`/dashboard/${workspace}/courses/${courseId}/exam`}
+          className="inline-block rounded-xl bg-[#0F1B3D] px-5 py-2.5 text-[13.5px] font-bold text-white transition-colors hover:bg-[#0F1B3D]/90"
+        >
+          ลองใหม่
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
       <Link href={`/dashboard/${workspace}/courses/${courseId}`} className="mb-2 inline-block text-[12.5px] font-semibold text-slate-400 hover:text-slate-600">← กลับไปจัดการคอร์ส</Link>
@@ -91,7 +109,6 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
       <div className="my-6 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-[13px] leading-6 text-blue-800">
         ผู้เรียนจะทำบททดสอบนี้หลังเรียนครบทุกบท และต้องได้อย่างน้อย <strong>{certificatePassPercentage}%</strong> เพื่อรับใบรับรอง {certificateEnabled ? "(เปิดใช้งานใบรับรองแล้ว)" : "(ขณะนี้ปิดการออกใบรับรอง)"}
       </div>
-      {lessonsError && <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">โหลดคำถามเดิมไม่สำเร็จ: {lessonsError.message}</p>}
       <CourseExamEditor
         courseId={courseId}
         initialQuestions={questions}

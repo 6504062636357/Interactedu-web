@@ -160,25 +160,25 @@ function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
   segments?: DraftVideoSegmentInput[];
   error?: string;
 } {
-  if (input.length > 200) return { error: "แบ่งวิดีโอได้สูงสุด 200 บท" };
+  if (input.length > 200) return { error: "แบ่งวิดีโอได้สูงสุด 200 หัวข้อย่อย" };
 
   const segments = [...input].sort((first, second) => first.start - second.start);
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
-    if (!segment.title.trim()) return { error: `กรุณาใส่ชื่อบทที่ ${index + 1}` };
-    if (segment.title.trim().length > 200) return { error: `ชื่อบทที่ ${index + 1} ยาวเกิน 200 ตัวอักษร` };
-    if ((segment.summary?.trim().length ?? 0) > 500) return { error: `คำอธิบายบทที่ ${index + 1} ยาวเกิน 500 ตัวอักษร` };
+    if (!segment.title.trim()) return { error: `กรุณาใส่ชื่อหัวข้อย่อยที่ ${index + 1}` };
+    if (segment.title.trim().length > 200) return { error: `ชื่อหัวข้อย่อยที่ ${index + 1} ยาวเกิน 200 ตัวอักษร` };
+    if ((segment.summary?.trim().length ?? 0) > 500) return { error: `คำอธิบายหัวข้อย่อยที่ ${index + 1} ยาวเกิน 500 ตัวอักษร` };
     if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.start < 0 || segment.end <= segment.start) {
-      return { error: `เวลาเริ่ม–จบของบทที่ ${index + 1} ไม่ถูกต้อง` };
+      return { error: `เวลาเริ่ม–จบของหัวข้อย่อยที่ ${index + 1} ไม่ถูกต้อง` };
     }
     if (!(["ai", "manual", "timed"] as const).includes(segment.source)) {
-      return { error: `แหล่งที่มาของบทที่ ${index + 1} ไม่ถูกต้อง` };
+      return { error: `แหล่งที่มาของหัวข้อย่อยที่ ${index + 1} ไม่ถูกต้อง` };
     }
     if (index > 0 && segment.start < segments[index - 1].end) {
-      return { error: `ช่วงเวลาของบทที่ ${index} และบทที่ ${index + 1} ซ้อนกัน` };
+      return { error: `ช่วงเวลาของหัวข้อย่อยที่ ${index} และหัวข้อย่อยที่ ${index + 1} ซ้อนกัน` };
     }
     if (segment.confidence != null && (!Number.isFinite(segment.confidence) || segment.confidence < 0 || segment.confidence > 1)) {
-      return { error: `ค่าความมั่นใจของบทที่ ${index + 1} ไม่ถูกต้อง` };
+      return { error: `ค่าความมั่นใจของหัวข้อย่อยที่ ${index + 1} ไม่ถูกต้อง` };
     }
   }
 

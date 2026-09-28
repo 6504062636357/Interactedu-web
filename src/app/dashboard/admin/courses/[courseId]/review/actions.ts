@@ -144,8 +144,8 @@ for (const lesson of lessons) {
     await createNotification({
       userId: courseInfo.created_by,
       type: "course_approved",
-      title: "คอร์สได้รับการอนุมัติ",
-      message: `คอร์ส ${courseInfo.title} ได้รับการอนุมัติและเผยแพร่แล้ว`,
+      title: `คอร์ส “${courseInfo.title}” ได้รับการอนุมัติ`,
+      message: `คอร์ส “${courseInfo.title}” ได้รับการอนุมัติและเผยแพร่แล้ว`,
       relatedType: "course",
       relatedId: courseId,
       actionUrl: `/dashboard/teacher/courses/${courseId}`,
@@ -306,12 +306,30 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
   // ดึง course_id ของ lesson นี้ เพื่อ revalidate หน้า review และเช็คว่าควร publish คอร์สหรือยัง
   const { data: lessonRow } = await supabase
     .from("lessons")
-    .select("course_id")
+    .select("course_id, title")
     .eq("id", lessonId)
     .maybeSingle();
 
   if (lessonRow?.course_id) {
     const courseId = lessonRow.course_id;
+    const { data: courseInfo } = await supabase
+      .from("courses")
+      .select("title, created_by")
+      .eq("id", courseId)
+      .maybeSingle();
+
+    if (courseInfo?.created_by && courseInfo.created_by !== user!.id) {
+      await createNotification({
+        userId: courseInfo.created_by,
+        type: "lesson_approved",
+        title: `บทเรียน “${lessonRow.title}” ได้รับการอนุมัติ`,
+        message: `บทเรียน “${lessonRow.title}” ในคอร์ส “${courseInfo.title}” ได้รับการอนุมัติและเผยแพร่แล้ว`,
+        relatedType: "lesson",
+        relatedId: lessonId,
+        actionUrl: `/dashboard/teacher/courses/${courseId}`,
+        dedupeKey: `lesson_approved:${draftId}`,
+      });
+    }
 
     // ดึงทุก lesson + draft ล่าสุดของคอร์สนี้ เพื่อเช็คว่าทุกบทอนุมัติครบหรือยัง
     const [{ data: lessons }, { data: courseExamRow }] = await Promise.all([
@@ -347,17 +365,12 @@ export async function approveLesson(draftId: string, lessonId: string): Promise<
           console.error("[approveLesson] course status update failed:", courseUpdateError);
           // ไม่ return error ตรงนี้ เพราะ lesson อนุมัติสำเร็จแล้ว แค่ course status อัปเดตไม่ทัน
         } else {
-          const { data: courseInfo } = await supabase
-            .from("courses")
-            .select("title, created_by")
-            .eq("id", courseId)
-            .maybeSingle();
           if (courseInfo?.created_by) {
             await createNotification({
               userId: courseInfo.created_by,
               type: "course_approved",
-              title: "คอร์สได้รับการอนุมัติ",
-              message: `คอร์ส ${courseInfo.title} ได้รับการอนุมัติและเผยแพร่แล้ว`,
+              title: `คอร์ส “${courseInfo.title}” ได้รับการอนุมัติ`,
+              message: `คอร์ส “${courseInfo.title}” ได้รับการอนุมัติและเผยแพร่แล้ว`,
               relatedType: "course",
               relatedId: courseId,
               actionUrl: `/dashboard/teacher/courses/${courseId}`,

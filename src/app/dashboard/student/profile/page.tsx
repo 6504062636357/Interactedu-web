@@ -26,6 +26,7 @@ interface ScormTrackingRow {
   lesson_id: string;
   lesson_status: string | null;
   video_completed: boolean | null;
+  completed_scos: string[] | null;
 }
 
 interface CertificateRow {
@@ -63,14 +64,14 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
   const { data: trackingRaw } = enrollmentIds.length
     ? await supabase
         .from("scorm_tracking")
-        .select("enrollment_id, lesson_id, lesson_status, video_completed")
+        .select("enrollment_id, lesson_id, lesson_status, video_completed, completed_scos")
         .in("enrollment_id", enrollmentIds)
     : { data: [] };
 
   const tracking = (trackingRaw ?? []) as ScormTrackingRow[];
 
   const { data: lessonsRaw } = courseIds.length
-    ? await supabase.from("lessons").select("id, course_id, order_index").in("course_id", courseIds).eq("is_published", true)
+    ? await supabase.from("lessons").select("id, course_id, order_index, scorm_source, scorm_manifest").in("course_id", courseIds).eq("is_published", true)
     : { data: [] };
 
   const coursesWithProgress = enrollments.filter((enrollment) => enrollment.courses).map((enrollment) => {

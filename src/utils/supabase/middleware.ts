@@ -1,22 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-// ★ ใส่ timeout ให้ fetch ทุกครั้งที่ supabase-js เรียกออกไป
-// ปัญหาที่เจอ: บางครั้ง connection ค้าง (เช่น keep-alive socket ถูกโปรแกรม antivirus/
-// remote-desktop ที่รันอยู่บนเครื่อง ดักหรือตัดทิ้งแบบไม่บอก) ทำให้ getUser() แขวนรอ
-// เป็นนาทีโดยไม่มี error ใดๆ กลับมา ซึ่งไปบล็อค middleware ทุก request เพราะ matcher
-// ครอบทุก path — การใส่ AbortController timeout ทำให้ request ที่ค้างจริงๆ fail เร็ว
-// (8 วิ) แทนที่จะแขวนเป็นนาที
-function fetchWithTimeout(timeoutMs: number): typeof fetch {
-  return (input, init) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    return fetch(input, { ...init, signal: controller.signal }).finally(() => {
-      clearTimeout(timeoutId);
-    });
-  };
-}
+import { createFetchWithTimeout } from "@/utils/supabase/fetch-with-timeout";
 
 /**
  * สร้าง Supabase client + response object สำหรับใช้ใน middleware.ts
@@ -36,7 +20,9 @@ export async function updateSession(request: NextRequest) {
       // เสี่ยงกิน timeout เต็มพร้อมกันถ้า Supabase สะดุดจังหวะเดียวกัน — ลด cap ต่อ 1 fetch ลง
       // ช่วยลด worst-case รวมได้ตรงๆ โดยยัง generous พอสำหรับ request ปกติที่เห็นจริง (<1.5s)
       global: {
-        fetch: fetchWithTimeout(5000),
+        // Middleware มีเพดานรวมของตัวเองอยู่แล้ว จึงไม่ปล่อยให้ PostgREST
+        // retry ต่อเบื้องหลังหลังจาก request หลักตอบกลับไปแล้ว
+        fetch: createFetchWithTimeout(5000, { retryTimedOutReads: false }),
       },
       cookies: {
         getAll() {

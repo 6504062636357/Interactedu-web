@@ -26,6 +26,9 @@ interface NotificationInsertRow {
   related_id: string | null;
   action_url: string | null;
   dedupe_key: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  created_at: string;
 }
 
 export interface NotificationWriteResult {
@@ -52,6 +55,9 @@ function toInsertRow(input: CreateNotificationInput): NotificationInsertRow {
     related_id: input.relatedId ?? null,
     action_url: safeActionUrl(input.actionUrl),
     dedupe_key: input.dedupeKey ?? null,
+    is_read: false,
+    read_at: null,
+    created_at: new Date().toISOString(),
   };
 }
 
@@ -65,7 +71,7 @@ export async function createNotification(
     const mutation = input.dedupeKey
       ? supabase.from("notifications").upsert(row, {
           onConflict: "dedupe_key",
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         })
       : supabase.from("notifications").insert(row);
 
@@ -116,7 +122,7 @@ export async function notifyAdmins(
     const mutation = input.dedupeKey
       ? supabase.from("notifications").upsert(rows, {
           onConflict: "dedupe_key",
-          ignoreDuplicates: true,
+          ignoreDuplicates: false,
         })
       : supabase.from("notifications").insert(rows);
 

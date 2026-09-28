@@ -15,6 +15,7 @@ function load(path, dependencies = {}) {
   return exports;
 }
 const progress = load('src/lib/courses/student-progress.ts');
+const resume = load('src/lib/courses/scorm-resume.ts');
 const lessons = [{ id: 'first' }, { id: 'second' }, { id: 'third' }];
 const record = (lesson_id, complete, last_accessed) => ({ lesson_id, video_completed: complete, lesson_status: 'incomplete', last_accessed });
 
@@ -35,6 +36,45 @@ test('finishing a lesson advances to the next incomplete lesson', () => {
 test('completion agrees with the final exam gate, even if SCORM lesson_status differs', () => {
   assert.equal(progress.isLessonComplete({ video_completed: false, lesson_status: 'passed' }), false);
   assert.equal(progress.isLessonComplete({ video_completed: true, lesson_status: 'incomplete' }), true);
+});
+test('stored SCORM chapter completion contributes partial course progress', () => {
+  const segmentedLesson = {
+    id: 'segmented',
+    scorm_source: 'generated',
+    scorm_manifest: {
+      items: [{
+        identifier: 'ITEM-LESSON', href: null, children: [
+          { identifier: 'ITEM-CHAPTER-1', href: 'lesson.html?chapter=1', type: 'lesson' },
+          { identifier: 'ITEM-CHAPTER-2', href: 'lesson.html?chapter=2', type: 'lesson' },
+          { identifier: 'ITEM-CHAPTER-3', href: 'lesson.html?chapter=3', type: 'lesson' },
+        ],
+      }, { identifier: 'ITEM-QUIZ', href: 'quiz.html', type: 'quiz' }],
+    },
+  };
+  const result = progress.summarizeStudentProgress([segmentedLesson], [{
+    ...record('segmented', false, '2026-09-21'),
+    completed_scos: ['lesson.html?chapter=1', 'lesson.html?chapter=2'],
+  }]);
+  assert.equal(result.completed, 0);
+  assert.equal(result.percent, 67);
+  assert.equal(result.started, true);
+});
+test('resume opens the unfinished chapter containing the saved video position', () => {
+  const manifest = {
+    items: [{ identifier: 'ITEM-LESSON', href: null, children: [
+      { identifier: 'ITEM-CHAPTER-1', href: 'lesson.html?chapter=1', type: 'lesson', startSeconds: 0, endSeconds: 300 },
+      { identifier: 'ITEM-CHAPTER-2', href: 'lesson.html?chapter=2', type: 'lesson', startSeconds: 300, endSeconds: 600 },
+      { identifier: 'ITEM-CHAPTER-3', href: 'lesson.html?chapter=3', type: 'lesson', startSeconds: 600, endSeconds: 1200 },
+    ] }],
+  };
+  assert.equal(resume.selectResumeScoPath({
+    entryPoint: 'lesson.html?chapter=1',
+    manifest,
+    scormSource: 'generated',
+    completedScos: ['lesson.html?chapter=1', 'lesson.html?chapter=2'],
+    resumeSeconds: 960,
+    videoCompleted: false,
+  }), 'lesson.html?chapter=3');
 });
 test('removed lessons never affect progress or resume, and partial completion stays below 100%', () => {
   const rows = Array.from({ length: 200 }, (_, i) => ({ id: String(i) }));

@@ -11,6 +11,8 @@ export const NOTIFICATION_TYPES = [
   "course_review_pending",
   "certificate_generation_failed",
   "course_approved",
+  "lesson_approved",
+  "lesson_rejected",
   "course_rejected",
   "student_completed_course",
 ] as const;

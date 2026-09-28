@@ -3,7 +3,22 @@ export interface StudentTracking {
   video_completed: boolean | null;
   lesson_status: string | null;
   last_accessed?: string | null;
+  completed_scos?: string[] | null;
   cmi_data?: { core?: { lesson_location?: unknown }; location?: unknown } | null;
+}
+
+interface ProgressManifestItem {
+  identifier?: string;
+  href?: string | null;
+  type?: "lesson" | "quiz";
+  kind?: "lesson" | "quiz";
+  children?: ProgressManifestItem[];
+}
+
+export interface StudentProgressLesson {
+  id: string;
+  scorm_source?: string | null;
+  scorm_manifest?: { items?: ProgressManifestItem[] } | null;
 }
 
 export function isLessonComplete(tracking?: StudentTracking): boolean {
@@ -18,7 +33,29 @@ export function getResumeSeconds(tracking?: StudentTracking): number {
   return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
 }
 
-export function summarizeStudentProgress<T extends { id: string }>(lessons: T[], tracking: StudentTracking[]) {
+function collectProgressScos(items: ProgressManifestItem[], includeQuizzes: boolean): string[] {
+  const hrefs: string[] = [];
+  for (const item of items) {
+    const isQuiz = item.type === "quiz" || item.kind === "quiz" || item.identifier?.includes("QUIZ") === true;
+    if (item.href && (includeQuizzes || !isQuiz)) hrefs.push(item.href);
+    if (item.children?.length) hrefs.push(...collectProgressScos(item.children, includeQuizzes));
+  }
+  return hrefs;
+}
+
+export function getLessonProgress(lesson: StudentProgressLesson, tracking?: StudentTracking): number {
+  if (isLessonComplete(tracking)) return 1;
+
+  const items = lesson.scorm_manifest?.items ?? [];
+  const scos = [...new Set(collectProgressScos(items, lesson.scorm_source === "imported"))];
+  if (scos.length === 0) return 0;
+
+  const completedScos = new Set(Array.isArray(tracking?.completed_scos) ? tracking.completed_scos : []);
+  const completed = scos.filter((href) => completedScos.has(href)).length;
+  return completed / scos.length;
+}
+
+export function summarizeStudentProgress<T extends StudentProgressLesson>(lessons: T[], tracking: StudentTracking[]) {
   const validIds = new Set(lessons.map((lesson) => lesson.id));
   const records = tracking.filter((row) => validIds.has(row.lesson_id));
   const byLesson = new Map(records.map((row) => [row.lesson_id, row]));
@@ -35,8 +72,21 @@ export function summarizeStudentProgress<T extends { id: string }>(lessons: T[],
       ?? firstIncomplete ?? lessons[0] ?? null;
   return {
     total, completed, allComplete, byLesson, resumeLesson,
-    // Don't label 199/200 completed lessons as 100%.
-    percent: total === 0 ? 0 : allComplete ? 100 : Math.min(99, Math.round(completed / total * 100)),
-    started: records.some((row) => !!row.last_accessed || getResumeSeconds(row) > 0 || isLessonComplete(row)),
+    // Each lesson has equal weight, while completed SCORM items provide the
+    // partial value inside an unfinished lesson (for example 2/3 = 67%).
+    // Keep 100% reserved for a fully completed course so exam gates remain exact.
+    percent: total === 0
+      ? 0
+      : allComplete
+        ? 100
+        : Math.min(99, Math.round(
+            lessons.reduce((sum, lesson) => sum + getLessonProgress(lesson, byLesson.get(lesson.id)), 0) / total * 100
+          )),
+    started: records.some((row) =>
+      !!row.last_accessed ||
+      getResumeSeconds(row) > 0 ||
+      isLessonComplete(row) ||
+      (Array.isArray(row.completed_scos) && row.completed_scos.length > 0)
+    ),
   };
 }

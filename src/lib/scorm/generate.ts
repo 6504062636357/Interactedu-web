@@ -45,6 +45,23 @@ interface VideoSegmentRow {
   order_index: number;
 }
 
+interface GeneratedManifestItem {
+  identifier: string;
+  title: string;
+  href: string | null;
+  children: GeneratedManifestItem[];
+  type: "lesson" | "quiz";
+  startSeconds?: number;
+  endSeconds?: number;
+}
+
+function formatGeneratedSubchapterTitle(title: string, index: number): string {
+  const generatedPrefix = /^(?:บท|ช่วง|หัวข้อ(?:ย่อย)?)ที่\s*\d+/;
+  return generatedPrefix.test(title.trim())
+    ? title.trim().replace(generatedPrefix, `หัวข้อย่อยที่ ${index + 1}`)
+    : title;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -81,15 +98,16 @@ function buildLessonPlayerJs(//helper function อยู่บนสุดได
     chapters: videoSegments
       .slice()
       .sort((a, b) => a.order_index - b.order_index)
-      .map((segment) => ({
+      .map((segment, index) => ({
         id: segment.id,
-        title: segment.title,
+        title: formatGeneratedSubchapterTitle(segment.title, index),
         summary: segment.summary,
         startSeconds: segment.start_seconds,
         endSeconds: segment.end_seconds,
       })),
   };
   return `var LESSON_DATA = ${JSON.stringify(lessonData)};//แปลง object ทั้งก้อนเป็น string JSON
+var REQUESTED_CHAPTER_ID = new URLSearchParams(window.location.search).get("chapter");
 // คุมตัวเล่นวิดิโอ + ควิซในวิดีโอ (SCO)ในบทเรียน 
 var REQUIRE_CORRECT_ANSWER = false;
 var answeredQuestionIds = {};
@@ -278,6 +296,7 @@ function loadAnsweredFromSuspendData() {
 function findNextUnansweredAt(currentTime) {
   for (var i = 0; i < LESSON_DATA.quizzes.length; i++) {
     var q = LESSON_DATA.quizzes[i];
+    if (!isTimeInRequestedChapter(q.timestampSeconds)) continue;
     if (!answeredQuestionIds[q.id] && q.timestampSeconds <= currentTime) return q;
   }
   return null;
@@ -287,6 +306,7 @@ function getMaxAllowedSeekTime() {
   var max = Infinity;
   for (var i = 0; i < LESSON_DATA.quizzes.length; i++) {
     var q = LESSON_DATA.quizzes[i];
+    if (!isTimeInRequestedChapter(q.timestampSeconds)) continue;
     if (!answeredQuestionIds[q.id]) max = Math.min(max, q.timestampSeconds);
   }
   return max;
@@ -379,7 +399,8 @@ function sanitizeLessonHtml(html) {
 }
 
 function renderLesson() {
-  document.getElementById("lesson-title").textContent = LESSON_DATA.title;
+  var requestedChapter = getRequestedChapter();
+  document.getElementById("lesson-title").textContent = requestedChapter ? requestedChapter.title : LESSON_DATA.title;
   document.getElementById("lesson-content").innerHTML = sanitizeLessonHtml(LESSON_DATA.contentHtml);
 }
 
@@ -569,58 +590,30 @@ function formatTime(sec) {
   return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
 }
 
-function findChapterAtTime(seconds) {
+function getRequestedChapter() {
+  if (!REQUESTED_CHAPTER_ID) return null;
   for (var i = 0; i < LESSON_DATA.chapters.length; i++) {
-    var chapter = LESSON_DATA.chapters[i];
-    var isLast = i === LESSON_DATA.chapters.length - 1;
-    if (seconds >= chapter.startSeconds && (seconds < chapter.endSeconds || (isLast && seconds <= chapter.endSeconds))) {
-      return chapter;
-    }
+    if (LESSON_DATA.chapters[i].id === REQUESTED_CHAPTER_ID) return LESSON_DATA.chapters[i];
   }
   return null;
 }
 
-function updateActiveChapter(video) {
-  var chapter = findChapterAtTime(video.currentTime);
-  var label = document.getElementById("current-chapter-label");
-  if (label) label.textContent = chapter ? chapter.title : "";
-
-  var buttons = document.querySelectorAll(".chapter-button");
-  for (var i = 0; i < buttons.length; i++) {
-    buttons[i].classList.toggle("active", !!chapter && buttons[i].dataset.chapterId === chapter.id);
-  }
+function isTimeInRequestedChapter(seconds) {
+  var requestedChapter = getRequestedChapter();
+  if (!requestedChapter) return true;
+  var lastChapter = LESSON_DATA.chapters[LESSON_DATA.chapters.length - 1];
+  var isLast = lastChapter && lastChapter.id === requestedChapter.id;
+  return seconds >= requestedChapter.startSeconds &&
+    (seconds < requestedChapter.endSeconds || (isLast && seconds <= requestedChapter.endSeconds));
 }
 
-function renderChapters(video) {
-  var nav = document.getElementById("chapter-nav");
-  var list = document.getElementById("chapter-list");
-  if (!nav || !list || !LESSON_DATA.chapters.length) return;
-
-  nav.hidden = false;
-  list.innerHTML = "";
-  LESSON_DATA.chapters.forEach(function (chapter) {
-    var button = document.createElement("button");
-    button.type = "button";
-    button.className = "chapter-button";
-    button.dataset.chapterId = chapter.id;
-
-    var title = document.createElement("span");
-    title.className = "chapter-button-title";
-    title.textContent = chapter.title;
-    button.appendChild(title);
-
-    var time = document.createElement("span");
-    time.className = "chapter-button-time";
-    time.textContent = formatTime(chapter.startSeconds) + "–" + formatTime(chapter.endSeconds);
-    button.appendChild(time);
-
-    button.addEventListener("click", function () {
-      video.currentTime = Math.min(chapter.startSeconds, getMaxAllowedSeekTime());
-      video.play();
-    });
-    list.appendChild(button);
-  });
-  updateActiveChapter(video);
+function getPlaybackBounds(video) {
+  var requestedChapter = getRequestedChapter();
+  if (!requestedChapter) return { start: 0, end: video.duration || 0 };
+  return {
+    start: Math.max(0, requestedChapter.startSeconds),
+    end: Math.min(video.duration || requestedChapter.endSeconds, requestedChapter.endSeconds),
+  };
 }
 
 function renderProgressMarkers(video) {
@@ -628,8 +621,12 @@ function renderProgressMarkers(video) {
   container.innerHTML = "";
   if (!video.duration || !isFinite(video.duration)) return;
 
+  var bounds = getPlaybackBounds(video);
+  var playableDuration = Math.max(0.001, bounds.end - bounds.start);
+
   LESSON_DATA.quizzes.forEach(function (q) {
-    var pct = Math.min(100, (q.timestampSeconds / video.duration) * 100);
+    if (!isTimeInRequestedChapter(q.timestampSeconds)) return;
+    var pct = Math.min(100, Math.max(0, ((q.timestampSeconds - bounds.start) / playableDuration) * 100));
     var dot = document.createElement("div");
     dot.className = "progress-marker-dot" + (answeredQuestionIds[q.id] ? " answered" : "");
     dot.style.left = pct + "%";
@@ -644,10 +641,13 @@ function updateMarkerAnswered(questionId) {
 }
 
 function updateProgressUI(video) {
-  var pct = video.duration ? (video.currentTime / video.duration) * 100 : 0;
+  var bounds = getPlaybackBounds(video);
+  var playableDuration = Math.max(0, bounds.end - bounds.start);
+  var elapsed = Math.min(playableDuration, Math.max(0, video.currentTime - bounds.start));
+  var pct = playableDuration ? (elapsed / playableDuration) * 100 : 0;
   document.getElementById("progress-fill").style.width = pct + "%";
   document.getElementById("time-display").textContent =
-    formatTime(video.currentTime) + " / " + formatTime(video.duration);
+    formatTime(elapsed) + " / " + formatTime(playableDuration);
 }
 
 /* ---------------- Custom controls wiring ---------------- */
@@ -689,23 +689,21 @@ function setupCustomControls(video) {
   function seekFromEvent(e) {
     var rect = progressTrack.getBoundingClientRect();
     var ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    var target = ratio * (video.duration || 0);
+    var bounds = getPlaybackBounds(video);
+    var target = bounds.start + ratio * Math.max(0, bounds.end - bounds.start);
     var maxAllowed = getMaxAllowedSeekTime();
     video.currentTime = Math.min(target, maxAllowed);
   }
   progressTrack.addEventListener("click", seekFromEvent);
 
   video.addEventListener("timeupdate", updateProgressUI.bind(null, video));
-  video.addEventListener("timeupdate", updateActiveChapter.bind(null, video));
   video.addEventListener("loadedmetadata", function () {
     updateProgressUI(video);
     renderProgressMarkers(video);
-    renderChapters(video);
   });
   if (video.readyState >= 1) {
     updateProgressUI(video);
     renderProgressMarkers(video);
-    renderChapters(video);
   }
 }
 
@@ -736,15 +734,32 @@ function showResumePrompt(video, resumeSeconds) {
 /* ---------------- Video behavior ---------------- */
 
 function attachVideoBehavior(video) {
+  var chapterCompleted = false;
+
   video.addEventListener("timeupdate", function () {
     if (pendingQuestion) return;
     var next = findNextUnansweredAt(video.currentTime);
-    if (next) { video.pause(); openQuizModal(next); }
+    if (next) { video.pause(); openQuizModal(next); return; }
+
+    var requestedChapter = getRequestedChapter();
+    if (requestedChapter && !chapterCompleted && video.currentTime >= requestedChapter.endSeconds - 0.1) {
+      chapterCompleted = true;
+      video.pause();
+      video.currentTime = Math.min(video.duration || requestedChapter.endSeconds, requestedChapter.endSeconds);
+      lastSavedPosition = video.currentTime;
+      savePosition(video.currentTime);
+      ScormAPI.setValue("cmi.core.lesson_status", "completed");
+      ScormAPI.commit();
+      return;
+    }
   });
 
   video.addEventListener("seeking", function () {
+    var bounds = getPlaybackBounds(video);
     var maxAllowed = getMaxAllowedSeekTime();
-    if (video.currentTime > maxAllowed) video.currentTime = maxAllowed;
+    var cappedMaximum = Math.min(bounds.end, maxAllowed);
+    if (video.currentTime < bounds.start) video.currentTime = bounds.start;
+    else if (video.currentTime > cappedMaximum) video.currentTime = cappedMaximum;
   });
 
   video.addEventListener("play", function () {
@@ -808,7 +823,7 @@ window.addEventListener("load", function () {
   // ทับสถานะ "completed"/"passed" ที่เพิ่งถูก loadFromJSON คืนกลับมาจากฝั่ง page.tsx ทันที
   // ต้องเช็คก่อนว่ามีสถานะเดิมอยู่แล้วหรือยัง (ไม่ใช่ "not attempted"/ว่างเปล่า) ถ้ามีแล้วห้ามทับ
   var existingStatus = ScormAPI.getValue("cmi.core.lesson_status");
-  if (!existingStatus || existingStatus === "not attempted") {
+  if (REQUESTED_CHAPTER_ID || !existingStatus || existingStatus === "not attempted") {
     ScormAPI.setValue("cmi.core.lesson_status", "incomplete");
   }
   renderLesson();
@@ -853,12 +868,16 @@ window.addEventListener("load", function () {
       // กลายเป็น "ab-initio" แล้วจริง) popup ก็ยังเด้งถามอยู่ดี ทั้งที่ตามสเปก SCORM ต้อง resume
       // เฉพาะตอน entry === "resume" เท่านั้น — เพิ่มเช็คนี้เป็นเงื่อนไขร่วม
       var entryValue = ScormAPI.getValue("cmi.core.entry");
-      if (entryValue === "resume" && resumeSeconds > 5 && resumeSeconds < video.duration - 2) {
+      var requestedChapter = getRequestedChapter();
+      var bounds = getPlaybackBounds(video);
+      var canResumeRequestedChapter = !requestedChapter || (resumeSeconds > bounds.start && resumeSeconds < bounds.end - 2);
+      if (entryValue === "resume" && resumeSeconds > 5 && resumeSeconds < video.duration - 2 && canResumeRequestedChapter) {
         showResumePrompt(video, resumeSeconds).then(function (seekTo) {
-          if (seekTo > 0) video.currentTime = seekTo;
+          video.currentTime = seekTo > 0 ? seekTo : bounds.start;
           attachVideoBehavior(video);
         });
       } else {
+        if (requestedChapter) video.currentTime = bounds.start;
         attachVideoBehavior(video);
       }
     }
@@ -928,17 +947,6 @@ const LESSON_HTML = `<!DOCTYPE html>
         </button>
       </div>
     </div>
-
-    <section id="chapter-nav" class="chapter-nav" hidden>
-      <div class="chapter-nav-header">
-        <div>
-          <p class="chapter-nav-kicker">บทของวิดีโอ</p>
-          <p id="current-chapter-label" class="current-chapter-label"></p>
-        </div>
-        <span class="chapter-nav-hint">เลือกเพื่อข้ามไปยังบท</span>
-      </div>
-      <div id="chapter-list" class="chapter-list"></div>
-    </section>
 
     <div id="lesson-content" class="lesson-content"></div>
   </div>
@@ -1135,39 +1143,6 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 }
 .progress-marker-dot.answered { background: #34D399; }
 
-/* ---------- Video chapters ---------- */
-.chapter-nav {
-  margin-top: 16px;
-  border: 1px solid rgba(124, 92, 255, 0.16);
-  border-radius: 16px;
-  background: #F7F5FF;
-  padding: 16px;
-}
-.chapter-nav[hidden] { display: none; }
-.chapter-nav-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.chapter-nav-kicker { margin: 0; color: #0F1B3D; font-size: 12px; font-weight: 700; }
-.current-chapter-label { margin: 2px 0 0; color: #5D45C7; font-size: 13px; font-weight: 700; }
-.chapter-nav-hint { color: rgba(15, 27, 61, 0.42); font-size: 10.5px; }
-.chapter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.chapter-button {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.68);
-  padding: 10px 12px;
-  text-align: left;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
-}
-.chapter-button:hover { border-color: rgba(124, 92, 255, 0.25); background: #fff; transform: translateY(-1px); }
-.chapter-button.active { border-color: rgba(124, 92, 255, 0.48); background: #fff; box-shadow: 0 4px 14px rgba(93, 69, 199, 0.08); }
-.chapter-button-title { overflow: hidden; color: #0F1B3D; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-button-time { color: #7C5CFF; font-size: 10.5px; font-weight: 600; }
-
 .speed-select {
   background: rgba(255,255,255,0.1);
   color: #fff;
@@ -1179,11 +1154,6 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   cursor: pointer;
 }
 .speed-select option { color: #0F1B3D; }
-
-@media (max-width: 560px) {
-  .chapter-list { grid-template-columns: 1fr; }
-  .chapter-nav-header { align-items: flex-start; flex-direction: column; gap: 4px; }
-}
 
 .lesson-content {
   margin: 28px 0;
@@ -1336,17 +1306,38 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 }`;
 
 // ============================================================
-// Manifest: 2 items / 2 resources (lesson.html, quiz.html)
+// Manifest: ช่วงวิดีโอแต่ละช่วงเป็น SCO แยกกัน; ถ้าไม่แบ่งช่วงให้คง lesson SCO เดียวแบบเดิม
 // ============================================================
 //สร้างไฟล์ imsmanifest.xml
-function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean, masteryScore: number): string {
+function buildManifestXml(
+  draft: LessonDraftRow,
+  hasQuiz: boolean,
+  masteryScore: number,
+  videoSegments: VideoSegmentRow[]
+): string {
   const identifier = `COM.INTERACTEDU.${draft.id.replace(/-/g, "").toUpperCase()}`;//สร้าง unique ID ของ manifest
   const escapedTitle = draft.lessons.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const sortedSegments = videoSegments.slice().sort((a, b) => a.order_index - b.order_index);
 
   // [งานข้อ 09] <adlcp:masteryscore> เป็น child ของ <item> ตามสเปก SCORM 1.2 CAM (ไม่ใช่ของ
   // <resource>) — ค่ามาจาก courses.certificate_pass_percentage เดียวกับที่ตัดสินใบรับรอง
   // ให้ SCO ที่ตรวจคะแนนตัวเองอ่านค่านี้จาก manifest แล้วเทียบกับ cmi.core.score.raw ได้เอง
-  const lessonItem = `<item identifier="ITEM-LESSON" identifierref="RES-LESSON">
+  const lessonItems = sortedSegments.length > 0
+    ? `<item identifier="ITEM-LESSON">
+        <title>${escapedTitle}</title>
+        ${sortedSegments.map((segment, index) => {
+          const segmentIdentifier = segment.id.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+          const segmentTitle = formatGeneratedSubchapterTitle(segment.title, index)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          return `<item identifier="ITEM-CHAPTER-${segmentIdentifier}" identifierref="RES-CHAPTER-${segmentIdentifier}">
+          <title>${segmentTitle}</title>
+          <adlcp:masteryscore>${masteryScore}</adlcp:masteryscore>
+        </item>`;
+        }).join("\n        ")}
+      </item>`
+    : `<item identifier="ITEM-LESSON" identifierref="RES-LESSON">
         <title>${escapedTitle}</title>
         <adlcp:masteryscore>${masteryScore}</adlcp:masteryscore>
       </item>`;
@@ -1358,7 +1349,18 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean, masteryScore:
       </item>`
     : "";
 
-  const lessonResource = `<resource identifier="RES-LESSON" type="webcontent" adlcp:scormtype="sco" href="lesson.html">
+  const lessonResources = sortedSegments.length > 0
+    ? sortedSegments.map((segment) => {
+        const segmentIdentifier = segment.id.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+        const chapterHref = `lesson.html?chapter=${encodeURIComponent(segment.id)}`;
+        return `<resource identifier="RES-CHAPTER-${segmentIdentifier}" type="webcontent" adlcp:scormtype="sco" href="${chapterHref}">
+      <file href="lesson.html" />
+      <file href="scorm-api.js" />
+      <file href="lesson-player.js" />
+      <file href="style.css" />
+    </resource>`;
+      }).join("\n    ")
+    : `<resource identifier="RES-LESSON" type="webcontent" adlcp:scormtype="sco" href="lesson.html">
       <file href="lesson.html" />
       <file href="scorm-api.js" />
       <file href="lesson-player.js" />
@@ -1389,12 +1391,12 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean, masteryScore:
   <organizations default="ORG-${draft.id}">
     <organization identifier="ORG-${draft.id}">
       <title>${escapedTitle}</title>
-      ${lessonItem}
+      ${lessonItems}
       ${quizItem}
     </organization>
   </organizations>
   <resources>
-    ${lessonResource}
+    ${lessonResources}
     ${quizResource}
   </resources>
 </manifest>`;
@@ -1406,22 +1408,38 @@ function buildManifestXml(draft: LessonDraftRow, hasQuiz: boolean, masteryScore:
 // เพิ่ม field "type" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
 // ============================================================
 
-function buildManifestJson(draft: LessonDraftRow, hasQuiz: boolean, masteryScore: number) { //สร้าง json เก็บลง db
-  const items: Array<{
-    identifier: string;
-    title: string;
-    href: string;
-    children: never[];
-    type: "lesson" | "quiz";
-  }> = [
-    {
+function buildManifestJson(
+  draft: LessonDraftRow,
+  hasQuiz: boolean,
+  masteryScore: number,
+  videoSegments: VideoSegmentRow[]
+) { //สร้าง json เก็บลง db
+  const items: GeneratedManifestItem[] = videoSegments.length > 0
+    ? [{
+      identifier: "ITEM-LESSON",
+      title: draft.lessons.title,
+      href: null,
+      children: videoSegments
+          .slice()
+          .sort((a, b) => a.order_index - b.order_index)
+          .map((segment, index) => ({
+            identifier: `ITEM-CHAPTER-${segment.id.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()}`,
+            title: formatGeneratedSubchapterTitle(segment.title, index),
+            href: `lesson.html?chapter=${encodeURIComponent(segment.id)}`,
+            children: [],
+            type: "lesson" as const,
+            startSeconds: segment.start_seconds,
+            endSeconds: segment.end_seconds,
+          })),
+      type: "lesson",
+    }]
+    : [{
       identifier: "ITEM-LESSON",
       title: draft.lessons.title,
       href: "lesson.html",
       children: [],
       type: "lesson",
-    },
-  ];
+    }];
 
   if (hasQuiz) {
     items.push({
@@ -1557,7 +1575,7 @@ export async function generateScormPackage(
   // (หรือ query พลาด) ควรได้ SCO ที่ใช้เกณฑ์เดียวกับที่ตัดสินใบรับรองอยู่ดี ไม่ใช่ไม่มีเกณฑ์เลย
   const masteryScore = Number.isFinite(configuredMasteryScore) ? configuredMasteryScore : 70;
 
-  const manifestXml = buildManifestXml(typedDraft, hasQuiz, masteryScore);
+  const manifestXml = buildManifestXml(typedDraft, hasQuiz, masteryScore, typedSegments);
   const lessonPlayerJs = buildLessonPlayerJs(
     typedDraft,
     lessonId,
@@ -1704,15 +1722,19 @@ export async function generateScormPackage(
   }
 
   // 6. อัปเดต lessons table ให้ player (/api/lessons/[lessonId]/scorm-info) อ่านได้ตรง
-  //    entryPoint ต้องชี้ไป lesson.html (SCO แรก) ไม่ใช่ quiz.html
-  //    manifest เป็น JSON ที่มี item ควิซแยกออกมา (type: "quiz") ให้ page.tsx แสดงเป็นบล็อกต่างหาก
-  const manifestJson = buildManifestJson(typedDraft, hasQuiz, masteryScore);
+  //    entryPoint ชี้ไปช่วงแรกเมื่อมีการแบ่งวิดีโอ และ fallback เป็น lesson.html เมื่อไม่ได้แบ่ง
+  //    manifest เก็บช่วงวิดีโอเป็นลูกของบทเรียน เพื่อให้ player วาดเป็นหัวข้อย่อยใต้บทหลัก
+  const manifestJson = buildManifestJson(typedDraft, hasQuiz, masteryScore, typedSegments);
+  const firstSegment = typedSegments.slice().sort((a, b) => a.order_index - b.order_index)[0];
+  const entryPoint = firstSegment
+    ? `lesson.html?chapter=${encodeURIComponent(firstSegment.id)}`
+    : "lesson.html";
 
   const { error: lessonUpdateError } = await supabase
     .from("lessons")
     .update({
       is_scorm: true,
-      scorm_entry_point: "lesson.html",
+      scorm_entry_point: entryPoint,
       scorm_version: "1.2",
       scorm_manifest: manifestJson,
       is_published: true,

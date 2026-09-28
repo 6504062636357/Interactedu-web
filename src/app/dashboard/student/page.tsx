@@ -2,7 +2,7 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { summarizeStudentProgress } from "@/lib/courses/student-progress";
+import { summarizeStudentProgress, type StudentProgressLesson } from "@/lib/courses/student-progress";
 import { createClient } from "@/utils/supabase/server";
 import { Award, BookOpen, CheckCircle, GraduationCap, Play, type LucideIcon } from "lucide-react";
 
@@ -17,8 +17,7 @@ interface EnrollmentRow {
   courses: EnrolledCourse;
 }
 
-interface LessonRef {
-  id: string;
+interface LessonRef extends StudentProgressLesson {
   order_index: number;
   title: string;
   is_published: boolean;
@@ -36,6 +35,7 @@ interface TrackingRow {
   video_completed: boolean | null;
   enrollment_id: string;
   last_accessed: string | null;
+  completed_scos: string[] | null;
 }
 
 interface CourseCardData {
@@ -81,13 +81,13 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
   if (courseIds.length > 0) {
     const { data: modulesData } = await supabase
       .from("modules")
-      .select("id, course_id, order_index, lessons(id, order_index, title, is_published)")
+      .select("id, course_id, order_index, lessons(id, order_index, title, is_published, scorm_source, scorm_manifest)")
       .in("course_id", courseIds)
       .order("order_index", { ascending: true });
 
     const { data: trackingData } = await supabase
       .from("scorm_tracking")
-      .select("lesson_id, lesson_status, video_completed, enrollment_id, last_accessed")
+      .select("lesson_id, lesson_status, video_completed, enrollment_id, last_accessed, completed_scos")
       .in(
         "enrollment_id",
         enrollments.map((e) => e.id)

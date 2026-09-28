@@ -11,7 +11,10 @@ import {
 import { useRouter } from "next/navigation";
 import { uploadVideoToR2 } from "@/lib/uploadVideoToR2";
 import { genId } from "@/lib/uuid";
-import VideoSegmenter, { type VideoSegment } from "@/components/teacher/VideoSegmenter";
+import VideoSegmenter, {
+  normalizeDefaultSegmentTitles,
+  type VideoSegment,
+} from "@/components/teacher/VideoSegmenter";
 import type { BankQuestionCounts } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
 
 interface LessonDraftFormProps {
@@ -103,11 +106,13 @@ export default function LessonDraftForm({
   const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [videoSegments, setVideoSegments] = useState<VideoSegment[]>(
-    initialData?.videoSegments.map((segment) => ({
-      ...segment,
-      summary: segment.summary ?? undefined,
-      confidence: segment.confidence ?? undefined,
-    })) ?? []
+    normalizeDefaultSegmentTitles(
+      initialData?.videoSegments.map((segment) => ({
+        ...segment,
+        summary: segment.summary ?? undefined,
+        confidence: segment.confidence ?? undefined,
+      })) ?? []
+    )
   );
 
   // แบบทดสอบท้ายคอร์สจัดการจากหน้าคอร์สโดยเฉพาะ ส่วนนี้เก็บเฉพาะควิซในวิดีโอ

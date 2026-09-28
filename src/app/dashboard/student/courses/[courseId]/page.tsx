@@ -3,16 +3,14 @@ import { notFound, redirect } from "next/navigation";
 import { Award, BookOpen, CheckCircle2, Clock3, Play } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
-import { getResumeSeconds, isLessonComplete, summarizeStudentProgress, type StudentTracking } from "@/lib/courses/student-progress";
+import { getResumeSeconds, isLessonComplete, summarizeStudentProgress, type StudentProgressLesson, type StudentTracking } from "@/lib/courses/student-progress";
 import ClaimCertificateButton from "@/components/certificates/ClaimCertificateButton";
 
-interface Lesson {
-  id: string;
+interface Lesson extends StudentProgressLesson {
   title: string;
   order_index: number;
   video_duration_seconds: number;
   is_published: boolean | null;
-  scorm_source: string | null;
 }
 interface Module { id: string; title: string; order_index: number; lessons: Lesson[] }
 
@@ -41,8 +39,8 @@ export default async function StudentCourseOverview({ params }: { params: Promis
   );
 
   const [modulesResult, trackingResult, settingsResult, certificateResult, attemptResult] = await Promise.all([
-    supabase.from("modules").select("id, title, order_index, lessons(id, title, order_index, video_duration_seconds, is_published, scorm_source)").eq("course_id", courseId).order("order_index"),
-    supabase.from("scorm_tracking").select("lesson_id, lesson_status, video_completed, last_accessed, cmi_data").eq("enrollment_id", enrollment.id),
+    supabase.from("modules").select("id, title, order_index, lessons(id, title, order_index, video_duration_seconds, is_published, scorm_source, scorm_manifest)").eq("course_id", courseId).order("order_index"),
+    supabase.from("scorm_tracking").select("lesson_id, lesson_status, video_completed, last_accessed, completed_scos, cmi_data").eq("enrollment_id", enrollment.id),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
     supabase.from("certificates").select("id, status, issued_at").eq("user_id", user.id).eq("course_id", courseId).maybeSingle(),
     supabase.from("quiz_attempts").select("id, score, passed, submitted_at").eq("enrollment_id", enrollment.id).not("submitted_at", "is", null).order("submitted_at", { ascending: false }).limit(1).maybeSingle(),

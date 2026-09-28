@@ -114,6 +114,10 @@ test('a teacher-owned course still requires exam approval and submitted lessons'
   app.draft.status = 'pending_review';
   assert.equal((await app.review.approveCourse('course')).error, undefined);
   assert.equal(app.course.status, 'published');
+  const notification = app.notifications.find(item => item.type === 'course_approved');
+  assert.ok(notification);
+  assert.match(notification.title, /Course/);
+  assert.equal(notification.actionUrl, '/dashboard/teacher/courses/course');
 });
 
 test('readiness rejects empty random exams, insufficient bank and database failures', async () => {
@@ -153,6 +157,18 @@ test('admin can save lesson edits while preserving final exam questions', async 
   assert.equal(app.draft.content_html, 'Edited content');
   assert.equal(app.course.status, 'draft');
   assert.equal(app.tables.quiz_questions.length, 1);
+});
+
+test('lesson approval notification identifies its course and links to it', async () => {
+  const app = setup({ owner: 'teacher', draftOwner: 'teacher', examStatus: 'pending' });
+  const result = await app.review.approveLesson('draft', 'lesson');
+  assert.equal(result.error, undefined);
+  const notification = app.notifications.find(item => item.type === 'lesson_approved');
+  assert.ok(notification);
+  assert.match(notification.title, /Lesson/);
+  assert.match(notification.message, /Course/);
+  assert.equal(notification.actionUrl, '/dashboard/teacher/courses/course');
+  assert.equal(notification.relatedId, 'lesson');
 });
 
 test('teacher cannot edit foreign content, nor can admin mix course and lesson IDs', async () => {
