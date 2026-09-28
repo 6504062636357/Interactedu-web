@@ -78,6 +78,10 @@ export async function PATCH(
   if (!Number.isFinite(price) || price < 0 || price > 10_000_000) {
     return NextResponse.json({ error: "ราคาคอร์สไม่ถูกต้อง" }, { status: 400 });
   }
+  // ราคาขั้นต่ำ 20 บาท ยกเว้นคอร์สฟรี (ฟอร์มส่ง price: 0 มาตอนติ๊ก "คอร์สเรียนฟรี")
+  if (price !== 0 && price < 20) {
+    return NextResponse.json({ error: "ราคาคอร์สขั้นต่ำ 20 บาท" }, { status: 400 });
+  }
   if (coverImageUrl === undefined) {
     return NextResponse.json({ error: "URL รูปปกไม่ถูกต้อง" }, { status: 400 });
   }

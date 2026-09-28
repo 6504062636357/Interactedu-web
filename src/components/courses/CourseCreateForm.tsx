@@ -108,6 +108,8 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
           errors.price = "ราคาต้องเป็นตัวเลขเท่านั้น";
         } else if (priceNumber < 0) {
           errors.price = "ราคาต้องมากกว่าหรือเท่ากับ 0";
+        } else if (priceNumber < 20) {
+          errors.price = "ราคาคอร์สขั้นต่ำ 20 บาท";
         }
       }
     }

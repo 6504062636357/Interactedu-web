@@ -98,9 +98,16 @@ export default function AdminCourseDetailsForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
     setError(null);
     setSuccess(null);
+
+    // ราคาขั้นต่ำ 20 บาท เช็คก่อนยิง request เหมือนฟิลด์อื่นๆ ในฟอร์มนี้ (ยกเว้นติ๊กคอร์สเรียนฟรี)
+    if (!isFree && Number(price) < 20) {
+      setError("ราคาคอร์สขั้นต่ำ 20 บาท");
+      return;
+    }
+
+    setSaving(true);
 
     try {
       let nextCoverUrl = coverImageUrl;

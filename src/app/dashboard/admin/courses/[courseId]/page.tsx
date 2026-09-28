@@ -9,6 +9,14 @@ import { createClient } from "@/utils/supabase/server";
 import { checkCourseReadiness } from "@/app/dashboard/teacher/courses/actions";
 import PublishCourseButton from "@/components/admin/PublishCourseButton";
 
+const COURSE_STATUS_LABEL: Record<string, string> = {
+  draft: "ฉบับร่าง",
+  pending: "รออนุมัติ",
+  published: "เผยแพร่แล้ว",
+  rejected: "ตีกลับ",
+  archived: "เก็บถาวร",
+};
+
 interface CertificateSettings {
   certificate_enabled: boolean;
   certificate_pass_percentage: number;
@@ -58,7 +66,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#FF5A3C]">Course workspace</p>
           <h1 className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[#0F1B3D]">{course.title}</h1>
-          <p className="mt-1 text-[12.5px] text-slate-500">{course.course_code ?? "ไม่ระบุรหัส"} · สถานะ {course.status}</p>
+          <p className="mt-1 text-[12.5px] text-slate-500">{course.course_code ?? "ไม่ระบุรหัส"} · สถานะ {COURSE_STATUS_LABEL[course.status] ?? course.status}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {!isOwnCourse && course.status === "pending" && <Link href={`/dashboard/admin/courses/${course.id}/review`} className="rounded-full bg-amber-500 px-4 py-2.5 text-[12.5px] font-bold text-white">ตรวจและอนุมัติ</Link>}

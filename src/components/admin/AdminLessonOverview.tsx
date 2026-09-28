@@ -56,6 +56,28 @@ function formatTime(value: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+// การ์ดแสดงคำถามเดียว ใช้ร่วมกันทั้งฝั่ง "คำถามในบทเรียน" (แทรกในวิดีโอ) และ "คำถามท้ายบทเรียน"
+function QuestionCard({ question, index }: { question: QuizQuestion; index: number }): ReactElement {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+      <p className="text-[13px] font-semibold text-[#0F1B3D]">
+        {index + 1}. {question.question_text}
+        {question.video_timestamp_seconds != null && <span className="ml-2 text-[11px] font-medium text-slate-500">เวลา {formatTime(question.video_timestamp_seconds)}</span>}
+      </p>
+      {(question.quiz_choices ?? []).length > 0 && (
+        <ul className="mt-2 space-y-1 pl-4 text-xs text-slate-600">
+          {[...(question.quiz_choices ?? [])].sort((a, b) => a.order_index - b.order_index).map((choice, choiceIndex) => (
+            <li key={choiceIndex} className={choice.is_correct ? "font-bold text-emerald-700" : undefined}>
+              {choice.is_correct ? "✓ " : ""}{choice.choice_text}
+            </li>
+          ))}
+        </ul>
+      )}
+      {question.explanation && <p className="mt-2 text-xs text-slate-500">คำอธิบาย: {question.explanation}</p>}
+    </div>
+  );
+}
+
 export default function AdminLessonOverview({
   courseId,
   lesson,
@@ -69,7 +91,10 @@ export default function AdminLessonOverview({
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   )[0];
   const videoUrl = draft?.video_url || lesson.video_url;
-  const questions = [...(draft?.quiz_questions ?? [])].sort((a, b) => a.order_index - b.order_index);
+  // แสดงเฉพาะคำถามแทรกในวิดีโอ (มี video_timestamp_seconds) — ไม่เอาคำถามท้ายบทเรียนมาแสดงในหน้านี้ กันสับสน
+  const questions = [...(draft?.quiz_questions ?? [])]
+    .filter((q) => q.video_timestamp_seconds != null)
+    .sort((a, b) => a.order_index - b.order_index);
   const markers = [...(draft?.video_quiz_markers ?? [])].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
 
   return (
@@ -112,22 +137,7 @@ export default function AdminLessonOverview({
           <div className="space-y-3 border-t border-slate-200 pt-4">
             <h4 className="text-xs font-bold text-slate-600">คำถามในบทเรียน ({questions.length + markers.length})</h4>
             {questions.map((question, questionIndex) => (
-              <div key={question.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
-                <p className="text-[13px] font-semibold text-[#0F1B3D]">
-                  {questionIndex + 1}. {question.question_text}
-                  {question.video_timestamp_seconds != null && <span className="ml-2 text-[11px] font-medium text-slate-500">เวลา {formatTime(question.video_timestamp_seconds)}</span>}
-                </p>
-                {(question.quiz_choices ?? []).length > 0 && (
-                  <ul className="mt-2 space-y-1 pl-4 text-xs text-slate-600">
-                    {[...(question.quiz_choices ?? [])].sort((a, b) => a.order_index - b.order_index).map((choice, choiceIndex) => (
-                      <li key={choiceIndex} className={choice.is_correct ? "font-bold text-emerald-700" : undefined}>
-                        {choice.is_correct ? "✓ " : ""}{choice.choice_text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {question.explanation && <p className="mt-2 text-xs text-slate-500">คำอธิบาย: {question.explanation}</p>}
-              </div>
+              <QuestionCard key={question.id} question={question} index={questionIndex} />
             ))}
             {markers.map((marker) => (
               <p key={marker.id} className="rounded-xl border border-violet-100 bg-white px-3.5 py-3 text-xs text-violet-700">
