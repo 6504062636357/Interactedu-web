@@ -114,6 +114,7 @@ var answeredQuestionIds = {};
 var pendingQuestion = null;
 var savePositionTimer = null;
 var lastSavedPosition = 0;
+var maxWatchedPosition = 0;
 // [งานข้อ 22] จับเวลาเริ่ม session ตั้งแต่บรรทัดนี้ทำงาน (สคริปต์นี้ execute ตอน parse หน้าเว็บ ก่อน
 // window "load" ด้วยซ้ำ) ไว้คำนวณ cmi.core.session_time ตอนจบ session — เดิมไม่เคย setValue ค่านี้
 // เลยสักครั้ง รายงานเวลาเรียนของผู้เรียนที่ LMS/dashboard เห็นจึงเป็นศูนย์ตลอดไม่ว่าจะเรียนนานแค่ไหน
@@ -303,7 +304,7 @@ function findNextUnansweredAt(currentTime) {
 }
 
 function getMaxAllowedSeekTime() {
-  var max = Infinity;
+  var max = maxWatchedPosition;
   for (var i = 0; i < LESSON_DATA.quizzes.length; i++) {
     var q = LESSON_DATA.quizzes[i];
     if (!isTimeInRequestedChapter(q.timestampSeconds)) continue;
@@ -747,6 +748,7 @@ function attachVideoBehavior(video) {
 
   video.addEventListener("timeupdate", function () {
     if (pendingQuestion) return;
+    maxWatchedPosition = Math.max(maxWatchedPosition, video.currentTime);
     var next = findNextUnansweredAt(video.currentTime);
     if (next) { video.pause(); openQuizModal(next); return; }
 
@@ -882,11 +884,13 @@ window.addEventListener("load", function () {
       var canResumeRequestedChapter = !requestedChapter || (resumeSeconds > bounds.start && resumeSeconds < bounds.end - 2);
       if (entryValue === "resume" && resumeSeconds > 5 && resumeSeconds < video.duration - 2 && canResumeRequestedChapter) {
         showResumePrompt(video, resumeSeconds).then(function (seekTo) {
-          video.currentTime = seekTo > 0 ? seekTo : bounds.start;
+          maxWatchedPosition = seekTo > 0 ? seekTo : bounds.start;
+          video.currentTime = maxWatchedPosition;
           attachVideoBehavior(video);
         });
       } else {
         if (requestedChapter) video.currentTime = bounds.start;
+        maxWatchedPosition = requestedChapter ? bounds.start : 0;
         attachVideoBehavior(video);
       }
     }
