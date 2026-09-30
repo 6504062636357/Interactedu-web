@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { summarizeStudentProgress, type StudentProgressLesson } from "@/lib/courses/student-progress";
+import { formatCourseVideoDuration, formatStudyTime } from "@/lib/courses/study-time";
 import { createClient } from "@/utils/supabase/server";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 
@@ -21,6 +22,7 @@ interface EnrollmentRow {
 interface LessonRef extends StudentProgressLesson {
   order_index: number;
   is_published: boolean;
+  video_duration_seconds: number | null;
 }
 
 interface ModuleWithLessons {
@@ -46,6 +48,8 @@ interface CourseCardData {
   progress: number;
   certified: boolean;
   href: string;
+  studySeconds: number | null;
+  videoSeconds: number;
 }
 
 function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
@@ -88,6 +92,10 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
             style={{ width: `${course.progress}%` }}
           />
         </div>
+        <div className="mt-3 space-y-1 text-[11.5px] text-slate-500">
+          <p>เรียนแล้ว {course.studySeconds === null ? "—" : formatStudyTime(course.studySeconds)}</p>
+          <p>ความยาวคลิปรวม {formatCourseVideoDuration(course.videoSeconds) ?? "ยังไม่ระบุ"}</p>
+        </div>
         <p className="mt-auto self-end pt-3 text-right text-xs font-bold text-[#3157D5]">
           ดูรายละเอียดและบทเรียน
         </p>
@@ -113,6 +121,12 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
 
   const enrollments = (data ?? []) as unknown as EnrollmentRow[];
   const courseIds = enrollments.map((e) => e.course_id);
+  const studyTimeResult = enrollments.length
+    ? await supabase.from("student_study_time").select("enrollment_id, total_seconds").in("enrollment_id", enrollments.map((e) => e.id))
+    : { data: [], error: null };
+  const studyTimeByEnrollment = new Map(
+    (studyTimeResult.data ?? []).map((row) => [row.enrollment_id, Number(row.total_seconds) || 0]),
+  );
 
   const { data: certificateRows } = courseIds.length
     ? await supabase
@@ -129,7 +143,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
   if (courseIds.length > 0) {
     const { data: modulesData } = await supabase
       .from("modules")
-      .select("id, course_id, order_index, lessons(id, order_index, is_published, scorm_source, scorm_manifest)")
+      .select("id, course_id, order_index, lessons(id, order_index, is_published, video_duration_seconds, scorm_source, scorm_manifest)")
       .in("course_id", courseIds)
       .order("order_index", { ascending: true });
 
@@ -170,6 +184,8 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         progress,
         certified: certifiedCourseIds.has(e.course_id),
         href: `/dashboard/student/courses/${e.course_id}`,
+        studySeconds: studyTimeResult.error ? null : studyTimeByEnrollment.get(e.id) ?? 0,
+        videoSeconds: allLessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds ?? 0), 0),
       });
     }
   }

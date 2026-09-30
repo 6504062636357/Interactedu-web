@@ -4,6 +4,7 @@ import { Award, BookOpen, CheckCircle2, Clock3, Play } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 import { getResumeSeconds, isLessonComplete, summarizeStudentProgress, type StudentProgressLesson, type StudentTracking } from "@/lib/courses/student-progress";
+import { formatCourseVideoDuration, formatStudyTime } from "@/lib/courses/study-time";
 import ClaimCertificateButton from "@/components/certificates/ClaimCertificateButton";
 
 interface Lesson extends StudentProgressLesson {
@@ -38,12 +39,13 @@ export default async function StudentCourseOverview({ params }: { params: Promis
     </div>
   );
 
-  const [modulesResult, trackingResult, settingsResult, certificateResult, attemptResult] = await Promise.all([
+  const [modulesResult, trackingResult, settingsResult, certificateResult, attemptResult, studyTimeResult] = await Promise.all([
     supabase.from("modules").select("id, title, order_index, lessons(id, title, order_index, video_duration_seconds, is_published, scorm_source, scorm_manifest)").eq("course_id", courseId).order("order_index"),
     supabase.from("scorm_tracking").select("lesson_id, lesson_status, video_completed, last_accessed, completed_scos, cmi_data").eq("enrollment_id", enrollment.id),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
     supabase.from("certificates").select("id, status, issued_at").eq("user_id", user.id).eq("course_id", courseId).maybeSingle(),
     supabase.from("quiz_attempts").select("id, score, passed, submitted_at").eq("enrollment_id", enrollment.id).not("submitted_at", "is", null).order("submitted_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("student_study_time").select("total_seconds").eq("enrollment_id", enrollment.id).maybeSingle(),
   ]);
   if (modulesResult.error) throw new Error("โหลดรายการบทเรียนไม่สำเร็จ");
   const rawModules = (modulesResult.data ?? []) as unknown as Module[];
@@ -56,7 +58,7 @@ export default async function StudentCourseOverview({ params }: { params: Promis
   const allLessonsComplete = trackingAvailable && progress.allComplete && unpublishedLessons === 0;
   const resume = progress.resumeLesson;
   const resumeSeconds = resume?.scorm_source === "generated" ? getResumeSeconds(progress.byLesson.get(resume.id)) : 0;
-  const totalMinutes = Math.ceil(lessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds || 0), 0) / 60);
+  const videoDuration = formatCourseVideoDuration(lessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds || 0), 0));
   const certificate = certificateResult.data;
   const attempt = attemptResult.data;
   const passed = attempt?.passed === true;
@@ -73,7 +75,7 @@ export default async function StudentCourseOverview({ params }: { params: Promis
             <h1 className="mt-2 break-words text-2xl font-extrabold sm:text-3xl">{course.title}</h1>
             <div className="mt-4 flex flex-wrap gap-4 text-xs text-white/70">
               <span className="inline-flex items-center gap-1.5"><BookOpen size={15} /> {progress.total} บทเรียน</span>
-              {totalMinutes > 0 && <span className="inline-flex items-center gap-1.5"><Clock3 size={15} /> {totalMinutes} นาที</span>}
+              <span className="inline-flex items-center gap-1.5"><Clock3 size={15} /> ความยาวคลิปรวม {videoDuration ?? "ยังไม่ระบุ"}</span>
               {certificateEnabled && <span className="inline-flex items-center gap-1.5"><Award size={15} /> มีใบรับรองเมื่อผ่านเกณฑ์</span>}
             </div>
           </div>
@@ -91,6 +93,7 @@ export default async function StudentCourseOverview({ params }: { params: Promis
           <div>
             <h2 className="font-extrabold text-[#0F1B3D]">ความคืบหน้าของคุณ</h2>
             <p className="mt-1 text-sm text-slate-600">{trackingAvailable ? `เรียนครบ ${progress.completed} จาก ${progress.total} บท · ${progress.percent}%` : "โหลดความคืบหน้าไม่สำเร็จ กรุณารีเฟรชหน้า"}</p>
+            <p className="mt-1 text-sm font-semibold text-[#3157D5]">เวลาเรียนสะสมในคอร์สนี้: {studyTimeResult.error ? "—" : formatStudyTime(Number(studyTimeResult.data?.total_seconds) || 0)}</p>
           </div>
           {resume && trackingAvailable && <Link href={`/play/${courseId}/${resume.id}`} className="inline-flex items-center gap-2 rounded-xl bg-[#3157D5] px-5 py-3 text-sm font-bold text-white hover:bg-[#0F1B3D]">
             <Play size={16} /> {progress.allComplete ? "ทบทวนบทเรียน" : progress.started ? "เรียนต่อจากที่ค้าง" : "เริ่มเรียน"}

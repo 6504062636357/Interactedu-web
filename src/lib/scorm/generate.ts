@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import JSZip from "jszip";
 import "server-only";
+import { withVolumeControls } from "@/lib/scorm/volume-controls";
 interface QuizChoiceRow { //interface เอาไว้กำหนดชนิดข้อมูลว่ามีอะไรบ้าง ถ้าเรียกใช้ต้องประกาศตัวแปรให้ครบห้ามขาดเกิน 
   choice_text: string;//ข้อความของชอยส์
   is_correct: boolean;
@@ -1602,13 +1603,14 @@ export async function generateScormPackage(
     typedMarkers,
     typedSegments
   );
+  const lessonHtml = withVolumeControls(LESSON_HTML);
 
   // 3. สร้างไฟล์ ZIP ด้วย JSZip
   let zipBuffer: Buffer;
   try {
     const zip = new JSZip();
     zip.file("imsmanifest.xml", manifestXml);
-    zip.file("lesson.html", LESSON_HTML);//หน้าหลัก
+    zip.file("lesson.html", lessonHtml);//หน้าหลัก
     zip.file("scorm-api.js", SCORM_API_JS);//ตัวเชื่อมกับ LMSตัวอื่น
     zip.file("lesson-player.js", lessonPlayerJs);//logic การเล่นวิดิโอและควิซแทรกกลางบทเรียน
     zip.file("style.css", STYLE_CSS);
@@ -1628,7 +1630,7 @@ export async function generateScormPackage(
 
   const filesToUpload: { name: string; content: string; contentType: string }[] = [
     { name: "imsmanifest.xml", content: manifestXml, contentType: "application/xml" },
-    { name: "lesson.html", content: LESSON_HTML, contentType: "text/html" },
+    { name: "lesson.html", content: lessonHtml, contentType: "text/html" },
     { name: "scorm-api.js", content: SCORM_API_JS, contentType: "application/javascript" },
     { name: "lesson-player.js", content: lessonPlayerJs, contentType: "application/javascript" },
     { name: "style.css", content: STYLE_CSS, contentType: "text/css" },

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { Scorm12API, Scorm2004API } from 'scorm-again';
 import { selectResumeScoPath } from '@/lib/courses/scorm-resume';
+import { useStudentStudyTime } from '@/lib/courses/use-student-study-time';
+import { useVideoSeekGuard } from '@/lib/courses/use-video-seek-guard';
 
 interface PlayProps {
   params: Promise<{ courseId: string; lessonId: string }>;
@@ -151,6 +153,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   // ความคืบหน้าราย SCO ของเลสสันปัจจุบัน
   const [completedScos, setCompletedScos] = useState<string[]>([]);
   const [videoCompleted, setVideoCompleted] = useState(false);
+  const [seekResumeSeconds, setSeekResumeSeconds] = useState(0);
 
   // true เมื่อ window.API/API_1484_11 ถูกตั้งค่าและโหลด CMI เดิมเสร็จแล้ว
   // ใช้กัน iframe ไม่ให้ขึ้นก่อน เพราะ SCO จะหา window.API ตอน load แค่ครั้งเดียว
@@ -158,6 +161,18 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
   // ความคืบหน้าของ item ที่กำลังเล่นอยู่ (0-1) จาก currentTime/duration ของ <video> ใน iframe
   const [currentItemFraction, setCurrentItemFraction] = useState(0);
+
+  const stopStudyTime = useStudentStudyTime({ courseId, lessonId, scormSource, currentPath, apiReady, iframeRef });
+  const seekGuardItem = flattenPlayableItems(manifest?.items ?? []).find((item) => item.href === currentPath);
+  const canReplayFreely = videoCompleted || (currentPath !== null && completedScos.includes(currentPath));
+  useVideoSeekGuard({
+    courseId, lessonId, currentPath, apiReady, scormSource,
+    completed: canReplayFreely,
+    chapterStartSeconds: seekGuardItem?.startSeconds ?? 0,
+    chapterEndSeconds: seekGuardItem?.endSeconds,
+    resumeSeconds: seekResumeSeconds,
+    iframeRef,
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -174,6 +189,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
         setCurrentPath(null);
         setCompletedScos([]);
         setVideoCompleted(false);
+        setSeekResumeSeconds(0);
 
         const [infoResponse, progressResponse] = await Promise.all([
           fetch(`/api/lessons/${lessonId}/scorm-info`),
@@ -187,6 +203,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
         const nextSource = data.scormSource === 'imported' ? 'imported' : 'generated';
         const nextCompletedScos = Array.isArray(progressData?.completedScos) ? progressData.completedScos : [];
         const nextVideoCompleted = progressData?.videoCompleted === true;
+        const nextResumeSeconds = Number(progressData?.resumeSeconds ?? 0);
 
         setManifest(nextManifest);
         setCourseTitle(data.courseTitle ?? null);
@@ -195,6 +212,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
         setScormSource(nextSource);
         setCompletedScos(nextCompletedScos);
         setVideoCompleted(nextVideoCompleted);
+        setSeekResumeSeconds(Number.isFinite(nextResumeSeconds) ? nextResumeSeconds : 0);
         setCurrentPath(selectResumeScoPath({
           entryPoint: data.entryPoint ?? null,
           manifest: nextManifest,
@@ -385,6 +403,11 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
       // ผู้ใช้สลับ SCO/เลสสันไปแล้วระหว่างรอ fetch — ทิ้งผลลัพธ์นี้ ปล่อยให้ effect รอบใหม่ทำงานแทน
       if (cancelled) return;
+
+      const priorResumeSeconds = Number(prior?.lessonLocation);
+      if (prior?.hasPriorAttempt && Number.isFinite(priorResumeSeconds) && priorResumeSeconds > 0) {
+        setSeekResumeSeconds((current) => Math.max(current, priorResumeSeconds));
+      }
 
       // 2) สร้าง API instance
       const settings = { autocommit: true, autocommitSeconds: 15, logLevel: 2 };
@@ -721,21 +744,29 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     courseLessons[courseLessonIndex]?.videoDurationSeconds
   );
 
+  function canSelectItem(href: string | null): boolean {
+    if (!href || scormSource !== 'generated') return true;
+    const targetIndex = flatItems.findIndex((item) => item.href === href);
+    if (targetIndex <= currentIndex) return true;
+    return flatItems.slice(Math.max(0, currentIndex), targetIndex).every((item) => item.completed);
+  }
+
   function handleSelectItem(href: string | null) {
-    if (!href || href === currentPath) return;
+    if (!href || href === currentPath || !canSelectItem(href)) return;
     setCurrentPath(href);
     if (window.innerWidth < 1024) setSidebarOpen(false);
   }
 
   // สลับไปเลสสันอื่นในคอร์ส — เปลี่ยน route ทำให้ effect ที่ผูกกับ lessonId รันใหม่ทั้งหมด
-  function handleSelectLesson(targetLessonId: string) {
+  async function handleSelectLesson(targetLessonId: string) {
     if (targetLessonId === lessonId) return;
+    await stopStudyTime();
     router.push(`/play/${courseId}/${targetLessonId}`);
   }
 
-  function handleExit() {
+  async function handleExit() {
+    await stopStudyTime();
     router.push(`/dashboard/student/courses/${courseId}`);
-    router.refresh();
   }
 
   const previousCourseLesson = courseLessonIndex > 0 ? courseLessons[courseLessonIndex - 1] : null;
@@ -743,6 +774,9 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     courseLessonIndex >= 0 && courseLessonIndex < courseLessons.length - 1
       ? courseLessons[courseLessonIndex + 1]
       : null;
+  const nextLocked = scormSource === 'generated' && (
+    nextItem ? !canSelectItem(nextItem.href) : Boolean(nextCourseLesson && !currentLessonCompleted)
+  );
 
   function handlePrevious(): void {
     if (prevItem) handleSelectItem(prevItem.href);
@@ -750,6 +784,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   }
 
   function handleNext(): void {
+    if (nextLocked) return;
     if (nextItem) handleSelectItem(nextItem.href);
     else if (nextCourseLesson) handleSelectLesson(nextCourseLesson.id);
     else handleExit();
@@ -768,9 +803,9 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             <li key={item.identifier} className="my-0.5">
               <button
                 onClick={() => handleSelectItem(item.href)}
-                disabled={!item.href}
+                disabled={!item.href || !canSelectItem(item.href)}
                 aria-expanded={hasChildren ? true : undefined}
-                className={`w-full flex items-start gap-2 text-left text-[12.5px] px-2.5 py-2 rounded-lg transition-colors ${
+                className={`w-full flex items-start gap-2 text-left text-[12.5px] px-2.5 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   item.href
                     ? isActive
                       ? 'bg-blue-500/15 text-white font-semibold border-l-2 border-blue-400 -ml-[2px] pl-[12px]'
@@ -1120,8 +1155,8 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             <button onClick={handlePrevious} disabled={!prevItem && !previousCourseLesson} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12.5px] font-bold text-slate-300 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:px-4">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg><span className="hidden sm:inline">ก่อนหน้า</span>
             </button>
-            <div className="min-w-0 px-3 text-center"><p className="truncate text-[11.5px] font-semibold text-slate-400">{displayLessonTitle ?? currentItem?.title}</p><p className="mt-0.5 text-[10.5px] text-slate-600">บันทึกความคืบหน้าอัตโนมัติ</p></div>
-            <button onClick={handleNext} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#FF684D] to-[#FF8066] px-4 py-2.5 text-[12.5px] font-extrabold text-white shadow-lg shadow-orange-950/20 transition hover:brightness-110 sm:px-5">
+            <div className="min-w-0 px-3 text-center"><p className="truncate text-[11.5px] font-semibold text-slate-400">{displayLessonTitle ?? currentItem?.title}</p><p className="mt-0.5 text-[10.5px] text-slate-500">{scormSource === 'generated' && !canReplayFreely ? 'เลื่อนได้ถึงช่วงที่ดูแล้ว · บันทึกอัตโนมัติ' : 'บันทึกความคืบหน้าอัตโนมัติ'}</p></div>
+            <button onClick={handleNext} disabled={nextLocked} title={nextLocked ? 'ดูช่วงนี้ให้จบก่อน' : undefined} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#FF684D] to-[#FF8066] px-4 py-2.5 text-[12.5px] font-extrabold text-white shadow-lg shadow-orange-950/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5">
               {nextItem ? 'ถัดไป' : nextCourseLesson ? 'บทเรียนถัดไป' : 'ดูสรุปการเรียน'}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
             </button>

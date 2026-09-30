@@ -554,7 +554,7 @@ function CourseCard({ course }: { course: Course }): ReactElement {
   );
 }
 
-function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
+function CourseCatalog({ courses, loadFailed }: { courses: Course[]; loadFailed: boolean }): ReactElement {
   return (
     <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-10 lg:pt-14 pb-20 lg:pb-28">
       <div className="mb-14 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
@@ -571,7 +571,16 @@ function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
         </p>
       </div>
 
-      {courses.length > 0 ? (
+      {loadFailed ? (
+        <div className="rounded-2xl border border-[#0F1B3D]/15 py-16 text-center">
+          <p className="text-[14px] font-medium text-[#0F1B3D]/60">โหลดรายการคอร์สไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p>
+          <form action="/" className="mt-4">
+            <button type="submit" className="rounded-full bg-[#0F1B3D] px-5 py-2.5 text-[13px] font-bold text-white">
+              ลองอีกครั้ง
+            </button>
+          </form>
+        </div>
+      ) : courses.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {courses.map((course) => (
             <CourseCard key={course.id} course={course} />
@@ -584,6 +593,15 @@ function CourseCatalog({ courses }: { courses: Course[] }): ReactElement {
       )}
     </section>
   );
+}
+
+function logHomepageQueryError(label: string, error: { message: string }): void {
+  const message = `${label}: ${error.message}`;
+  if (/timed out|fetch failed/i.test(error.message)) {
+    console.warn(message);
+  } else {
+    console.error(message);
+  }
 }
 
 function CtaBanner(): ReactElement {
@@ -682,7 +700,7 @@ export default async function Page(): Promise<ReactElement> {
     ? (user.user_metadata?.full_name as string | undefined) ?? user.email?.split("@")[0] ?? "ผู้ใช้"
     : null;
 
-  const { data: courses, error } = await supabase
+  const courseQuery = supabase
     .from("courses")
     .select(`
       id, title, slug, category, price, cover_image_url,
@@ -691,9 +709,23 @@ export default async function Page(): Promise<ReactElement> {
     .eq("status", "published")
     .order("created_at", { ascending: false })
     .limit(4);
+  const pathCoursesQuery = supabase
+    .from("courses")
+    .select("id, title, slug, category, description")
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(48);
+
+  const [
+    { data: courses, error },
+    { data: pathCoursesData, error: pathCoursesError },
+  ] = await Promise.all([courseQuery, pathCoursesQuery]);
 
   if (error) {
-    console.error("Failed to fetch courses:", error.message);
+    logHomepageQueryError("Failed to fetch courses", error);
+  }
+  if (pathCoursesError) {
+    logHomepageQueryError("Failed to fetch career path courses", pathCoursesError);
   }
 
   // ดึงคะแนนรีวิวของคอร์สที่โชว์ในหน้านี้ แล้วคำนวณเฉลี่ย/นับจำนวนเอง
@@ -708,7 +740,7 @@ export default async function Page(): Promise<ReactElement> {
       .in("course_id", courseIds);
 
     if (reviewsError) {
-      console.error("Failed to fetch course ratings:", reviewsError.message);
+      logHomepageQueryError("Failed to fetch course ratings", reviewsError);
     }
 
     for (const row of reviewRows ?? []) {
@@ -742,25 +774,13 @@ export default async function Page(): Promise<ReactElement> {
     };
   });
 
-  // เรียงล่าสุดก่อน แล้วเลือกคอร์สตัวแทนเพียงหนึ่งใบต่อหมวดหมู่
-  const { data: pathCoursesData, error: pathCoursesError } = await supabase
-    .from("courses")
-    .select("id, title, slug, category, description")
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .limit(48);
-
-  if (pathCoursesError) {
-    console.error("Failed to fetch career path courses:", pathCoursesError.message);
-  }
-
   return (
     <div className="min-h-screen w-full app-canvas">
       <Navbar displayName={displayName} avatarUrl={avatarUrl} />
       <Hero />
       <HowItWorks />
       <CareerPaths courses={oneCoursePerCategory(pathCoursesData ?? [])} />
-      <CourseCatalog courses={coursesWithRatings} />
+      <CourseCatalog courses={coursesWithRatings} loadFailed={Boolean(error)} />
       <CtaBanner />
       <Footer />
     </div>

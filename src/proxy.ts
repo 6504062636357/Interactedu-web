@@ -40,13 +40,15 @@ export async function proxy(request: NextRequest) {
   // แล้วใน middleware.ts) กันไว้ ถ้าเกิน ให้ถือว่า "role ไม่รู้" แล้วปล่อยผ่านแบบระมัดระวังแทนที่จะ
   // ค้างไม่จำกัดเวลา — สำคัญมากตอนสอบจบที่ไม่อยากให้หน้าเว็บค้างกลางอากาศต่อหน้าอาจารย์
   let userRole: string | undefined;
+  let userIsActive = true;
   let roleLookupTimedOut = false;
-  const needsRole = user && (isAuthPage || pathname === "/dashboard" || isProtected);
+  let profileLookupFailed = false;
+  const needsRole = user && (isAuthPage || pathname === "/dashboard" || isProtected || pathname.startsWith("/api"));
 
   if (needsRole) {
     const PROFILE_QUERY_TIMEOUT_MS = 5000;
     const timeoutSentinel = Symbol("profile-query-timeout");
-    const profileQuery = supabase.from("profiles").select("role").eq("id", user!.id).single();
+    const profileQuery = supabase.from("profiles").select("role, is_active").eq("id", user!.id).single();
     const timeoutPromise = new Promise<typeof timeoutSentinel>((resolve) =>
       setTimeout(() => resolve(timeoutSentinel), PROFILE_QUERY_TIMEOUT_MS)
     );
@@ -59,10 +61,25 @@ export async function proxy(request: NextRequest) {
         `[middleware] profile lookup เกิน ${PROFILE_QUERY_TIMEOUT_MS}ms (path: ${pathname}, user: ${user!.id}) — ปล่อยผ่านแบบไม่เช็ค role รอบนี้`
       );
     } else {
-      const { data: profile, error } = result;
+      let { data: profile, error } = result;
+      if (error?.code === "42703") {
+        const fallback = await supabase.from("profiles").select("role").eq("id", user!.id).single();
+        profile = fallback.data as typeof profile;
+        error = fallback.error;
+      }
       userRole = profile?.role;
-      console.log("profile:", profile, "error:", error, "user id:", user!.id);
+      userIsActive = profile?.is_active !== false;
+      profileLookupFailed = Boolean(error || !profile);
+      console.log("profile role:", userRole, "error:", error?.message, "user id:", user!.id);
     }
+  }
+
+  if ((roleLookupTimedOut || profileLookupFailed) && (isProtected || pathname.startsWith("/api"))) {
+    return new NextResponse("ตรวจสอบสถานะบัญชีไม่สำเร็จ กรุณาลองใหม่", { status: 503 });
+  }
+  if (user && !userIsActive) {
+    if (pathname.startsWith("/api")) return NextResponse.json({ error: "บัญชีนี้ถูกปิดใช้งาน" }, { status: 403 });
+    return NextResponse.redirect(new URL("/account-inactive", request.url));
   }
 
   // ล็อกอินแล้ว แต่ดันอยู่หน้า login/signup หรือหน้ากลาง /dashboard

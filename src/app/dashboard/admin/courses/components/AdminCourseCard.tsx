@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactElement } from "react";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
+import CourseLifecycleButton from "@/components/courses/CourseLifecycleButton";
 
 interface AdminCourseCardProps {
     id:string;
@@ -81,6 +82,11 @@ export default function AdminCourseCard({
         >
           {isPending ? "ตรวจสอบเพื่ออนุมัติ" : "จัดการคอร์ส"} <span>›</span>
         </Link>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <CourseLifecycleButton courseId={id} courseTitle={title} mode={status === "archived" ? "restore" : "archive"} />
+          {status === "draft" && <CourseLifecycleButton courseId={id} courseTitle={title} mode="delete" />}
+        </div>
 
         <p className="text-[11.5px] text-[#0F1B3D]/35 mt-3">
           สร้างเมื่อ {new Date(createdAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })}

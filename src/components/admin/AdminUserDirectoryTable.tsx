@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactElement } from "react";
+import AdminAccountStatusSwitch from "@/components/admin/AdminAccountStatusSwitch";
 
 export type UserDirectoryRow = {
   id: string;
@@ -13,6 +14,7 @@ export type UserDirectoryRow = {
   last_sign_in_at: string | null;
   enrollment_count: number;
   certificate_count: number;
+  is_active: boolean;
 };
 
 const roleLabels = { student: "นักเรียน", teacher: "ครูผู้สอน", admin: "แอดมิน" };
@@ -31,7 +33,7 @@ function lastSignIn(value: string | null): string {
   return value ? new Date(value).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
-function AccountRow({ user }: { user: UserDirectoryRow }): ReactElement {
+function AccountRow({ user, currentUserId, statusReady }: { user: UserDirectoryRow; currentUserId: string | null; statusReady: boolean }): ReactElement {
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
       <td className="px-5 py-4">
@@ -44,18 +46,23 @@ function AccountRow({ user }: { user: UserDirectoryRow }): ReactElement {
       <td className="px-5 py-4"><RoleBadge role={user.role} /></td>
       <td className="px-5 py-4 text-xs text-slate-500">{user.enrollment_count} คอร์ส · {user.certificate_count} ใบรับรอง</td>
       <td className="px-5 py-4 text-xs text-slate-500">{lastSignIn(user.last_sign_in_at)}</td>
-      <td className="px-5 py-4 text-right"><Link href={`/dashboard/admin/users/${user.id}`} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-[#3157D5] hover:bg-blue-50">ดูรายละเอียด</Link></td>
+      <td className="px-5 py-4">
+        <div className="flex items-center justify-end gap-4">
+          <AdminAccountStatusSwitch key={`${user.id}-${user.is_active}`} userId={user.id} userName={user.full_name ?? user.email ?? "ผู้ใช้"} initialActive={user.is_active ?? true} disabled={!statusReady || user.id === currentUserId || !user.role} />
+          <Link href={`/dashboard/admin/users/${user.id}`} className="shrink-0 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold text-[#3157D5] hover:bg-blue-50">ดูรายละเอียด</Link>
+        </div>
+      </td>
     </tr>
   );
 }
 
-export default function AdminUserDirectoryTable({ users }: { users: UserDirectoryRow[] }): ReactElement {
+export default function AdminUserDirectoryTable({ users, currentUserId, statusReady }: { users: UserDirectoryRow[]; currentUserId: string | null; statusReady: boolean }): ReactElement {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[820px]">
-        <thead><tr className="border-b border-slate-100 bg-slate-50/70"><th className="px-5 py-3 text-left text-[11px] text-slate-400">ผู้ใช้</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">ติดต่อ</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">บทบาท</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">กิจกรรม</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">เข้าใช้ล่าสุด</th><th><span className="sr-only">รายละเอียด</span></th></tr></thead>
+      <table className="w-full min-w-[980px]">
+        <thead><tr className="border-b border-slate-100 bg-slate-50/70"><th className="px-5 py-3 text-left text-[11px] text-slate-400">ผู้ใช้</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">ติดต่อ</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">บทบาท</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">กิจกรรม</th><th className="px-5 py-3 text-left text-[11px] text-slate-400">เข้าใช้ล่าสุด</th><th className="px-5 py-3 text-right text-[11px] text-slate-400">จัดการ</th></tr></thead>
         <tbody>
-          {users.map((user) => <AccountRow key={user.id} user={user} />)}
+          {users.map((user) => <AccountRow key={user.id} user={user} currentUserId={currentUserId} statusReady={statusReady} />)}
         </tbody>
       </table>
     </div>

@@ -24,6 +24,66 @@ interface CreateCourseResult {
   error?: string;
 }
 
+export async function setCourseArchived(courseId: string, archived: boolean): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "admin") return { error: "เฉพาะแอดมินที่เก็บคอร์สเข้าคลังได้" };
+
+  const { data: result, error } = await supabase.rpc("set_course_archived", {
+    p_course_id: courseId,
+    p_archived: archived,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return { error: "ฐานข้อมูลยังไม่มีฟังก์ชันเก็บคอร์สเข้าคลัง กรุณารัน migration ล่าสุด" };
+    console.warn("[setCourseArchived]", error.code, error.message);
+    return { error: "เปลี่ยนสถานะคอร์สไม่สำเร็จ กรุณาลองใหม่" };
+  }
+  if (result === "forbidden") return { error: "เฉพาะแอดมินที่เก็บคอร์สเข้าคลังได้" };
+  if (result === "not_found") return { error: "ไม่พบคอร์สนี้" };
+  if (result === "not_archived") return { error: "คอร์สนี้ไม่ได้อยู่ในคลัง" };
+  if (result) return { error: "เปลี่ยนสถานะคอร์สไม่สำเร็จ กรุณาลองใหม่" };
+
+  revalidatePath("/");
+  revalidatePath("/courses");
+  revalidatePath("/dashboard/admin/courses");
+  revalidatePath(`/dashboard/admin/courses/${courseId}`);
+  revalidatePath("/dashboard/teacher/courses");
+  revalidatePath("/dashboard/student/courses");
+  return {};
+}
+
+export async function deleteDraftCourse(courseId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "กรุณาเข้าสู่ระบบก่อน" };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "teacher" && profile?.role !== "admin") return { error: "ไม่มีสิทธิ์ลบฉบับร่าง" };
+
+  const { data: result, error } = await supabase.rpc("delete_draft_course", { p_course_id: courseId });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return { error: "ฐานข้อมูลยังไม่มีฟังก์ชันลบฉบับร่าง กรุณารัน migration ล่าสุด" };
+    console.warn("[deleteDraftCourse]", error.code, error.message);
+    return { error: "ลบฉบับร่างไม่สำเร็จ กรุณาลองใหม่" };
+  }
+  if (result === "not_found") return { error: "ไม่พบคอร์สนี้" };
+  if (result === "forbidden") return { error: "ลบได้เฉพาะฉบับร่างของตนเอง" };
+  if (result === "not_draft") return { error: "ลบได้เฉพาะคอร์สที่เป็นฉบับร่าง" };
+  if (result === "has_history") {
+    return { error: "คอร์สนี้มีประวัติผู้เรียนหรือรีวิว จึงลบฉบับร่างไม่ได้ ให้เก็บเข้าคลังแทน" };
+  }
+  if (result === "has_dependencies") return { error: "คอร์สนี้มีข้อมูลอื่นผูกอยู่ จึงลบฉบับร่างไม่ได้" };
+  if (result) return { error: "ลบฉบับร่างไม่สำเร็จ กรุณาลองใหม่" };
+
+  revalidatePath("/dashboard/teacher/courses");
+  revalidatePath("/dashboard/admin/courses");
+  revalidatePath("/dashboard/admin");
+  return {};
+}
+
 function slugify(input: string): string {
   return input
     .toString()

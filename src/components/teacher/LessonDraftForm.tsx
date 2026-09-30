@@ -11,10 +11,6 @@ import {
 import { useRouter } from "next/navigation";
 import { uploadVideoToR2 } from "@/lib/uploadVideoToR2";
 import { genId } from "@/lib/uuid";
-import VideoSegmenter, {
-  normalizeDefaultSegmentTitles,
-  type VideoSegment,
-} from "@/components/teacher/VideoSegmenter";
 import type { BankQuestionCounts } from "@/app/dashboard/teacher/courses/[courseId]/lessons/new/actions";
 
 interface LessonDraftFormProps {
@@ -28,7 +24,7 @@ interface QuestionState extends DraftQuestionInput {
   key: string;
 }
 
-type TabKey = "info" | "segments" | "video-quiz";
+type TabKey = "info" | "video-quiz";
 type QuizSourceMode = "custom" | "bank_manual" | "bank_random";
 
 interface RandomMarkerState {
@@ -75,17 +71,6 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function findVideoSegmentAtTime(segments: VideoSegment[], seconds: number): VideoSegment | null {
-  const lastSegment = segments[segments.length - 1];
-  return (
-    segments.find(
-      (segment) =>
-        seconds >= segment.start &&
-        (seconds < segment.end || (segment.id === lastSegment?.id && seconds <= segment.end))
-    ) ?? null
-  );
-}
-
 export default function LessonDraftForm({
   courseId,
   moduleId,
@@ -105,17 +90,6 @@ export default function LessonDraftForm({
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [videoSegments, setVideoSegments] = useState<VideoSegment[]>(
-    normalizeDefaultSegmentTitles(
-      initialData?.videoSegments.map((segment) => ({
-        ...segment,
-        summary: segment.summary ?? undefined,
-        confidence: segment.confidence ?? undefined,
-      })) ?? []
-    )
-  );
-
-  // แบบทดสอบท้ายคอร์สจัดการจากหน้าคอร์สโดยเฉพาะ ส่วนนี้เก็บเฉพาะควิซในวิดีโอ
   const initialVideoQuizzes =
     initialData?.questions.filter((q) => q.timestampSeconds != null).map((q) => ({ key: genId(), ...q })) ?? [];
 
@@ -159,8 +133,8 @@ export default function LessonDraftForm({
     const file = e.target.files?.[0];
     if (!file) return;
     if (
-      (videoSegments.length > 0 || videoQuizQuestions.length > 0 || randomMarkers.length > 0) &&
-      !window.confirm("เปลี่ยนวิดีโอแล้วช่วงและควิซที่ปักไว้เดิมจะถูกล้าง ต้องการดำเนินการต่อใช่ไหม?")
+      (videoQuizQuestions.length > 0 || randomMarkers.length > 0) &&
+      !window.confirm("เปลี่ยนวิดีโอแล้วควิซที่ปักไว้เดิมจะถูกล้าง ต้องการดำเนินการต่อใช่ไหม?")
     ) {
       e.target.value = "";
       return;
@@ -179,7 +153,6 @@ export default function LessonDraftForm({
       const url = await uploadVideoToR2(file, setUploadProgress);
       setVideoUrl(url);
       // ล้างตำแหน่งเดิมหลังอัปโหลดไฟล์ใหม่สำเร็จเท่านั้น
-      setVideoSegments([]);
       setVideoQuizQuestions([]);
       setRandomMarkers([]);
     } catch (err) {
@@ -364,15 +337,6 @@ export default function LessonDraftForm({
     () => [...randomMarkers].sort((a, b) => a.timestampSeconds - b.timestampSeconds),
     [randomMarkers]
   );
-  const currentVideoSegment = useMemo(
-    () => findVideoSegmentAtTime(videoSegments, videoCurrentTime),
-    [videoSegments, videoCurrentTime]
-  );
-  const pinModalVideoSegment = useMemo(
-    () => findVideoSegmentAtTime(videoSegments, pinModalTimestamp),
-    [videoSegments, pinModalTimestamp]
-  );
-
   // ---------- Save / submit ----------
 
   const saveCurrentDraft = async (): Promise<{ draftId?: string; lessonId?: string; error?: string }> => {
@@ -429,18 +393,6 @@ export default function LessonDraftForm({
       difficulty,
     }));
 
-    const allVideoSegments = videoSegments.map(({ title, summary, start, end, source, confidence }) => ({
-      title,
-      summary: summary ?? null,
-      start,
-      end,
-      source: source ?? "manual",
-      confidence: confidence ?? null,
-    }));
-
-    // ความยาววิดีโอจริงที่ browser จับได้จาก <video> ตอนโหลด metadata (videoDuration)
-    // ส่งไปเก็บที่ server ด้วย เพราะก่อนหน้านี้ server คำนวณความยาวจาก video segment
-    // เท่านั้น ซึ่งบทเรียนส่วนใหญ่ไม่ได้แบ่ง segment เลยได้ 0 เสมอ
     const videoDurationSeconds = videoDuration > 0 ? Math.round(videoDuration) : 0;
 
     return savedDraftId && savedLessonId
@@ -452,7 +404,7 @@ export default function LessonDraftForm({
           videoUrl,
           contentHtml,
           videoDurationSeconds,
-          videoSegments: allVideoSegments,
+          videoSegments: videoFile ? [] : initialData?.videoSegments ?? [],
           questions: allQuestions,
           randomMarkers: allRandomMarkers,
         })
@@ -463,7 +415,7 @@ export default function LessonDraftForm({
           videoUrl,
           contentHtml,
           videoDurationSeconds,
-          videoSegments: allVideoSegments,
+          videoSegments: videoFile ? [] : initialData?.videoSegments ?? [],
           questions: allQuestions,
           randomMarkers: allRandomMarkers,
         });
@@ -528,7 +480,6 @@ export default function LessonDraftForm({
 
   const tabs: { key: TabKey; label: string; badge?: number }[] = [
     { key: "info", label: "รายละเอียดบทเรียน" },
-    { key: "segments", label: "แบ่งช่วงวิดีโอ", badge: videoSegments.length || undefined },
     { key: "video-quiz", label: "In-Video Quiz", badge: videoQuizQuestions.length || undefined },
   ];
 
@@ -619,13 +570,6 @@ export default function LessonDraftForm({
                   <p className="text-[13px] font-semibold text-[#00B37E]">
                     {isEditMode && !videoFile ? "มีวิดีโอเดิมอยู่แล้ว" : "อัปโหลดวิดีโอสำเร็จแล้ว"}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("segments")}
-                    className="text-left text-[12px] font-bold text-[#FF5A3C] hover:text-[#EB4A2D] sm:text-right"
-                  >
-                    ไปแบ่งช่วงวิดีโอ →
-                  </button>
                 </div>
                 <video
                   src={videoPreviewUrl ?? videoUrl ?? undefined}
@@ -655,45 +599,6 @@ export default function LessonDraftForm({
         </div>
       )}
 
-      {/* ===================== TAB 2: แบ่งช่วงวิดีโอ ===================== */}
-      {activeTab === "segments" && (
-        <div>
-          {isAdmin && (
-            <div className="mb-4 rounded-2xl border border-[#FF5A3C]/15 bg-[#FF5A3C]/[0.04] px-4 py-3">
-              <p className="text-[12.5px] font-bold text-[#EB4A2D]">โหมดแก้ไขเต็มสำหรับแอดมิน</p>
-              <p className="mt-1 text-[11.5px] text-[#0F1B3D]/55">
-                แอดมินสามารถเพิ่ม/ตัด/แก้ช่วงวิดีโอได้เต็มแบบเดียวกับครูฝึกสอน
-              </p>
-            </div>
-          )}
-
-          {!videoPreviewUrl && !videoUrl ? (
-            <div className="mb-6 rounded-2xl border border-dashed border-[#0F1B3D]/15 bg-white px-6 py-12 text-center">
-              <p className="text-[13.5px] font-bold text-[#0F1B3D]/55">อัปโหลดวิดีโอก่อนเริ่มแบ่งช่วง</p>
-              <p className="mt-2 text-[12px] text-[#0F1B3D]/40">
-                กลับไปที่แท็บ &quot;รายละเอียดบทเรียน&quot; แล้วเลือกไฟล์วิดีโอที่ต้องการใช้
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveTab("info")}
-                className="mt-5 rounded-full bg-[#0F1B3D] px-5 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-[#19284F]"
-              >
-                ไปอัปโหลดวิดีโอ
-              </button>
-            </div>
-          ) : (
-            <VideoSegmenter
-              courseId={courseId}
-              sourceUrl={videoPreviewUrl ?? videoUrl!}
-              analysisVideoUrl={videoUrl}
-              sourceFile={videoFile}
-              segments={videoSegments}
-              onSegmentsChange={(segments) => { setVideoSegments(segments); markDirty(); }}
-            />
-          )}
-        </div>
-      )}
-
       {/* ===================== TAB 3: In-Video Quiz ===================== */}
       {activeTab === "video-quiz" && (
         <div>
@@ -716,65 +621,9 @@ export default function LessonDraftForm({
                 />
               </div>
 
-              {videoSegments.length > 0 ? (
-                <div className="mb-4 rounded-2xl border border-[#7C5CFF]/15 bg-[#F7F5FF] p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[12.5px] font-extrabold text-[#0F1B3D]">เลือกบทของวิดีโอ</p>
-                      <p className="mt-0.5 text-[10.5px] text-[#0F1B3D]/45">ควิซยังอ้างอิงเวลารวมของวิดีโอต้นฉบับ</p>
-                    </div>
-                    {currentVideoSegment && (
-                      <span className="rounded-full bg-white px-3 py-1.5 text-[10.5px] font-bold text-[#5D45C7] ring-1 ring-[#7C5CFF]/10">
-                        กำลังอยู่: {currentVideoSegment.title}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {videoSegments.map((segment) => {
-                      const active = currentVideoSegment?.id === segment.id;
-                      return (
-                        <button
-                          key={segment.id}
-                          type="button"
-                          onClick={() => handleSeekToMarker(segment.start)}
-                          className={`rounded-xl border px-3 py-2.5 text-left transition ${
-                            active
-                              ? "border-[#7C5CFF]/45 bg-white shadow-sm"
-                              : "border-transparent bg-white/60 hover:border-[#7C5CFF]/20 hover:bg-white"
-                          }`}
-                        >
-                          <span className="block truncate text-[11.5px] font-extrabold text-[#0F1B3D]">{segment.title}</span>
-                          <span className="mt-0.5 block text-[10px] font-semibold text-[#7C5CFF]">
-                            {formatTime(segment.start)}–{formatTime(segment.end)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="mb-4 rounded-xl border border-dashed border-[#0F1B3D]/12 bg-[#F7F8FA] px-4 py-3 text-[11.5px] text-[#0F1B3D]/45">
-                  ยังไม่ได้แบ่งบท ควิซจะอ้างอิงเวลาของวิดีโอเต็มตามปกติ
-                </div>
-              )}
-
               {/* Timeline พร้อม marker ตำแหน่งควิซ */}
               {videoDuration > 0 && (
                 <div className="relative mb-2 h-8 overflow-hidden rounded-lg bg-[#0F1B3D]/[0.04]">
-                  {videoSegments.map((segment, index) => {
-                    const left = Math.max(0, Math.min(100, (segment.start / videoDuration) * 100));
-                    const width = Math.max(0, Math.min(100 - left, ((segment.end - segment.start) / videoDuration) * 100));
-                    return (
-                      <button
-                        key={segment.id}
-                        type="button"
-                        title={`${segment.title} — ${formatTime(segment.start)}–${formatTime(segment.end)}`}
-                        onClick={() => handleSeekToMarker(segment.start)}
-                        style={{ left: `${left}%`, width: `${width}%` }}
-                        className={`absolute inset-y-0 border-r border-white/70 ${index % 2 === 0 ? "bg-[#FFDED6]/70" : "bg-[#DDD7FF]/70"}`}
-                      />
-                    );
-                  })}
                   {sortedVideoQuizzes.map((q, idx) => {
                     const pct = Math.min(100, ((q.timestampSeconds ?? 0) / videoDuration) * 100);
                     return (
@@ -811,7 +660,6 @@ export default function LessonDraftForm({
               <div className="flex items-center justify-between mb-6">
                 <p className="text-[12px] text-[#0F1B3D]/40 font-medium">
                   เวลาปัจจุบัน: {formatTime(videoCurrentTime)} / {formatTime(videoDuration)}
-                  {currentVideoSegment ? ` • ${currentVideoSegment.title}` : ""}
                 </p>
                 <button
                   type="button"
@@ -831,18 +679,12 @@ export default function LessonDraftForm({
           ) : (
             <div className="space-y-6">
               {sortedVideoQuizzes.map((q) => {
-                const segment = findVideoSegmentAtTime(videoSegments, q.timestampSeconds ?? 0);
                 return (
                 <div key={q.key} className="rounded-2xl border border-[#0F1B3D]/[0.08] p-5">
                   <div className="flex items-center gap-2 mb-4">
                     <span className="inline-flex items-center gap-1.5 text-[12px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2.5 py-1 rounded-full">
                       ⏱ {formatTime(q.timestampSeconds ?? 0)}
                     </span>
-                    {segment && (
-                      <span className="inline-flex items-center rounded-full bg-[#7C5CFF]/10 px-2.5 py-1 text-[11px] font-bold text-[#5D45C7]">
-                        {segment.title}
-                      </span>
-                    )}
                     <button
                       type="button"
                       onClick={() => handleFetchCurrentTime(q.key)}
@@ -951,7 +793,6 @@ export default function LessonDraftForm({
             <div className="mt-6 space-y-3">
               <p className="text-[12px] font-bold uppercase tracking-wide text-[#0F1B3D]/35">สุ่มจากคลังข้อสอบ</p>
               {sortedRandomMarkers.map((m) => {
-                const segment = findVideoSegmentAtTime(videoSegments, m.timestampSeconds);
                 return (
                 <div key={m.key} className="flex items-center gap-3 rounded-2xl border border-[#7C5CFF]/20 bg-[#7C5CFF]/[0.04] p-4">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-bold text-[#7C5CFF] bg-[#7C5CFF]/10 px-2.5 py-1 rounded-full shrink-0">
@@ -959,7 +800,6 @@ export default function LessonDraftForm({
                   </span>
                   <span className="text-[13px] font-semibold text-[#0F1B3D]">
                     สุ่มจากคลัง · ระดับ{m.difficulty === "easy" ? "ง่าย" : m.difficulty === "medium" ? "ปานกลาง" : "ยาก"}
-                    {segment ? ` · ${segment.title}` : ""}
                   </span>
                   <div className="flex-1" />
                   <button
@@ -1080,11 +920,6 @@ export default function LessonDraftForm({
       </h3>
       <div className="mb-4 flex items-center justify-between gap-3">
         <p className="text-[12.5px] text-[#0F1B3D]/50">แหล่งที่มาของข้อสอบ</p>
-        {pinModalVideoSegment && (
-          <span className="rounded-full bg-[#7C5CFF]/10 px-2.5 py-1 text-[10.5px] font-bold text-[#5D45C7]">
-            {pinModalVideoSegment.title}
-          </span>
-        )}
       </div>
 
       {/* ===== แถบแท็บเลือกโหมด (Segmented Control) ===== */}

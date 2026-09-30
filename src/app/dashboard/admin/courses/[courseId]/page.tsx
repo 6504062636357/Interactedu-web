@@ -8,6 +8,7 @@ import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import { createClient } from "@/utils/supabase/server";
 import { checkCourseReadiness } from "@/app/dashboard/teacher/courses/actions";
 import PublishCourseButton from "@/components/admin/PublishCourseButton";
+import CourseLifecycleButton from "@/components/courses/CourseLifecycleButton";
 
 const COURSE_STATUS_LABEL: Record<string, string> = {
   draft: "ฉบับร่าง",
@@ -70,13 +71,19 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         </div>
         <div className="flex flex-wrap gap-2">
           {!isOwnCourse && course.status === "pending" && <Link href={`/dashboard/admin/courses/${course.id}/review`} className="rounded-full bg-amber-500 px-4 py-2.5 text-[12.5px] font-bold text-white">ตรวจและอนุมัติ</Link>}
+          {course.status !== "archived" && <>
           <Link href={`/dashboard/admin/courses/${course.id}/materials`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2.5 text-[12.5px] font-bold text-[#0F1B3D]">เอกสารประกอบ</Link>
           <Link href={`/dashboard/admin/courses/${course.id}/exam`} className="rounded-full border border-[#0F1B3D]/15 bg-white px-4 py-2.5 text-[12.5px] font-bold text-[#0F1B3D]">บททดสอบท้ายคอร์ส</Link>
           <Link href={`/dashboard/admin/courses/${course.id}/lessons/new`} className="rounded-full bg-[#FF5A3C] px-4 py-2.5 text-[12.5px] font-bold text-white">+ เพิ่มบทเรียน</Link>
+          </>}
+          <CourseLifecycleButton courseId={course.id} courseTitle={course.title} mode={course.status === "archived" ? "restore" : "archive"} />
+          {course.status === "draft" && <CourseLifecycleButton courseId={course.id} courseTitle={course.title} mode="delete" redirectTo="/dashboard/admin/courses" />}
         </div>
       </div>
 
-      {readiness && course.status !== "published" && (
+      {course.status === "archived" && <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">คอร์สนี้อยู่ในคลัง นำออกจากคลังก่อนแก้ไขหรือเผยแพร่</div>}
+
+      {readiness && course.status !== "published" && course.status !== "archived" && (
         <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50 p-5">
           <h2 className="font-bold text-[#0F1B3D]">เตรียมคอร์สก่อนเผยแพร่</h2>
           <p className="mt-1 text-sm text-slate-600">บันทึกบทเรียนและบททดสอบท้ายคอร์สให้ครบ จากนั้นเผยแพร่ได้ทันทีโดยไม่ต้องส่งอนุมัติ</p>
@@ -89,7 +96,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         </section>
       )}
 
-      <CourseManagementTabs tabs={[
+      {course.status !== "archived" && <CourseManagementTabs tabs={[
         { id: "lessons", label: `บทเรียน (${lessons.length})`, description: "เนื้อหาและคำถาม", content: (
           <section className="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-extrabold text-[#0F1B3D]">บทเรียน</h2><p className="text-xs text-slate-400">{lessons.length} บทเรียน</p></div></div>
@@ -119,7 +126,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
         ) : (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">กรุณาอัปเดต migration ระบบใบรับรองก่อนตั้งค่า</div>
         ) },
-      ]} />
+      ]} />}
     </div>
   );
 }

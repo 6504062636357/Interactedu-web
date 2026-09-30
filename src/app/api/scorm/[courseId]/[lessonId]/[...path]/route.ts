@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import mime from 'mime-types';
 import { isLessonComplete } from '@/lib/courses/student-progress';
+import { withVolumeControls } from '@/lib/scorm/volume-controls';
 
 const r2 = new S3Client({
   region: 'auto',
@@ -198,6 +199,12 @@ export async function GET(
 
     const mimeType = mime.lookup(filePath);
     const actualContentType = typeof mimeType === 'string' ? mimeType : 'application/octet-stream';
+
+    // Existing generated packages in R2 still contain the old player markup.
+    // Add the same controls used by new packages when their lesson page is served.
+    if (filePath === 'lesson.html' && actualContentType === 'text/html') {
+      buffer = Buffer.from(withVolumeControls(buffer.toString('utf8')), 'utf8');
+    }
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {

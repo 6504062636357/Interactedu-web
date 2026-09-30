@@ -7,6 +7,7 @@ import CertificateSettingsForm from "@/components/certificates/CertificateSettin
 import CourseManagementTabs from "@/components/courses/CourseManagementTabs";
 import SubmitCourseButton from "@/components/teacher/SubmitCourseButton";
 import DeleteLessonButton from "@/components/teacher/DeleteLessonButton";
+import CourseLifecycleButton from "@/components/courses/CourseLifecycleButton";
 import { checkCourseReadiness } from "../actions";
 import { CATEGORY_COLORS, type Category } from "@/lib/constants/categories";
 
@@ -156,6 +157,8 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               )}
             </div>
             <div className="flex flex-wrap items-start gap-2">
+              {course.status !== "archived" && (
+                <>
               <Link href={`/dashboard/teacher/courses/${course.id}/materials`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">เอกสารประกอบ</Link>
               <Link href={`/dashboard/teacher/courses/${course.id}/exam`} className="shrink-0 rounded-full border border-[#0F1B3D]/15 bg-white px-5 py-2.5 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:bg-slate-50">
                 บททดสอบท้ายคอร์ส
@@ -165,11 +168,22 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               {course.status !== "published" && (
                 <SubmitCourseButton courseId={course.id} ready={readiness.ready} />
               )}
+                </>
+              )}
+              {course.status === "draft" && (
+                <CourseLifecycleButton courseId={course.id} courseTitle={course.title} mode="delete" redirectTo="/dashboard/teacher/courses" />
+              )}
             </div>
           </div>
         </div>
 
-        {!readiness.ready && course.status !== "published" && (
+        {course.status === "archived" && (
+          <div className="mb-8 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600">
+            คอร์สนี้อยู่ในคลัง กรุณาติดต่อแอดมินหากต้องการนำกลับมาแก้ไขหรือเผยแพร่
+          </div>
+        )}
+
+        {!readiness.ready && course.status !== "published" && course.status !== "archived" && (
           <div className="mb-8 rounded-2xl border border-red-100 bg-red-50/60 px-5 py-4">
             <p className="text-[12.5px] font-bold text-red-500">
               ยังกรอกข้อมูลไม่ครบ ต้องแก้ไขก่อนกดส่งคอร์สเข้าตรวจได้
@@ -194,7 +208,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
           </div>
         )}
 
-        <CourseManagementTabs tabs={[
+        {course.status !== "archived" && <CourseManagementTabs tabs={[
           { id: "lessons", label: `บทเรียน (${lessonsWithDetails.length})`, description: "เพิ่มและแก้ไขเนื้อหา", content: (
             <>
         {lessonsError && (
@@ -334,7 +348,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               </p>
             </div>
           ) },
-        ]} />
+        ]} />}
       </main>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useRef, useEffect, type FormEvent, type ChangeEvent } from "react";
+import { useState, useRef, useSyncExternalStore, type FormEvent, type ChangeEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
 import AppBrand from "@/components/AppBrand";
 
@@ -19,6 +19,15 @@ const SYSTEM_ERROR_MESSAGE = "ระบบขัดข้องชั่วค�
 const INVALID_CREDENTIALS_MESSAGE = "อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง";
 const RATE_LIMIT_MESSAGE = "คุณลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง";
 
+function subscribeConnection(onChange: () => void): () => void {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => {
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+  };
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState<string>("");
@@ -26,26 +35,13 @@ export default function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState<LoginFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [isOffline, setIsOffline] = useState<boolean>(false);
+  const isOffline = useSyncExternalStore(subscribeConnection, () => !navigator.onLine, () => false);
 
   const supabase = createClient();
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   // ref แบบ synchronous กันดับเบิลคลิก/กดรัวๆ ยิง request login ซ้ำ (state update เป็น async)
   const isSubmittingRef = useRef<boolean>(false);
-
-  // แถบแจ้งเตือนด้านบนสุดของจอ: เด้งขึ้นทันทีที่เน็ตหลุด ไม่ต้องรอให้กดส่งฟอร์มก่อนถึงจะรู้
-  useEffect(() => {
-    setIsOffline(!navigator.onLine);
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
 
   const handleEmailChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setEmail(e.target.value);
@@ -144,11 +140,27 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        const { data: profile } = await supabase
+        let { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role, is_active")
           .eq("id", data.user.id)
           .single();
+
+        if (profileError?.code === "42703") {
+          const fallback = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+          profile = fallback.data as typeof profile;
+          profileError = fallback.error;
+        }
+        if (profileError) {
+          await supabase.auth.signOut({ scope: "local" });
+          setFormError("ตรวจสอบสถานะบัญชีไม่สำเร็จ กรุณาลองใหม่");
+          return;
+        }
+        if (profile?.is_active === false) {
+          await supabase.auth.signOut({ scope: "local" });
+          setFormError("บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ");
+          return;
+        }
 
         router.refresh();
 

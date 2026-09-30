@@ -4,7 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import CourseStatusTabs, { type CourseStatusFilter } from "./components/CourseStatusTabs";
 import AdminCourseCard from "./components/AdminCourseCard";
 
-const VALID_STATUSES: CourseStatusFilter[] = ["all", "published", "pending", "draft", "rejected"];
+const VALID_STATUSES: CourseStatusFilter[] = ["all", "published", "pending", "draft", "rejected", "archived"];
 
 export default async function AdminCoursesPage({
   searchParams,
@@ -37,6 +37,7 @@ export default async function AdminCoursesPage({
     pending: courses.filter((c) => c.status === "pending").length,
     draft: courses.filter((c) => c.status === "draft").length,
     rejected: courses.filter((c) => c.status === "rejected").length,
+    archived: courses.filter((c) => c.status === "archived").length,
   };
 
   const filteredCourses = courses.filter((course) => {

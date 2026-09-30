@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { ReactElement } from "react";
 
-export type CourseStatusFilter = "all" | "published" | "pending" | "draft" | "rejected";
+export type CourseStatusFilter = "all" | "published" | "pending" | "draft" | "rejected" | "archived";
 
 interface StatusCounts {
   all: number;
@@ -11,6 +11,7 @@ interface StatusCounts {
   pending: number;
   draft: number;
   rejected: number;
+  archived: number;
 }
 
 interface CourseStatusTabsProps {
@@ -23,6 +24,7 @@ const TABS: { value: CourseStatusFilter; label: string }[] = [
   { value: "pending", label: "รออนุมัติ" },
   { value: "draft", label: "ฉบับร่าง" },
   { value: "rejected", label: "ตีกลับ" },
+  { value: "archived", label: "เก็บเข้าคลัง" },
 ];
 
 export default function CourseStatusTabs({ counts }: CourseStatusTabsProps): ReactElement {

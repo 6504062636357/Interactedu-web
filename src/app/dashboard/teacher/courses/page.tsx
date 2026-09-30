@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback, useMemo, type ReactElement } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
+import CourseLifecycleButton from "@/components/courses/CourseLifecycleButton";
 
 const supabase = createClient();
 
@@ -14,6 +15,7 @@ interface CourseRow {
   id: string;
   title: string;
   price: number;
+  status: string;
   lessonCount: number;
   studentCount: number;
   latestStatus: LessonDraftStatus | null;
@@ -112,6 +114,7 @@ export default function TeacherCoursesPage(): ReactElement {
         id: course.id,
         title: course.title,
         price: course.price,
+        status: course.status,
         lessonCount: lessonsForCourse.length,
         studentCount,
         latestStatus: latest?.status ?? null,
@@ -218,6 +221,7 @@ export default function TeacherCoursesPage(): ReactElement {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-[14.5px] font-semibold text-slate-900 leading-snug truncate">{course.title}</p>
+                  {course.status === "archived" && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">เก็บเข้าคลัง</span>}
                   {course.latestStatus && <StatusBadge status={course.latestStatus} />}
                 </div>
                 {course.latestStatus === "rejected" && course.latestRejectionReason && (
@@ -237,6 +241,14 @@ export default function TeacherCoursesPage(): ReactElement {
               >
                 เปิดพื้นที่จัดการคอร์ส
               </Link>
+              {course.status === "draft" && (
+                <CourseLifecycleButton
+                  courseId={course.id}
+                  courseTitle={course.title}
+                  mode="delete"
+                  onDeleted={() => setCourses((previous) => previous.filter((item) => item.id !== course.id))}
+                />
+              )}
             </div>
           ))}
         </div>
