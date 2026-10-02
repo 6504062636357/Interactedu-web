@@ -53,7 +53,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       score_percentage: grade.scorePercentage,
       pass_percentage: grade.passPercentage,
       passed: grade.passed,
-      details: grade.details,
+      // ===== แก้: เดิมส่ง grade.details (ถูก/ผิดรายข้อ + correctChoiceIndex + explanation) กลับไปให้ทุกคน
+      // แม้สอบไม่ผ่าน → เฉลยรั่วทาง Network tab ตอนนี้ส่ง "review" เฉพาะตอนสอบผ่านแล้วเท่านั้น
+      // (ยังไม่ผ่าน = ไม่ส่งเฉลยใดๆ ออกไปเลย แม้แต่ข้อไหนถูก/ผิด)
+      review: grade.passed ? grade.review ?? [] : undefined,
       certificate_issued: certificateIssued,
       certificate_id: certificateId,
       certificate_download_url: certificateDownloadUrl,

@@ -51,7 +51,7 @@ export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButt
         // ★ ปุ่มนี้อยู่แถวเดียวกับ "เอกสารประกอบ" / "บททดสอบท้ายคอร์ส" / "+ เพิ่มบทเรียนใหม่"
         // ต้องยึด class ชุดเดียวกับปุ่มพวกนั้น (13px) ไม่ใช่ "Edit บทเรียน" (12.5px คนละแถว)
         // ต่างกันแค่สีพื้นหลังตามสถานะ ready/not-ready เพื่อให้หน้าตาเป็นชุดเดียวกัน
-        className={`shrink-0 rounded-full px-5 py-2.5 text-[13px] font-bold text-white transition-colors ${
+        className={`shrink-0 rounded-full border border-transparent px-5 py-2.5 text-[13px] font-bold text-white transition-colors ${
           !ready
             ? "bg-[#0F1B3D]/55 hover:bg-[#0F1B3D]/70"
             : "bg-[#0F1B3D] hover:bg-[#0F1B3D]/90"

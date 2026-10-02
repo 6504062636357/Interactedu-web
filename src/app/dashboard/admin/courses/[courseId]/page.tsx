@@ -44,7 +44,7 @@ export default async function AdminCourseWorkspacePage({ params }: { params: Pro
       lesson_drafts (
         id, status, created_at, video_url, content_html,
         quiz_questions (
-          id, question_text, video_timestamp_seconds, order_index, explanation,
+          id, question_text, video_timestamp_seconds, order_index, explanation, image_url, image_caption, image_pins, interaction_type, answer_data,
           quiz_choices (choice_text, is_correct, order_index)
         ),
         video_quiz_markers (id, timestamp_seconds, random_difficulty, order_index)

@@ -2,6 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import JSZip from "jszip";
 import "server-only";
 import { withVolumeControls } from "@/lib/scorm/volume-controls";
+// ===== เพิ่มใหม่: bake matching/sequencing (display แบบสลับลำดับ + answerData เฉลยจริง) ลงในแพ็กเกจ
+// SCORM แบบ static เหมือนที่ทำกับ correctIndex ของ multiple_choice/true_false เดิม =====
+import { buildDragDropDisplay, buildMatchingSequencingDisplay } from "@/lib/courses/question-bank-sampling";
+import { seedFromString } from "@/lib/courses/seeded-random";
+import type { DragDropAnswerData, MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
 interface QuizChoiceRow { //interface เอาไว้กำหนดชนิดข้อมูลว่ามีอะไรบ้าง ถ้าเรียกใช้ต้องประกาศตัวแปรให้ครบห้ามขาดเกิน 
   choice_text: string;//ข้อความของชอยส์
   is_correct: boolean;
@@ -12,9 +17,23 @@ interface QuizQuestionRow {//คำถาม
   id: string;//ID ของคำถาม
   question_text: string;
   order_index: number;
-  video_timestamp_seconds: number | null;//in quiz video 
+  video_timestamp_seconds: number | null;//in quiz video
   explanation: string | null;
+  image_url: string | null;//รูปประกอบคำถาม (ไม่บังคับมี)
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ (ไม่บังคับ ใช้ได้เมื่อมี image_url) =====
+  image_caption: string | null;
+  image_pins: ImagePin[] | null;
+  // ===== เพิ่มใหม่: matching/sequencing สำหรับควิซ static ระหว่างวิดีโอ =====
+  interaction_type: "multiple_choice" | "true_false" | "multi_select" | "drag_drop" | "matching" | "sequencing" | null;
+  answer_data: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
   quiz_choices: QuizChoiceRow[];
+}
+
+// ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพประกอบคำถาม x/y เป็น % ของขนาดภาพ (0-100) =====
+interface ImagePin {
+  id: string;
+  x: number;
+  y: number;
 }
 
 interface LessonInfo {//ข้อมูลบทเรียน
@@ -73,13 +92,50 @@ function buildLessonPlayerJs(//helper function อยู่บนสุดได
   videoQuizMarkers: VideoQuizMarkerRow[],//บอกแค่ตำแหน่งเวลาที่จะสุ่ม ไม่มีคำถามตายตัว
   videoSegments: VideoSegmentRow[]//ช่วง/บทของวิดีโอ (chapters) สำหรับฟีเจอร์แบ่งช่วงวิดีโอ
 ): string {//return type เป็น string
-  const staticQuizzes = videoQuizQuestions.map((q) => ({//วน mapใน videoQuizQuestionsทุกตัว 
-    id: q.id,//ตัวใหม่
-    timestampSeconds: q.video_timestamp_seconds,
-    sourceType: "static" as const,
-    questionText: q.question_text,
-    choices: q.quiz_choices.sort((a, b) => a.order_index - b.order_index).map((c) => c.choice_text),
-  }));//เรียง choice index จากน้อยไปมากและ ดึงเฉพาะ choice_text ออกมาจากแต่ละ choice object เหลือแค่ array ของ string ล้วนๆ
+  const staticQuizzes = videoQuizQuestions.map((q) => {//วน mapใน videoQuizQuestionsทุกตัว
+    const sortedChoices = q.quiz_choices.sort((a, b) => a.order_index - b.order_index);
+    const interactionType = q.interaction_type ?? "multiple_choice";
+    // drag_drop ไม่ใช้ choices เหมือน matching/sequencing (เนื้อหา+เฉลยอยู่ใน answer_data) ส่วน multi_select ใช้ choices
+    // ปกติแต่ฝัง correctIndexes (หลายตัว) แทน correctIndex — เหตุผลเดียวกับ correctIndex: ตรวจในเครื่องแบบ offline
+    const isMatchingOrSequencing =
+      interactionType === "matching" || interactionType === "sequencing" || interactionType === "drag_drop";
+    const dragDropDisplay = interactionType === "drag_drop"
+      ? buildDragDropDisplay(interactionType, q.answer_data, seedFromString(q.id), q.id)
+      : null;
+    // matching/sequencing: ใช้ seed คงที่จาก id คำถาม (ไม่ใช่ต่อนักเรียน/ต่อครั้งแบบ final exam หรือ
+    // popup) เพราะแพ็กเกจ SCORM นี้ bake ครั้งเดียวตอน generate แล้วทุกคนที่เปิดแพ็กเกจนี้เห็นลำดับ
+    // ที่สลับแล้วเหมือนกันหมด — สลับแค่เพื่อไม่ให้ตอบตามลำดับเดิมเป๊ะๆ ได้เฉยๆ
+    const { matchingDisplay, sequencingDisplay } = isMatchingOrSequencing
+      ? buildMatchingSequencingDisplay(interactionType, q.answer_data, seedFromString(q.id), q.id)
+      : { matchingDisplay: null, sequencingDisplay: null };
+    return {
+      id: q.id,//ตัวใหม่
+      timestampSeconds: q.video_timestamp_seconds,
+      sourceType: "static" as const,
+      questionText: q.question_text,
+      imageUrl: q.image_url ?? null,
+      imageCaption: q.image_caption ?? null,
+      imagePins: q.image_pins ?? [],
+      interactionType,
+      choices: isMatchingOrSequencing ? [] : sortedChoices.map((c) => c.choice_text),//เรียง choice index จากน้อยไปมากและ ดึงเฉพาะ choice_text ออกมาจากแต่ละ choice object เหลือแค่ array ของ string ล้วนๆ
+      // [ให้พกพา] ฝัง correctIndex + explanation ลงไปในแพ็กเกจเลย เพื่อให้ตรวจคำตอบในเครื่องได้
+      // โดยไม่ต้องพึ่ง API ของเว็บเรา (ถ้าเปิดแพ็กเกจนี้ใน LMS อื่นที่เรียก API เราไม่ได้ ยังตอบได้
+      // ปกติ) — เฉลยจะเห็นได้จาก F12 เหมือน SCORM ทั่วไปทุกตัว แต่ควิซกลางวิดีโอนี้เป็นแค่ตัวช่วย
+      // ทบทวน (formative) ไม่ใช่คะแนนตัดสินใบรับรอง จึงยอมรับความเสี่ยงนี้ได้ (ห้ามทำแบบนี้กับ
+      // final exam เด็ดขาด เพราะนั่นตัดสินใบรับรองจริง ต้องตรวจฝั่ง server เท่านั้น)
+      correctIndex: isMatchingOrSequencing || interactionType === "multi_select" ? -1 : sortedChoices.findIndex((c) => c.is_correct),
+      correctIndexes: interactionType === "multi_select"
+        ? sortedChoices.flatMap((c, index) => (c.is_correct ? [index] : []))
+        : null,
+      explanation: q.explanation ?? null,
+      // ===== เพิ่มใหม่: matching/sequencing — display แบบสลับลำดับ (ไม่มีเฉลย) + answerData
+      // (เฉลยจริง ฝังไปด้วยเพื่อตรวจในเครื่อง เหตุผลเดียวกับ correctIndex ด้านบน) =====
+      matching: matchingDisplay,
+      sequencing: sequencingDisplay,
+      dragDrop: dragDropDisplay,
+      answerData: isMatchingOrSequencing ? q.answer_data ?? null : null,
+    };
+  });
 
   const randomQuizzes = videoQuizMarkers.map((m) => ({ //แปลง videoQuizMarkers แต่ละตัวเป็น object
     id: m.id,
@@ -113,9 +169,17 @@ var REQUESTED_CHAPTER_ID = new URLSearchParams(window.location.search).get("chap
 var REQUIRE_CORRECT_ANSWER = false;
 var answeredQuestionIds = {};
 var pendingQuestion = null;
+// ===== เพิ่มใหม่: matching/sequencing ใน popup — เก็บฟังก์ชันล้าง listener ระดับ document ของ
+// sequencing drag-and-drop ตัวที่กำลังทำงานอยู่ (ถ้ามี) ไว้ที่นี่ เพื่อให้ปิด/เปลี่ยนคำถามแล้วเคลียร์
+// listener เก่าทิ้งได้ ไม่งั้น listener จะค้างสะสมทุกครั้งที่เปิดคำถาม sequencing ข้อใหม่
+var activeDragCleanup = null;
 var savePositionTimer = null;
 var lastSavedPosition = 0;
 var maxWatchedPosition = 0;
+// [ยังเรียนอยู่ไหม] เช็คทุก 5 นาทีที่วิดีโอเล่นต่อเนื่อง (ไม่ถูก pause) — ถ้าไม่มีการโต้ตอบเลยจะ
+// pause วิดีโอ + เด้ง popup ให้กดยืนยันก่อนเรียนต่อ กันเปิดทิ้งไว้เฉยๆ นับเป็นเวลาเรียนจริง
+var stillWatchingTimer = null;
+var STILL_WATCHING_INTERVAL_MS = 5 * 60 * 1000;
 // [งานข้อ 22] จับเวลาเริ่ม session ตั้งแต่บรรทัดนี้ทำงาน (สคริปต์นี้ execute ตอน parse หน้าเว็บ ก่อน
 // window "load" ด้วยซ้ำ) ไว้คำนวณ cmi.core.session_time ตอนจบ session — เดิมไม่เคย setValue ค่านี้
 // เลยสักครั้ง รายงานเวลาเรียนของผู้เรียนที่ LMS/dashboard เห็นจึงเป็นศูนย์ตลอดไม่ว่าจะเรียนนานแค่ไหน
@@ -403,7 +467,12 @@ function sanitizeLessonHtml(html) {
 function renderLesson() {
   var requestedChapter = getRequestedChapter();
   document.getElementById("lesson-title").textContent = requestedChapter ? requestedChapter.title : LESSON_DATA.title;
-  document.getElementById("lesson-content").innerHTML = sanitizeLessonHtml(LESSON_DATA.contentHtml);
+  var lessonContentEl = document.getElementById("lesson-content");
+  lessonContentEl.innerHTML = sanitizeLessonHtml(LESSON_DATA.contentHtml);
+  // ไม่มีเนื้อหาจริง (ว่าง หรือมีแค่แท็กเปล่าอย่าง p/br) = ซ่อนกล่องขาวทั้งอัน ไม่ให้เหลือกรอบว่างใต้วิดีโอ
+  var hasLessonText = lessonContentEl.textContent.replace(/\s+/g, "") !== "";
+  var hasLessonMedia = !!lessonContentEl.querySelector("img, video, audio, iframe, table, svg, canvas, object, embed");
+  lessonContentEl.style.display = hasLessonText || hasLessonMedia ? "" : "none";
 }
 
 /* ---------------- Quiz modal (เหมือนเดิม) ---------------- */
@@ -420,6 +489,17 @@ function openQuizModal(question) { //เปิดคำถามใน modal
       .then(function (sampled) {//ได้คำถามมาแล้ว ไปเซ็ตลงใน object question ตัวเดิม
         question.questionText = sampled.questionText;
         question.choices = sampled.choices;
+        question.imageUrl = sampled.imageUrl ?? null;
+        // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ — renderQuizModalContent รองรับ
+        // field นี้อยู่แล้ว (ใช้กับทางคำถามคงที่/per-timestamp) แค่ต้องเซ็ตให้ทาง random_bank ด้วย
+        question.imageCaption = sampled.imageCaption ?? null;
+        question.imagePins = sampled.imagePins ?? [];
+        // ===== เพิ่มใหม่: matching/sequencing — ไม่มีเฉลยติดมา (ดู sample/route.ts) แค่ข้อมูล
+        // แสดงผลที่สลับลำดับแล้ว interactionType ที่ไม่รู้จัก (MC/True-False) ถือเป็น undefined ปกติ
+        question.interactionType = sampled.interactionType;
+        question.matching = sampled.matching ?? null;
+        question.sequencing = sampled.sequencing ?? null;
+        question.dragDrop = sampled.dragDrop ?? null;
         renderQuizModalContent(question);
       })
       .catch(function () {
@@ -447,15 +527,99 @@ function openQuizModal(question) { //เปิดคำถามใน modal
 }
 
 function renderQuizModalContent(question) {
+  // เคลียร์ listener ของ drag-and-drop จากคำถาม sequencing ข้อก่อนหน้า (ถ้ามีค้างอยู่) ก่อน render
+  // เนื้อหาใหม่ทับ ไม่งั้น listener ระดับ document จะค้างสะสมทุกครั้งที่เปิดคำถามใหม่
+  if (typeof activeDragCleanup === "function") { activeDragCleanup(); }
+
   var overlay = document.getElementById("quiz-overlay");
   var body = document.getElementById("quiz-modal-body");
   body.innerHTML = "";
+
+  // [ใส่รูปในคำถาม] แสดงเฉพาะข้อที่มี imageUrl ฝังมา (static quiz ที่ครูอัปโหลดรูปไว้) —
+  // รูปมาจาก R2 เป็น public URL เหมือน videoUrl อยู่แล้ว โหลดตรงได้เลยไม่ต้องพึ่ง API
+  // ของเว็บเรา เปิดจาก LMS ไหนก็เห็นรูปเหมือนกัน (ไม่กระทบเรื่องพกพา)
+  if (question.imageUrl) {
+    // ===== เพิ่มใหม่: ครอบรูปด้วย wrapper เพื่อวางหมุดตัวเลข (absolute position ตาม % ของรูป) ทับ
+    // บนรูปได้ — เดิมมีแค่ <img> เปล่าๆ ไม่มี wrapper ให้ position: absolute อ้างอิง =====
+    var imageWrap = document.createElement("div");
+    imageWrap.className = "quiz-modal-image-wrap";
+
+    var image = document.createElement("img");
+    image.className = "quiz-modal-image";
+    image.src = question.imageUrl;
+    image.alt = "";
+    imageWrap.appendChild(image);
+
+    (question.imagePins || []).forEach(function (pin, pinIndex) {
+      var pinBadge = document.createElement("span");
+      pinBadge.className = "quiz-modal-image-pin";
+      pinBadge.style.left = pin.x + "%";
+      pinBadge.style.top = pin.y + "%";
+      pinBadge.textContent = String(pinIndex + 1);
+      imageWrap.appendChild(pinBadge);
+    });
+
+    body.appendChild(imageWrap);
+
+    // [แคปชันใต้ภาพ] โชว์เฉพาะข้อที่ครูพิมพ์ไว้ (ไม่บังคับ)
+    if (question.imageCaption) {
+      var imageCaption = document.createElement("p");
+      imageCaption.className = "quiz-modal-image-caption";
+      imageCaption.textContent = question.imageCaption;
+      body.appendChild(imageCaption);
+    }
+  }
 
   var title = document.createElement("p");
   title.className = "quiz-modal-question";
   title.textContent = question.questionText;
   body.appendChild(title);
 
+  // ===== เพิ่มใหม่: matching/sequencing มี sub-text อธิบายวิธีตอบ (เหมือนที่ปรับใน Final Exam
+  // ตาม feedback ของ UI/UX) MC/True-False (รวมถึง static quiz เดิม) ไม่ต้องมี ไม่เปลี่ยนพฤติกรรมเดิม
+  if (question.interactionType === "matching" || question.interactionType === "sequencing" ||
+      question.interactionType === "multi_select" || question.interactionType === "drag_drop") {
+    var subText = document.createElement("p");
+    subText.className = "quiz-modal-subtext";
+    subText.textContent =
+      question.interactionType === "matching"
+        ? "เลือกจับคู่คำตอบที่ถูกต้อง"
+        : question.interactionType === "multi_select"
+        ? "เลือกได้หลายคำตอบ — ติ๊กทุกข้อที่ถูก (ต้องเลือกให้ครบจึงจะถูก)"
+        : question.interactionType === "drag_drop"
+        ? "ลากคำไปวางในช่องว่าง หรือแตะคำเพื่อเติมช่องว่างช่องแรก (แตะคำในช่องเพื่อเอาออก)"
+        : "ลากเพื่อสลับลำดับจากน้อยไปมาก";
+    body.appendChild(subText);
+  }
+
+  var feedback = document.createElement("div");
+  feedback.id = "quiz-modal-feedback";
+  feedback.className = "quiz-modal-feedback";
+
+  // ===== เพิ่มใหม่: matching/sequencing มีปุ่ม "ส่งคำตอบ" ของตัวเอง — ส่ง feedback เข้าไปให้ฟังก์ชัน
+  // render ควบคุมลำดับ DOM เอง (ต้องอยู่ "เหนือ" ปุ่มส่งคำตอบเสมอ: รายการ → ฟีดแบ็ก → ปุ่ม ไม่ใช่ต่อท้าย
+  // ปุ่มแบบเดิม ซึ่งทำให้เห็นปุ่ม "ส่งคำตอบ" เทาค้างอยู่ใต้ฟีดแบ็กอีกที) MC/True-False ไม่มีปุ่มส่งแยก
+  // (คลิกตัวเลือก = ส่งคำตอบทันที) ต่อท้ายแบบเดิมได้เลย ไม่กระทบ
+  if (question.interactionType === "matching") {
+    renderMatchingBody(question, body, feedback);
+  } else if (question.interactionType === "sequencing") {
+    renderSequencingBody(question, body, feedback);
+  } else if (question.interactionType === "multi_select") {
+    renderMultiSelectBody(question, body, feedback);
+  } else if (question.interactionType === "drag_drop" && question.dragDrop) {
+    renderDragDropBody(question, body, feedback);
+  } else {
+    // ทางเดิม: multiple_choice/true_false (และ static quiz เดิมที่ไม่มี interactionType เลย)
+    renderChoicesBody(question, body);
+    body.appendChild(feedback);
+  }
+
+  overlay.classList.add("open");
+}
+
+// เดิมโค้ดนี้ inline อยู่ใน renderQuizModalContent ตรงๆ — แยกออกมาเป็นฟังก์ชันเดียว เพื่อให้สลับ
+// ไปเรียก renderMatchingBody/renderSequencingBody ตาม interactionType ได้ ไม่กระทบพฤติกรรมเดิมเลย
+function renderChoicesBody(question, body) {
   var choicesWrap = document.createElement("div");
   choicesWrap.className = "quiz-modal-choices";
 
@@ -469,23 +633,1041 @@ function renderQuizModalContent(question) {
   });
 
   body.appendChild(choicesWrap);
+}
 
-  var feedback = document.createElement("div");
-  feedback.id = "quiz-modal-feedback";
-  feedback.className = "quiz-modal-feedback";
+// ===== เพิ่มใหม่: matching (จับคู่) สำหรับ Pop-up Quiz — ฝั่งซ้ายเป็นการ์ด ฝั่งขวาเป็น dropdown ที่
+// เปลี่ยนเป็นสีเขียวเมื่อเลือกแล้ว (ปรับสไตล์ dropdown เดิมให้สวยขึ้นตาม feedback ของ Final Exam
+// ไม่ใช่ drag-and-drop เพราะจับคู่ด้วย dropdown ยังชัดเจน/ทำง่ายกว่าและเป็นตัวเลือกที่เลือกไว้แล้ว)
+// เก็บคำตอบเป็น {pairs: [{left, right}]} shape เดียวกับ MatchingStudentAnswer ฝั่ง server
+function renderMatchingBody(question, body, feedback) {
+  var matching = question.matching; // { left: string[], rightOptions: string[] }
+  var answers = {}; // leftIndex -> right text ที่เลือกไว้ (ใช้ index แทนข้อความกันกรณีข้อความฝั่งซ้ายซ้ำกัน)
+  var rowRefs = []; // { row, select, leftIndex, leftText } — เก็บไว้ใช้ทั้งกันเลือกซ้ำและไฮไลต์ถูก/ผิด
+
+  // ===== เพิ่มใหม่: หัวข้อ "จับคู่แล้ว N/4" + แถบ progress แบ่งเป็นช่องเท่าจำนวนคู่ ให้เห็นความคืบหน้า
+  // ก่อนส่งคำตอบ (เดิมไม่มีอะไรบอกความคืบหน้าเลย)
+  var progressWrap = document.createElement("div");
+  progressWrap.className = "quiz-modal-matching-progress";
+  var progressLabel = document.createElement("span");
+  progressLabel.className = "quiz-modal-matching-progress-label";
+  var progressBar = document.createElement("div");
+  progressBar.className = "quiz-modal-matching-progress-bar";
+  var progressSegs = matching.left.map(function () {
+    var seg = document.createElement("span");
+    seg.className = "quiz-modal-matching-progress-seg";
+    progressBar.appendChild(seg);
+    return seg;
+  });
+  progressWrap.appendChild(progressLabel);
+  progressWrap.appendChild(progressBar);
+
+  function updateProgress() {
+    var answeredCount = Object.keys(answers).length;
+    progressLabel.textContent = "จับคู่แล้ว " + answeredCount + "/" + matching.left.length;
+    progressSegs.forEach(function (seg, i) { seg.classList.toggle("is-filled", i < answeredCount); });
+  }
+
+  var wrap = document.createElement("div");
+  wrap.className = "quiz-modal-matching";
+
+  // ===== เพิ่มใหม่: หมุดบนภาพ (ถ้ามี) — จับคู่กับแถวด้วยเลขที่แทรกอยู่ในข้อความฝั่งซ้าย (เช่น "หมุด 3"
+  // คือหมุดเลข 3 บนภาพ) รูปถูกวาดไว้ใน body ไปแล้วก่อนเรียกฟังก์ชันนี้ (ดู renderQuizModalContent) จึง
+  // querySelectorAll หาได้ตรงนี้เลย — ถ้าข้อความไม่มีเลข หรือภาพไม่มีหมุดพอ ก็ข้ามไปเงียบๆ ไม่พังอะไร
+  // เป็นของเสริมให้ภาพกับรายการ "คุยกัน" (hover/focus แถว → หมุดเรืองแสง, กดหมุด → โฟกัส dropdown)
+  var pinEls = body.querySelectorAll(".quiz-modal-image-pin");
+
+  // ===== เพิ่มใหม่: กันเลือกคำตอบฝั่งขวาซ้ำกันข้ามแถว — ตัวเลือกที่แถวอื่นเลือกไปแล้วจะถูก disable พร้อม
+  // ต่อท้ายข้อความ "(เลือกแล้ว)" ให้ชัดว่าทำไมกดไม่ได้ ใน <select> ของแถวอื่นทั้งหมด (ยกเว้นแถวที่เลือก
+  // มันอยู่ตอนนี้) พอเปลี่ยน/ล้างค่าในแถวไหน ตัวเลือกเดิมจะกลับมาเลือกได้อีกทันที ไม่ต้องรอ submit
+  function refreshOptionAvailability() {
+    var chosenByIndex = {}; // rightValue -> leftIndex ที่เลือกค่านี้อยู่ตอนนี้
+    rowRefs.forEach(function (ref) {
+      if (ref.select.value) chosenByIndex[ref.select.value] = ref.leftIndex;
+    });
+    rowRefs.forEach(function (ref) {
+      Array.prototype.forEach.call(ref.select.options, function (opt) {
+        if (!opt.value) return; // ไม่แตะ placeholder "— เลือกคำตอบ —"
+        var ownerIndex = chosenByIndex[opt.value];
+        var isTakenByOther = ownerIndex !== undefined && ownerIndex !== ref.leftIndex;
+        opt.disabled = isTakenByOther;
+        opt.textContent = isTakenByOther ? opt.dataset.label + " (เลือกแล้ว)" : opt.dataset.label;
+      });
+    });
+  }
+
+  matching.left.forEach(function (leftText, leftIndex) {
+    var row = document.createElement("div");
+    row.className = "quiz-modal-matching-row";
+
+    var pinMatch = /(\d+)\s*$/.exec(String(leftText).trim());
+    var pinNumber = pinMatch ? parseInt(pinMatch[1], 10) : null;
+    var pinEl = pinNumber ? pinEls[pinNumber - 1] || null : null;
+
+    // ===== เพิ่มใหม่: วงกลมเลขสีส้ม สไตล์เดียวกับหมุดบนภาพ แทนกล่องขาวที่มีแต่ข้อความ (ตาจะได้ลิงก์
+    // เลขบนรายการกับเลขหมุดบนภาพเข้าด้วยกันเอง)
+    var badge = document.createElement("span");
+    badge.className = "quiz-modal-matching-badge";
+    badge.textContent = pinNumber ? String(pinNumber) : String(leftIndex + 1);
+    row.appendChild(badge);
+
+    var leftCard = document.createElement("div");
+    leftCard.className = "quiz-modal-matching-left";
+    leftCard.textContent = leftText;
+    row.appendChild(leftCard);
+
+    var connector = document.createElement("div");
+    connector.className = "quiz-modal-matching-connector";
+    row.appendChild(connector);
+
+    var select = document.createElement("select");
+    select.className = "quiz-modal-matching-select";
+
+    var placeholderOpt = document.createElement("option");
+    placeholderOpt.value = "";
+    placeholderOpt.textContent = "— เลือกคำตอบ —";
+    select.appendChild(placeholderOpt);
+
+    matching.rightOptions.forEach(function (rightText) {
+      var opt = document.createElement("option");
+      opt.value = rightText;
+      opt.dataset.label = rightText;
+      opt.textContent = rightText;
+      select.appendChild(opt);
+    });
+
+    if (pinEl) {
+      pinEl.classList.add("is-linkable");
+      pinEl.addEventListener("click", function () { select.focus(); });
+    }
+
+    function setActive(on) {
+      row.classList.toggle("is-active", on);
+      if (pinEl) pinEl.classList.toggle("is-active", on);
+    }
+    row.addEventListener("mouseenter", function () { setActive(true); });
+    row.addEventListener("mouseleave", function () { setActive(false); });
+    select.addEventListener("focus", function () { setActive(true); });
+    select.addEventListener("blur", function () { setActive(false); });
+
+    select.addEventListener("change", function () {
+      if (select.value) {
+        answers[leftIndex] = select.value;
+      } else {
+        delete answers[leftIndex];
+      }
+      var isFilled = Boolean(select.value);
+      // ===== เพิ่มใหม่: "เลือกแล้ว" (ยังไม่ส่งคำตอบ) ใช้สี accent (navy) แทนเขียว — เขียว/แดงเก็บไว้
+      // ใช้เฉพาะตอนเฉลยหลังส่งคำตอบเท่านั้น กันเข้าใจผิดว่า "ถูกแล้ว" ทั้งที่ยังไม่ได้ตรวจ
+      select.classList.toggle("is-filled", isFilled);
+      connector.classList.toggle("is-filled", isFilled);
+      badge.classList.toggle("is-matched", isFilled);
+      if (pinEl) pinEl.classList.toggle("is-matched", isFilled);
+      updateProgress();
+      refreshOptionAvailability();
+    });
+
+    rowRefs.push({ row: row, select: select, leftIndex: leftIndex, leftText: leftText });
+    row.appendChild(select);
+    wrap.appendChild(row);
+  });
+
+  updateProgress();
+  body.appendChild(progressWrap);
+  body.appendChild(wrap);
+  // ===== เพิ่มใหม่: feedback ต้องอยู่ "เหนือ" ปุ่มส่งคำตอบเสมอ (รายการ → ฟีดแบ็ก → ปุ่มหลัก) —
+  // renderQuizModalContent ส่ง feedback เข้ามาให้ตรงนี้แทนที่จะต่อท้ายปุ่มเองแบบเดิม
   body.appendChild(feedback);
 
-  overlay.classList.add("open");
+  var submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "quiz-modal-continue-btn quiz-modal-submit-btn";
+  submitBtn.textContent = "ส่งคำตอบ";
+
+  // ===== เพิ่มใหม่: ปุ่มกดได้ตลอด ไม่ disable ตามความครบ (เดิม disable เฉยๆ ผู้เรียนไม่รู้ว่าต้องทำ
+  // อะไรต่อ) — ถ้ายังตอบไม่ครบ ขึ้นข้อความแดง "เหลืออีก N หมุด" + สั่นเบาๆ ที่แถวที่ยังว่างแทน ใช้
+  // .onclick (ไม่ใช่ addEventListener) เพื่อให้ applyContinueOrRetryToButton แทนที่ handler นี้ได้
+  // สะอาดๆ หลังส่งคำตอบจริง ไม่ให้ยิงซ้ำสองชุดถ้ากดปุ่มอีกทีตอนเปลี่ยนสถานะเป็น "เรียนต่อ"/"ลองใหม่" แล้ว
+  submitBtn.onclick = function () {
+    var answeredCount = Object.keys(answers).length;
+    if (answeredCount !== matching.left.length) {
+      feedback.innerHTML = '<p class="quiz-modal-incomplete-warning">เหลืออีก ' + (matching.left.length - answeredCount) + ' หมุด</p>';
+      rowRefs.forEach(function (ref) {
+        if (answers[ref.leftIndex] !== undefined) return;
+        ref.row.classList.remove("is-shake");
+        void ref.row.offsetWidth; // force reflow ให้เล่น animation ซ้ำได้ ถ้าสั่นไปแล้วรอบก่อน
+        ref.row.classList.add("is-shake");
+      });
+      return;
+    }
+    feedback.innerHTML = "";
+
+    var pairs = matching.left.map(function (leftText, leftIndex) { return { left: leftText, right: answers[leftIndex] }; });
+
+    // ===== ไฮไลต์ถูก/ผิดเป็นรายคู่ทันทีหลังกดส่งคำตอบ (บอกชัดว่าคู่ไหนผิดบ้าง ไม่ใช่แค่ข้อความสรุปรวม)
+    // — ทำได้เฉพาะตอนมีเฉลยฝังมาในเครื่อง (question.answerData) ซึ่งควิซ static ระหว่างวิดีโอมีเฉลยฝังมา
+    // เสมอ ยกเว้นมาร์กเกอร์สุ่มเก่าที่ยังเหลืออยู่ (ไม่มี answerData) จะไม่มีไฮไลต์รายคู่
+    if (question.answerData && question.answerData.pairs) {
+      var correctMap = {};
+      question.answerData.pairs.forEach(function (p) { correctMap[p.left] = p.right; });
+      rowRefs.forEach(function (ref) {
+        var isRowCorrect = correctMap[ref.leftText] === answers[ref.leftIndex];
+        ref.row.classList.add(isRowCorrect ? "is-row-correct" : "is-row-incorrect");
+        var icon = document.createElement("span");
+        icon.className = "quiz-modal-row-icon " + (isRowCorrect ? "is-correct" : "is-incorrect");
+        icon.textContent = isRowCorrect ? "✓" : "✕";
+        ref.row.appendChild(icon);
+      });
+    }
+
+    submitStructuredAnswer(question, { pairs: pairs }, [wrap], submitBtn);
+  };
+  body.appendChild(submitBtn);
+}
+
+// ===== เพิ่มใหม่: sequencing (เรียงลำดับ) สำหรับ Pop-up Quiz — ลาก-วางจริงด้วย Pointer Events
+// (รองรับทั้งเมาส์และทัสก์สกรีนในโค้ดชุดเดียว ไม่ต้องแยก touch/mouse listener) แทนปุ่มลูกศรขึ้น-ลง
+// แบบเดิม ตาม feedback ของ Final Exam — จับที่ drag handle (ไอคอนจุด 6 จุด) เท่านั้น ลากผ่านแถวไหน
+// ก็สลับตำแหน่งกับแถวนั้นทันที (swap-based reorder เหมือน SortableJS) ไม่มี @dnd-kit ให้ใช้ในแพ็กเกจ
+// SCORM (ปลอด framework ทั้งหมด) เลยต้องเขียนเองด้วย vanilla JS
+function renderSequencingBody(question, body, feedback) {
+  var order = question.sequencing.map(function (item) { return item.id; });
+  var textById = {};
+  question.sequencing.forEach(function (item) { textById[item.id] = item.text; });
+
+  var list = document.createElement("div");
+  list.className = "quiz-modal-sequencing-list";
+  var dragState = null; // { id, pointerId }
+
+  function renderRows() {
+    list.innerHTML = "";
+    order.forEach(function (id, index) {
+      var row = document.createElement("div");
+      row.className = "quiz-modal-sequencing-row";
+      row.setAttribute("data-id", id);
+
+      var badge = document.createElement("span");
+      badge.className = "quiz-modal-sequencing-badge";
+      badge.textContent = String(index + 1);
+      row.appendChild(badge);
+
+      var text = document.createElement("span");
+      text.className = "quiz-modal-sequencing-text";
+      text.textContent = textById[id];
+      row.appendChild(text);
+
+      var handle = document.createElement("button");
+      handle.type = "button";
+      handle.className = "quiz-modal-sequencing-handle";
+      handle.setAttribute("aria-label", "ลากเพื่อสลับลำดับ");
+      handle.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
+        '<circle cx="5" cy="3" r="1.4" fill="currentColor"></circle><circle cx="11" cy="3" r="1.4" fill="currentColor"></circle>' +
+        '<circle cx="5" cy="8" r="1.4" fill="currentColor"></circle><circle cx="11" cy="8" r="1.4" fill="currentColor"></circle>' +
+        '<circle cx="5" cy="13" r="1.4" fill="currentColor"></circle><circle cx="11" cy="13" r="1.4" fill="currentColor"></circle>' +
+        '</svg>';
+      row.appendChild(handle);
+
+      // สำรองสำหรับคีย์บอร์ด (โฟกัสที่ handle แล้วกดลูกศรขึ้น/ลง) เผื่อลาก/แทะไม่ได้สะดวก
+      handle.addEventListener("keydown", function (e) {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        var from = order.indexOf(id);
+        var to = e.key === "ArrowUp" ? from - 1 : from + 1;
+        if (to < 0 || to >= order.length) return;
+        order.splice(from, 1);
+        order.splice(to, 0, id);
+        renderRows();
+        var movedRow = list.querySelector('[data-id="' + id + '"]');
+        var movedHandle = movedRow && movedRow.querySelector(".quiz-modal-sequencing-handle");
+        if (movedHandle) movedHandle.focus();
+      });
+
+      handle.addEventListener("pointerdown", function (e) {
+        if (e.button != null && e.button !== 0) return; // เมาส์ต้องเป็นปุ่มซ้ายเท่านั้น (ทัสก์ไม่มี button)
+        e.preventDefault();
+        dragState = { id: id, pointerId: e.pointerId };
+        row.classList.add("is-dragging");
+        try { handle.setPointerCapture(e.pointerId); } catch (captureErr) { void captureErr; }
+      });
+
+      list.appendChild(row);
+    });
+  }
+
+  function onPointerMove(e) {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    e.preventDefault();
+    var hoveredEl = document.elementFromPoint(e.clientX, e.clientY);
+    var hoveredRow = hoveredEl && hoveredEl.closest ? hoveredEl.closest(".quiz-modal-sequencing-row") : null;
+    if (!hoveredRow) return;
+    var hoveredId = hoveredRow.getAttribute("data-id");
+    if (hoveredId === dragState.id) return;
+    var fromIndex = order.indexOf(dragState.id);
+    var toIndex = order.indexOf(hoveredId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, dragState.id);
+    renderRows();
+    var draggedRow = list.querySelector('[data-id="' + dragState.id + '"]');
+    if (draggedRow) draggedRow.classList.add("is-dragging");
+  }
+
+  function endDrag(e) {
+    if (!dragState || (e && e.pointerId !== dragState.pointerId)) return;
+    var draggedRow = list.querySelector('[data-id="' + dragState.id + '"]');
+    if (draggedRow) draggedRow.classList.remove("is-dragging");
+    dragState = null;
+  }
+
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+  activeDragCleanup = function () {
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", endDrag);
+    document.removeEventListener("pointercancel", endDrag);
+    activeDragCleanup = null;
+  };
+
+  renderRows();
+  body.appendChild(list);
+  // ===== เพิ่มใหม่: feedback ต้องอยู่เหนือปุ่มส่งคำตอบเสมอ เหมือนที่ปรับใน renderMatchingBody ด้านบน
+  body.appendChild(feedback);
+
+  var submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "quiz-modal-continue-btn quiz-modal-submit-btn";
+  submitBtn.textContent = "ส่งคำตอบ";
+  // ===== เพิ่มใหม่: .onclick (ไม่ใช่ addEventListener) ให้ applyContinueOrRetryToButton แทนที่ handler
+  // นี้ได้สะอาดๆ หลังส่งคำตอบจริง — กันปุ่มเดิมค้างเป็น handler ซ้อนอีกชุดหลังเปลี่ยนเป็น "เรียนต่อ"
+  submitBtn.onclick = function () {
+    if (typeof activeDragCleanup === "function") activeDragCleanup();
+
+    // ===== เพิ่มใหม่: ไฮไลต์ถูก/ผิดเป็นรายข้อทันทีหลังกดส่งคำตอบ (ตามที่ขอ "เรียงลำดับ...อยากให้มัน
+    // ขึ้นสีแดงตรงข้อที่ตอบผิด") — เทียบตำแหน่งปัจจุบันของแต่ละข้อกับ correct_order ทีละตำแหน่ง เหมือน
+    // checkSequencingLocally() — ทำได้เฉพาะตอนมีเฉลยฝังมาในเครื่อง เช่นเดียวกับ matching ด้านบน
+    if (question.answerData && question.answerData.correct_order) {
+      var correctOrder = question.answerData.correct_order;
+      order.forEach(function (id, index) {
+        var rowEl = list.querySelector('[data-id="' + id + '"]');
+        if (!rowEl) return;
+        var isRowCorrect = id === correctOrder[index];
+        rowEl.classList.add(isRowCorrect ? "is-row-correct" : "is-row-incorrect");
+        var icon = document.createElement("span");
+        icon.className = "quiz-modal-row-icon " + (isRowCorrect ? "is-correct" : "is-incorrect");
+        icon.textContent = isRowCorrect ? "✓" : "✕";
+        rowEl.appendChild(icon);
+      });
+    }
+
+    submitStructuredAnswer(question, { order: order.slice() }, [list], submitBtn);
+  };
+  body.appendChild(submitBtn);
 }
   
+// ===== เพิ่มใหม่: multi_select (เลือกได้หลายคำตอบ) สำหรับ Pop-up Quiz — ตัวเลือกเป็นปุ่มติ๊กได้หลายข้อ
+// แล้วกด "ส่งคำตอบ" (ต่างจาก MC ที่กดตัวเลือกแล้วส่งทันที) ถูกก็ต่อเมื่อติ๊กครบและไม่เกินเฉลยเป๊ะ
+// คำตอบที่ส่งคือ { selectedChoiceIndexes: [...] } (index ตามลำดับตัวเลือกที่แสดง) =====
+function renderMultiSelectBody(question, body, feedback) {
+  var selected = {};
+  var wrap = document.createElement("div");
+  wrap.className = "quiz-modal-choices";
+  var btns = [];
+
+  var countEl = document.createElement("p");
+  countEl.className = "quiz-modal-multi-count";
+
+  function pickedIndexes() {
+    var out = [];
+    question.choices.forEach(function (_c, i) { if (selected[i]) out.push(i); });
+    return out;
+  }
+  function updateCount() { countEl.textContent = "เลือกแล้ว " + pickedIndexes().length + " ข้อ"; }
+
+  question.choices.forEach(function (choiceText, idx) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "quiz-modal-choice-btn quiz-modal-multi-btn";
+    btn.setAttribute("role", "checkbox");
+    btn.setAttribute("aria-checked", "false");
+
+    var box = document.createElement("span");
+    box.className = "quiz-modal-multi-box";
+    btn.appendChild(box);
+
+    var label = document.createElement("span");
+    label.className = "quiz-modal-multi-label";
+    label.textContent = choiceText;
+    btn.appendChild(label);
+
+    btn.addEventListener("click", function () {
+      if (selected[idx]) { delete selected[idx]; } else { selected[idx] = true; }
+      var on = Boolean(selected[idx]);
+      btn.classList.toggle("is-selected", on);
+      btn.setAttribute("aria-checked", on ? "true" : "false");
+      box.textContent = on ? "✓" : "";
+      feedback.innerHTML = "";
+      updateCount();
+    });
+    btns.push(btn);
+    wrap.appendChild(btn);
+  });
+
+  updateCount();
+  body.appendChild(wrap);
+  body.appendChild(countEl);
+  body.appendChild(feedback);
+
+  var submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "quiz-modal-continue-btn quiz-modal-submit-btn";
+  submitBtn.textContent = "ส่งคำตอบ";
+  submitBtn.onclick = function () {
+    var picked = pickedIndexes();
+    if (picked.length === 0) {
+      feedback.innerHTML = '<p class="quiz-modal-incomplete-warning">กรุณาเลือกอย่างน้อย 1 ข้อ</p>';
+      return;
+    }
+    feedback.innerHTML = "";
+    // ไฮไลต์รายตัวเลือกได้เฉพาะตอนมีเฉลยฝังมาในเครื่อง (ควิซ static) — ข้อสุ่มจากคลังโชว์แค่ถูก/ผิดรวม
+    if (Array.isArray(question.correctIndexes)) {
+      btns.forEach(function (b, i) {
+        b.classList.remove("is-selected");
+        if (question.correctIndexes.indexOf(i) !== -1) { b.classList.add("correct"); }
+        else if (selected[i]) { b.classList.add("incorrect"); }
+      });
+    }
+    submitStructuredAnswer(question, { selectedChoiceIndexes: picked }, [wrap], submitBtn);
+  };
+  body.appendChild(submitBtn);
+}
+
+// ===== เพิ่มใหม่: drag_drop (เติมคำลงช่องว่าง) สำหรับ Pop-up Quiz — vanilla JS + Pointer Events
+// (ไม่มี @dnd-kit ในแพ็กเกจ SCORM) ใช้ได้ 3 วิธี: ลากคำไปวางช่อง / แตะคำ (ลงช่องที่เลือกไว้หรือช่องว่างแรก)
+// / คีย์บอร์ด (Tab + Enter) — ตรรกะ move/tap เหมือน lib/quiz/drag-drop-state.ts ฝั่งเว็บ (ถ้าแก้ต้องแก้คู่กัน)
+// โจทย์: question.dragDrop = { template: "... {{b1}} ...", blankIds: [...], words: [{id, text}] } (ไม่มีเฉลย)
+// คำตอบที่ส่งคือ { placements: { blankId: wordId } } =====
+function ddSplitTemplate(template, blankIds) {
+  var segs = [];
+  var pos = 0;
+  while (pos < template.length) {
+    var open = template.indexOf("{{", pos);
+    if (open === -1) { segs.push({ type: "text", text: template.slice(pos) }); break; }
+    var close = template.indexOf("}}", open + 2);
+    if (close === -1) { segs.push({ type: "text", text: template.slice(pos) }); break; }
+    var id = template.slice(open + 2, close);
+    if (blankIds.indexOf(id) === -1) {
+      segs.push({ type: "text", text: template.slice(pos, close + 2) });
+      pos = close + 2;
+      continue;
+    }
+    if (open > pos) { segs.push({ type: "text", text: template.slice(pos, open) }); }
+    segs.push({ type: "blank", id: id });
+    pos = close + 2;
+  }
+  return segs;
+}
+
+function ddHoldingBlank(placements, wordId) {
+  var keys = Object.keys(placements);
+  for (var i = 0; i < keys.length; i++) { if (placements[keys[i]] === wordId) return keys[i]; }
+  return null;
+}
+
+// วางคำลงช่อง: คำอยู่ช่องอื่น = ย้าย / ช่องปลายทางมีคำอื่น = สลับ (ถ้าคำมาจากช่อง) หรือคืนคำเดิมกลับคลัง (ถ้ามาจากคลัง)
+function ddMoveWord(placements, wordId, targetBlankId) {
+  var from = ddHoldingBlank(placements, wordId);
+  if (from === targetBlankId) return placements;
+  var displaced = placements[targetBlankId] !== undefined ? placements[targetBlankId] : null;
+  var next = {};
+  Object.keys(placements).forEach(function (k) { next[k] = placements[k]; });
+  if (from) { delete next[from]; }
+  next[targetBlankId] = wordId;
+  if (from && displaced) { next[from] = displaced; }
+  return next;
+}
+
+function renderDragDropBody(question, body, feedback) {
+  var dd = question.dragDrop;
+  var textById = {};
+  dd.words.forEach(function (w) { textById[w.id] = w.text; });
+  var placements = {};
+  var activeBlank = null;
+  var drag = null;
+  var suppressClick = false;
+
+  var wrap = document.createElement("div");
+  wrap.className = "quiz-modal-dd";
+  var sentence = document.createElement("div");
+  sentence.className = "quiz-modal-dd-sentence";
+  var bank = document.createElement("div");
+  bank.className = "quiz-modal-dd-bank";
+  bank.setAttribute("data-bank", "1");
+  wrap.appendChild(sentence);
+  wrap.appendChild(bank);
+
+  var countEl = document.createElement("p");
+  countEl.className = "quiz-modal-multi-count";
+
+  function filledCount() {
+    return dd.blankIds.filter(function (id) { return placements[id] !== undefined; }).length;
+  }
+
+  function firstEmptyBlank() {
+    for (var i = 0; i < dd.blankIds.length; i++) { if (placements[dd.blankIds[i]] === undefined) return dd.blankIds[i]; }
+    return null;
+  }
+
+  function tapWord(wordId) {
+    if (ddHoldingBlank(placements, wordId)) return;
+    var target = (activeBlank && dd.blankIds.indexOf(activeBlank) !== -1 && placements[activeBlank] === undefined)
+      ? activeBlank
+      : firstEmptyBlank();
+    if (target) { placements = ddMoveWord(placements, wordId, target); }
+    activeBlank = null;
+  }
+
+  function startDrag(e, el, wordId, fromBlank) {
+    if (el.disabled) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    drag = { wordId: wordId, fromBlank: fromBlank, startX: e.clientX, startY: e.clientY, pointerId: e.pointerId, moved: false, ghost: null, el: el, hover: null };
+  }
+
+  function targetBlankAt(x, y) {
+    var hit = document.elementFromPoint(x, y);
+    return hit && hit.closest ? hit.closest("[data-blank]") : null;
+  }
+
+  function clearHover() {
+    if (drag && drag.hover) { drag.hover.classList.remove("is-over"); drag.hover = null; }
+  }
+
+  function removeGhost() {
+    if (drag && drag.ghost && drag.ghost.parentNode) { drag.ghost.parentNode.removeChild(drag.ghost); }
+  }
+
+  function onMove(e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) < 6) return;
+      drag.moved = true;
+      drag.ghost = document.createElement("div");
+      drag.ghost.className = "quiz-modal-dd-ghost";
+      drag.ghost.textContent = textById[drag.wordId] || "";
+      document.body.appendChild(drag.ghost);
+      drag.el.classList.add("is-dragging");
+    }
+    drag.ghost.style.left = e.clientX + "px";
+    drag.ghost.style.top = e.clientY + "px";
+    var over = targetBlankAt(e.clientX, e.clientY);
+    if (over !== drag.hover) {
+      clearHover();
+      if (over) { over.classList.add("is-over"); drag.hover = over; }
+    }
+    e.preventDefault();
+  }
+
+  function onUp(e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    var d = drag;
+    if (!d.moved) { drag = null; return; } // แตะเฉยๆ ไม่ได้ลาก — ให้ handler click จัดการ
+    var overEl = targetBlankAt(e.clientX, e.clientY);
+    clearHover();
+    removeGhost();
+    drag = null;
+    suppressClick = true;
+    setTimeout(function () { suppressClick = false; }, 0);
+    if (overEl) {
+      placements = ddMoveWord(placements, d.wordId, overEl.getAttribute("data-blank"));
+      activeBlank = null;
+    } else if (d.fromBlank) {
+      delete placements[d.fromBlank]; // ลากออกนอกช่อง = คืนคำกลับคลัง
+    }
+    render();
+  }
+
+  function onCancel(e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    clearHover();
+    removeGhost();
+    drag = null;
+    render();
+  }
+
+  document.addEventListener("pointermove", onMove, { passive: false });
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onCancel);
+  activeDragCleanup = function () {
+    if (drag) { removeGhost(); drag = null; }
+    document.removeEventListener("pointermove", onMove, { passive: false });
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onCancel);
+    activeDragCleanup = null;
+  };
+
+  function makeChip(wordId, fromBlank) {
+    var chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "quiz-modal-dd-chip";
+    chip.textContent = textById[wordId] || "";
+    chip.addEventListener("pointerdown", function (e) { startDrag(e, chip, wordId, fromBlank); });
+    return chip;
+  }
+
+  function render() {
+    sentence.innerHTML = "";
+    bank.innerHTML = "";
+
+    ddSplitTemplate(dd.template, dd.blankIds).forEach(function (seg) {
+      if (seg.type === "text") {
+        sentence.appendChild(document.createTextNode(seg.text));
+        return;
+      }
+      var blankId = seg.id;
+      var blankNumber = dd.blankIds.indexOf(blankId) + 1;
+      var slot = document.createElement("span");
+      slot.className = "quiz-modal-dd-blank";
+      slot.setAttribute("data-blank", blankId);
+      var wordId = placements[blankId];
+      if (wordId !== undefined) {
+        slot.classList.add("is-filled");
+        var chip = makeChip(wordId, blankId);
+        chip.classList.add("is-placed");
+        chip.setAttribute("aria-label", "ช่องที่ " + blankNumber + ": " + (textById[wordId] || "") + " (กดเพื่อเอาออก)");
+        chip.addEventListener("click", function () {
+          if (suppressClick || chip.disabled) return;
+          delete placements[blankId];
+          activeBlank = blankId;
+          render();
+        });
+        slot.appendChild(chip);
+      } else {
+        var emptyBtn = document.createElement("button");
+        emptyBtn.type = "button";
+        emptyBtn.className = "quiz-modal-dd-empty";
+        emptyBtn.textContent = String(blankNumber);
+        emptyBtn.setAttribute("aria-label", "ช่องว่างที่ " + blankNumber + " ยังว่าง");
+        if (activeBlank === blankId) { slot.classList.add("is-active"); }
+        emptyBtn.addEventListener("click", function () {
+          if (suppressClick || emptyBtn.disabled) return;
+          activeBlank = activeBlank === blankId ? null : blankId;
+          render();
+        });
+        slot.appendChild(emptyBtn);
+      }
+      sentence.appendChild(slot);
+    });
+
+    var unused = dd.words.filter(function (w) { return !ddHoldingBlank(placements, w.id); });
+    if (unused.length === 0) {
+      var empty = document.createElement("span");
+      empty.className = "quiz-modal-dd-bank-empty";
+      empty.textContent = "เติมครบทุกช่องแล้ว — กดคำในช่องเพื่อเอาออก";
+      bank.appendChild(empty);
+    }
+    unused.forEach(function (w) {
+      var chip = makeChip(w.id, null);
+      chip.addEventListener("click", function () {
+        if (suppressClick || chip.disabled) return;
+        tapWord(w.id);
+        feedback.innerHTML = "";
+        render();
+      });
+      bank.appendChild(chip);
+    });
+
+    countEl.textContent = "เติมแล้ว " + filledCount() + "/" + dd.blankIds.length + " ช่อง";
+  }
+
+  render();
+  body.appendChild(wrap);
+  body.appendChild(countEl);
+  body.appendChild(feedback);
+
+  var submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "quiz-modal-continue-btn quiz-modal-submit-btn";
+  submitBtn.textContent = "ส่งคำตอบ";
+  submitBtn.onclick = function () {
+    var missing = dd.blankIds.length - filledCount();
+    if (missing > 0) {
+      feedback.innerHTML = '<p class="quiz-modal-incomplete-warning">เหลืออีก ' + missing + ' ช่อง</p>';
+      return;
+    }
+    feedback.innerHTML = "";
+    var answer = {};
+    dd.blankIds.forEach(function (id) { answer[id] = placements[id]; });
+
+    // ไฮไลต์ถูก/ผิดรายช่อง ทำได้เฉพาะตอนมีเฉลยฝังมาในเครื่อง (ควิซ static)
+    if (question.answerData && question.answerData.correct_map) {
+      Array.prototype.forEach.call(sentence.querySelectorAll("[data-blank]"), function (slot) {
+        var id = slot.getAttribute("data-blank");
+        slot.classList.add(answer[id] === question.answerData.correct_map[id] ? "is-row-correct" : "is-row-incorrect");
+      });
+    }
+    submitStructuredAnswer(question, { placements: answer }, [wrap], submitBtn);
+  };
+  body.appendChild(submitBtn);
+}
+
+// [ให้พกพา] เฉลยของ static quiz ถูกฝังมาใน question.correctIndex ตั้งแต่ตอน generate แล้ว (ดู
+// buildLessonPlayerJs) เลยตรวจในเครื่องได้ทันทีไม่ต้องรอ API — คืน null ถ้าไม่มีเฉลยฝังมา (เช่น
+// random_bank ที่ยังต้องพึ่ง server สุ่ม+ตรวจอยู่ ณ ตอนนี้)
+function computeLocalResult(question, choiceIndex) {
+  if (typeof question.correctIndex !== "number" || question.correctIndex < 0) return null;
+  return {
+    isCorrect: choiceIndex === question.correctIndex,
+    explanation: question.explanation || null,
+  };
+}
+
+// ===== เพิ่มใหม่: ตรวจ matching/sequencing ในเครื่อง (offline) สำหรับควิซ static ระหว่างวิดีโอ —
+// เขียนเลียนแบบ validateMatching()/validateSequencing() ฝั่ง server (src/lib/quiz/validators/) เป๊ะๆ
+// แต่เป็น plain vanilla JS เพราะไฟล์นี้เป็น string template ไม่ใช่โมดูล import จริงไม่ได้ ต้อง copy
+// ตรรกะมาเขียนซ้ำมือ — ถ้าแก้ตรงนี้ ต้องไปแก้ validateMatching/validateSequencing ให้ตรงกันด้วย
+function checkMatchingLocally(answerData, studentAnswer) {
+  if (!answerData || !answerData.pairs || answerData.pairs.length === 0) return false;
+  if (!studentAnswer || !studentAnswer.pairs || !Array.isArray(studentAnswer.pairs)) return false;
+
+  var correctPairs = answerData.pairs;
+  var studentPairs = studentAnswer.pairs;
+  if (studentPairs.length !== correctPairs.length) return false;
+
+  var correctMap = {};
+  correctPairs.forEach(function (p) { correctMap[p.left] = p.right; });
+
+  var isCorrect = studentPairs.every(function (p) { return correctMap[p.left] === p.right; });
+
+  var studentLeftSet = {};
+  studentPairs.forEach(function (p) { studentLeftSet[p.left] = true; });
+  var hasMissingLeft = correctPairs.some(function (p) { return !studentLeftSet[p.left]; });
+
+  return isCorrect && !hasMissingLeft;
+}
+
+// multi_select: ถูกก็ต่อเมื่อชุด index ที่ติ๊ก "เท่ากับ" ชุดเฉลยเป๊ะ (เหมือน validateMultiSelect ฝั่ง server)
+function checkMultiSelectLocally(correctIndexes, studentAnswer) {
+  if (!Array.isArray(correctIndexes) || correctIndexes.length === 0) return false;
+  var picked = studentAnswer && studentAnswer.selectedChoiceIndexes;
+  if (!Array.isArray(picked) || picked.length !== correctIndexes.length) return false;
+  var set = {};
+  picked.forEach(function (i) { set[i] = true; });
+  if (Object.keys(set).length !== picked.length) return false;
+  return correctIndexes.every(function (i) { return set[i] === true; });
+}
+
+// drag_drop: ทุกช่องต้องมีคำ ห้ามใช้คำซ้ำ และต้องตรง correct_map ทุกช่อง (เหมือน validateDragDrop ฝั่ง server)
+function checkDragDropLocally(answerData, studentAnswer) {
+  if (!answerData || !answerData.blanks || !answerData.correct_map) return false;
+  var placements = studentAnswer && studentAnswer.placements;
+  if (!placements || typeof placements !== "object") return false;
+  var used = {};
+  for (var i = 0; i < answerData.blanks.length; i++) {
+    var blankId = answerData.blanks[i].id;
+    var wordId = placements[blankId];
+    if (typeof wordId !== "string" || used[wordId]) return false;
+    used[wordId] = true;
+    if (wordId !== answerData.correct_map[blankId]) return false;
+  }
+  return true;
+}
+
+function checkSequencingLocally(answerData, studentAnswer) {
+  if (!answerData || !answerData.correct_order || answerData.correct_order.length === 0) return false;
+  if (!studentAnswer || !studentAnswer.order || !Array.isArray(studentAnswer.order)) return false;
+
+  var correctOrder = answerData.correct_order;
+  var studentOrder = studentAnswer.order;
+  if (studentOrder.length !== correctOrder.length) return false;
+
+  var correctIdSet = {};
+  correctOrder.forEach(function (id) { correctIdSet[id] = true; });
+  var hasInvalidId = studentOrder.some(function (id) { return !correctIdSet[id]; });
+  if (hasInvalidId) return false;
+
+  return studentOrder.every(function (id, index) { return id === correctOrder[index]; });
+}
+
+// [ให้พกพา] เหมือน computeLocalResult() ข้างบนแต่สำหรับ matching/sequencing — ใช้ question.answerData
+// (เฉลยจริง ฝังมาจาก buildLessonPlayerJs ตอน generate เฉพาะควิซ static เท่านั้น) คืน null ถ้าไม่มี
+// เฉลยฝังมา (เช่น random_bank ที่ยังต้องพึ่ง server ตรวจอยู่ ณ ตอนนี้)
+function computeLocalStructuredResult(question, studentAnswer) {
+  var isCorrect;
+  if (question.interactionType === "multi_select") {
+    if (!Array.isArray(question.correctIndexes)) return null;
+    isCorrect = checkMultiSelectLocally(question.correctIndexes, studentAnswer);
+  } else {
+    if (!question.answerData) return null;
+    isCorrect =
+      question.interactionType === "matching"
+        ? checkMatchingLocally(question.answerData, studentAnswer)
+        : question.interactionType === "drag_drop"
+        ? checkDragDropLocally(question.answerData, studentAnswer)
+        : checkSequencingLocally(question.answerData, studentAnswer);
+  }
+  return {
+    isCorrect: isCorrect,
+    explanation: question.explanation || null,
+  };
+}
+
+// [งานข้อ 11 + ให้พกพา] บันทึกผลตอบลง CMI (interactions/objective/suspend_data) — แยกออกมาจาก
+// การ "แสดงผล" เพื่อให้ทั้งเส้นทางตรวจในเครื่อง (static) และเส้นทางเดิมที่รอ server (random_bank)
+// เรียกใช้ร่วมกันได้ ไม่ต้องเขียนซ้ำสองที่
+// ===== เพิ่มใหม่: interactionKind (พารามิเตอร์ที่ 4) ให้ระบุ cmi.interactions.n.type ตาม
+// interaction_type จริงได้ (เดิม hardcode "choice" เสมอ) — ไม่ส่งมา (undefined) จะ fallback เป็น
+// "choice" เหมือนเดิมทุกอย่าง ไม่กระทบทางเดิม (multiple_choice/true_false/static quiz)
+// SCORM 1.2 cmi.interactions.n.type รับแค่ค่ามาตรฐาน (choice, fill-in, matching, sequencing ฯลฯ) และ
+// student_response ยาวได้ไม่เกิน 255 ตัวอักษร — multi_select ถือเป็น "choice" (หลายคำตอบ), drag_drop เป็น "fill-in"
+function scormInteractionKind(question) {
+  if (question.interactionType === "multi_select") return "choice";
+  if (question.interactionType === "drag_drop") return "fill-in";
+  return question.interactionType;
+}
+
+function scormStudentResponse(question, studentAnswer) {
+  var text;
+  if (question.interactionType === "multi_select") {
+    text = (studentAnswer.selectedChoiceIndexes || []).join(",");
+  } else if (question.interactionType === "drag_drop" && question.dragDrop) {
+    text = question.dragDrop.blankIds.map(function (id) { return (studentAnswer.placements || {})[id] || ""; }).join(",");
+  } else {
+    return JSON.stringify(studentAnswer);
+  }
+  return text.length > 250 ? text.slice(0, 250) : text;
+}
+
+// multi_select ส่งเป็น selectedChoiceIndexes ระดับบนสุด (ตรงกับ API) ส่วนชนิดอื่นส่งเป็น studentAnswer
+function buildStructuredAttemptBody(question, studentAnswer) {
+  if (question.interactionType === "multi_select") {
+    return { questionId: question.id, selectedChoiceIndexes: studentAnswer.selectedChoiceIndexes };
+  }
+  return { questionId: question.id, studentAnswer: studentAnswer };
+}
+
+function recordAnswerLocally(question, responseValue, isCorrect, interactionKind) {
+  // [งานข้อ 11] นับ/เขียน CMI เฉพาะครั้งแรกที่ตอบข้อนี้จริงๆ — กันนับซ้ำถ้าเผลอกดตอบซ้ำ
+  var isNewAnswer = !answeredQuestionIds[question.id];
+
+  answeredQuestionIds[question.id] = true;
+  updateMarkerAnswered(question.id);
+
+  if (isNewAnswer) {
+    quizSummary.total++;
+    if (isCorrect) quizSummary.correct++;
+
+    // cmi.interactions.n.* — บันทึกคู่ขนานทีละข้อ (interaction แยกจาก objective รวม)
+    ScormAPI.setValue("cmi.interactions." + interactionIndex + ".id", String(question.id));
+    ScormAPI.setValue("cmi.interactions." + interactionIndex + ".type", interactionKind || "choice");
+    ScormAPI.setValue("cmi.interactions." + interactionIndex + ".student_response", String(responseValue));
+    ScormAPI.setValue("cmi.interactions." + interactionIndex + ".result", isCorrect ? "correct" : "wrong");
+    interactionIndex++;
+
+    reportQuizSummaryToCmi();
+    // [งานข้อ 21] บันทึกชุดข้อที่ตอบแล้วลง cmi.suspend_data คู่ขนานไปกับ REST — commit
+    // รวมไปกับ setValue อื่นๆ ข้างบนในจังหวะเดียวกันเลย ไม่ยิง commit แยกเพิ่ม
+    saveAnsweredToSuspendData();
+    ScormAPI.commit();
+  }
+
+  return isNewAnswer;
+}
+
+// เดิมโค้ดปุ่ม "เรียนต่อ"/"ลองใหม่" อยู่ท้าย renderAnswerFeedback ตรงๆ — แยกออกมาเพื่อให้
+// renderStructuredFeedback (matching/sequencing เพิ่มใหม่ด้านล่าง) เรียกใช้ซ้ำได้ ไม่ต้องเขียนซ้ำ
+function appendContinueOrRetryButton(feedback, question, result) {
+  var canContinue = !REQUIRE_CORRECT_ANSWER || result.isCorrect;
+
+  if (canContinue) {
+    var continueBtn = document.createElement("button");
+    continueBtn.type = "button";
+    continueBtn.className = "quiz-modal-continue-btn";
+    continueBtn.textContent = "เรียนต่อ";
+    continueBtn.addEventListener("click", closeQuizModal);
+    feedback.appendChild(continueBtn);
+  } else {
+    var retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "quiz-modal-continue-btn";
+    retryBtn.textContent = "ลองใหม่";
+    retryBtn.addEventListener("click", function () {
+      answeredQuestionIds[question.id] = false;
+      openQuizModal(question);
+    });
+    feedback.appendChild(retryBtn);
+  }
+}
+
+// แสดงผลถูก/ผิด + ปุ่มเรียนต่อ/ลองใหม่ — ใช้ร่วมกันทั้งเส้นทางตรวจในเครื่องและเส้นทางรอ server
+function renderAnswerFeedback(question, choiceIndex, choicesWrap, result) {
+  var feedback = document.getElementById("quiz-modal-feedback");
+
+  var chosenBtn = choicesWrap.children[choiceIndex];
+  chosenBtn.classList.add(result.isCorrect ? "correct" : "incorrect");
+
+  feedback.innerHTML = "";
+
+  var resultText = document.createElement("p");
+  resultText.className = "quiz-modal-result-text " + (result.isCorrect ? "is-correct" : "is-incorrect");
+  resultText.textContent = result.isCorrect ? "ตอบถูกต้อง!" : "ตอบไม่ถูกต้อง";
+  feedback.appendChild(resultText);
+
+  if (result.explanation) {
+    var explanation = document.createElement("p");
+    explanation.className = "quiz-modal-explanation";
+    explanation.textContent = result.explanation;
+    feedback.appendChild(explanation);
+  }
+
+  appendContinueOrRetryButton(feedback, question, result);
+}
+
+// ===== เพิ่มใหม่: matching/sequencing มีปุ่ม "ส่งคำตอบ" ของตัวเองอยู่แล้วก่อนหน้านี้ (ไม่เหมือน MC/
+// True-False ที่ "คลิกตัวเลือก" = ส่งคำตอบทันที ไม่มีปุ่มแยก) — เดิมพอส่งคำตอบแล้ว ปุ่มนั้นจะถูก
+// disabled ค้างเป็นสีเทาอยู่ใต้ฟีดแบ็ก แล้วมีการสร้างปุ่ม "เรียนต่อ"/"ลองใหม่" ใหม่อีกตัวซ้อนขึ้นมา
+// (เห็นเป็น 2 ปุ่มคนละขนาดคนละตำแหน่ง) ตอนนี้เปลี่ยนมา "เปลี่ยนปุ่มเดิมในที่เดิม" ให้กลายเป็น
+// "เรียนต่อ"/"ลองใหม่" แทน (ขนาด/ตำแหน่งเดิมเป๊ะ เพราะยังเป็นปุ่มตัวเดียวกัน) ไม่มีปุ่มเทาค้างให้เห็นอีก
+// — ใช้ได้เพราะปุ่มส่งคำตอบของ matching/sequencing ผูก handler ด้วย .onclick (ไม่ใช่ addEventListener)
+// ไว้ตั้งแต่สร้าง ทำให้แทนที่ตรงนี้ได้สะอาดๆ ไม่มี handler เดิมค้างซ้อนอยู่
+function applyContinueOrRetryToButton(btn, question, result) {
+  var canContinue = !REQUIRE_CORRECT_ANSWER || result.isCorrect;
+  btn.disabled = false;
+  if (canContinue) {
+    btn.textContent = "เรียนต่อ";
+    btn.onclick = closeQuizModal;
+  } else {
+    btn.textContent = "ลองใหม่";
+    btn.onclick = function () {
+      answeredQuestionIds[question.id] = false;
+      openQuizModal(question);
+    };
+  }
+}
+
+// ===== เพิ่มใหม่: matching/sequencing ไม่มี "ปุ่มตัวเลือกที่กด" ให้ไฮไลต์แบบ choicesWrap เดิม —
+// แค่ disable ตัวควบคุมคำตอบ (answerEls — select/drag handle) แล้วโชว์ผลเหมือน renderAnswerFeedback
+// ส่วนปุ่มส่งคำตอบ (submitBtn) ไม่ปนอยู่ใน answerEls แล้ว เพราะต้อง "เปลี่ยนสถานะ" ต่อ (ดูฟังก์ชัน
+// applyContinueOrRetryToButton ด้านบน) ไม่ใช่แค่ disabled ทิ้งไว้เหมือนตัวควบคุมคำตอบตัวอื่น
+function renderStructuredFeedback(question, answerEls, submitBtn, result) {
+  answerEls.forEach(function (el) {
+    if (!el) return;
+    Array.prototype.forEach.call(el.querySelectorAll("select, button"), function (control) { control.disabled = true; });
+  });
+
+  var feedback = document.getElementById("quiz-modal-feedback");
+  feedback.innerHTML = "";
+
+  var resultText = document.createElement("p");
+  resultText.className = "quiz-modal-result-text " + (result.isCorrect ? "is-correct" : "is-incorrect");
+  resultText.textContent = result.isCorrect ? "ตอบถูกต้อง!" : "ตอบไม่ถูกต้อง";
+  feedback.appendChild(resultText);
+
+  if (result.explanation) {
+    var explanation = document.createElement("p");
+    explanation.className = "quiz-modal-explanation";
+    explanation.textContent = result.explanation;
+    feedback.appendChild(explanation);
+  }
+
+  applyContinueOrRetryToButton(submitBtn, question, result);
+}
+
+// ===== เพิ่มใหม่: ส่งคำตอบ matching/sequencing ไปตรวจ — แต่เดิม (Pop-up Quiz แบบสุ่มจากคลังข้อสอบ
+// sourceType "random_bank") ไม่มีเฉลยฝังในเครื่อง ต้องรอ server ตรวจเสมอ ตอนนี้ควิซ static ระหว่าง
+// วิดีโอ (quiz_questions) ฝัง answerData เฉลยจริงมาด้วยแล้ว (ดู buildLessonPlayerJs) เลยตรวจในเครื่อง
+// ได้ทันทีเหมือน submitAnswer/computeLocalResult — ส่วน POST ไป server ยังยิงอยู่เหมือนเดิมแต่
+// เปลี่ยนเป็น fire-and-forget (เก็บสถิติเฉยๆ ไม่รอผล ไม่ retry) พังก็ไม่กระทบผู้เรียน
+function submitStructuredAnswer(question, studentAnswer, answerEls, submitBtn, attempt) {
+  attempt = attempt || 0;
+  answerEls.forEach(function (el) {
+    if (!el) return;
+    Array.prototype.forEach.call(el.querySelectorAll("select, button"), function (control) { control.disabled = true; });
+  });
+  // ===== เพิ่มใหม่: submitBtn ไม่ปนอยู่ใน answerEls อีกแล้ว (ต้องเปลี่ยนสถานะเป็น "เรียนต่อ"/"ลองใหม่"
+  // ต่อ ไม่ใช่ disabled ค้างทิ้งไว้) — disable ไว้ชั่วคราวระหว่างรอผลเฉยๆ กันกดซ้ำ แล้วเปิดกลับคืนให้
+  // เสมอตอนได้ผลแล้ว (ในฟังก์ชัน applyContinueOrRetryToButton) ไม่ว่าจะทางตรวจในเครื่องหรือรอ server
+  submitBtn.disabled = true;
+
+  var feedback = document.getElementById("quiz-modal-feedback");
+
+  var localStructuredResult = computeLocalStructuredResult(question, studentAnswer);
+  if (localStructuredResult) {
+    recordAnswerLocally(question, scormStudentResponse(question, studentAnswer), localStructuredResult.isCorrect, scormInteractionKind(question));
+    renderStructuredFeedback(question, answerEls, submitBtn, localStructuredResult);
+
+    // เก็บสถิติไว้ให้ครูดูใน dashboard เฉยๆ — ไม่รอผล ไม่ retry ไม่บล็อก UI ถ้าเรียกไม่ได้
+    fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildStructuredAttemptBody(question, studentAnswer)),
+    }).catch(function (err) {
+      console.warn("[stats] บันทึกสถิติไม่สำเร็จ (ไม่กระทบผู้เรียน)", err);
+    });
+    return;
+  }
+
+  // ---- เส้นทางเดิม: ไม่มีเฉลยฝังในเครื่อง (ตอนนี้คือ random_bank) ต้องพึ่ง server ตรวจเหมือนเดิม ----
+  if (attempt > 0) {
+    feedback.innerHTML = '<p class="quiz-modal-hint">สัญญาณอินเทอร์เน็ตช้าไปนิด กำลังลองส่งคำตอบให้อีกครั้ง...</p>';
+  }
+
+  fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(buildStructuredAttemptBody(question, studentAnswer)),
+  })
+    .then(function (result) {
+      recordAnswerLocally(question, scormStudentResponse(question, studentAnswer), result.isCorrect, scormInteractionKind(question));
+      renderStructuredFeedback(question, answerEls, submitBtn, result);
+    })
+    .catch(function (err) {
+      console.error("Failed to submit structured answer (attempt " + (attempt + 1) + ")", err);
+      if (attempt < 1) {
+        setTimeout(function () {
+          submitStructuredAnswer(question, studentAnswer, answerEls, submitBtn, attempt + 1);
+        }, 1200);
+        return;
+      }
+      feedback.innerHTML =
+        '<p class="quiz-modal-error">เชื่อมต่อไม่สำเร็จ อินเทอร์เน็ตหรือระบบอาจไม่เสถียรชั่วคราว ลองส่งคำตอบอีกครั้ง หรือตรวจสอบสัญญาณอินเทอร์เน็ตของคุณ</p>';
+      answerEls.forEach(function (el) {
+        if (!el) return;
+        Array.prototype.forEach.call(el.querySelectorAll("select, button"), function (control) { control.disabled = false; });
+      });
+      submitBtn.disabled = false;
+    });
+}
+
 // [แก้บั๊ก: ส่งคำตอบไม่สำเร็จแล้วค้าง] ถ้า POST ล้มเหลวเพราะเน็ต/เซิร์ฟเวอร์สะดุดชั่วครู่ (เช่น Supabase
 // free-tier หน่วงเป็นพักๆ) เดิมจะโชว์ error ทันทีรอบเดียว ผู้เรียนต้องกดตอบเองซ้ำทุกครั้ง — ถ้าจังหวะนั้น
 // เน็ตแกว่งพอดีอาจต้องกดวนหลายรอบ กว่าจะหลุด ตอนนี้เพิ่ม retry อัตโนมัติให้ 1 ครั้งก่อน (หน่วง 1.2 วิ
 // สั้นพอไม่ทำให้รอนาน และไม่ยิง request รัวจนหนักเซิร์ฟเวอร์) ถ้ายังไม่สำเร็จอีกถึงค่อยโชว์ error ให้กดเอง
+// [ให้พกพา] ถ้าคำถามนี้ฝัง correctIndex มาด้วย (static quiz) ตัดจบด้วยการตรวจในเครื่องทันที ไม่ต้องรอ
+// API เลย ส่วน POST ไป server ยังยิงอยู่เหมือนเดิมแต่เปลี่ยนเป็น "เก็บสถิติเฉยๆ แบบไม่รอผล" (fire-and-
+// forget) — พังก็ไม่กระทบผู้เรียน ต่างจากเดิมที่ทุกคำตอบต้องรอ server ตัดสินก่อนเห็นผล
 function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
   attempt = attempt || 0;
   Array.prototype.forEach.call(choicesWrap.children, function (btn) { btn.disabled = true; });
   var feedback = document.getElementById("quiz-modal-feedback");
+
+  var localResult = computeLocalResult(question, choiceIndex);
+  if (localResult) {
+    recordAnswerLocally(question, choiceIndex, localResult.isCorrect);
+    renderAnswerFeedback(question, choiceIndex, choicesWrap, localResult);
+
+    // เก็บสถิติไว้ให้ครูดูใน dashboard เฉยๆ — ไม่รอผล ไม่ retry ไม่บล็อก UI ถ้าเรียกไม่ได้
+    // (เช่นเปิดแพ็กเกจนี้บน LMS อื่นที่เรียก API เว็บเราไม่ได้) ผู้เรียนก็ยังตอบคำถามได้ตามปกติ
+    fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId: question.id, selectedChoiceIndex: choiceIndex }),
+    }).catch(function (err) {
+      console.warn("[stats] บันทึกสถิติไม่สำเร็จ (ไม่กระทบผู้เรียน)", err);
+    });
+    return;
+  }
+
+  // ---- เส้นทางเดิม: ไม่มีเฉลยฝังในเครื่อง (ตอนนี้คือ random_bank) ต้องพึ่ง server ตรวจเหมือนเดิม ----
   if (attempt > 0) {
     feedback.innerHTML = "<p class=\\"quiz-modal-hint\\">สัญญาณอินเทอร์เน็ตช้าไปนิด กำลังลองส่งคำตอบให้อีกครั้ง...</p>";
   }
@@ -496,68 +1678,8 @@ function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
     body: JSON.stringify({ questionId: question.id, selectedChoiceIndex: choiceIndex }),
   })
     .then(function (result) {
-      // [งานข้อ 11] นับ/เขียน CMI เฉพาะครั้งแรกที่ตอบข้อนี้จริงๆ — กันนับซ้ำถ้าเผลอกดตอบซ้ำ
-      // (video_quiz_attempts ก็ upsert คีย์เดียวกันนี้ ไม่สร้างแถวซ้ำเหมือนกัน)
-      var isNewAnswer = !answeredQuestionIds[question.id];
-
-      answeredQuestionIds[question.id] = true;
-      updateMarkerAnswered(question.id);
-
-      if (isNewAnswer) {
-        quizSummary.total++;
-        if (result.isCorrect) quizSummary.correct++;
-
-        // cmi.interactions.n.* — บันทึกคู่ขนานทีละข้อ (interaction แยกจาก objective รวม)
-        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".id", String(question.id));
-        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".type", "choice");
-        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".student_response", String(choiceIndex));
-        ScormAPI.setValue("cmi.interactions." + interactionIndex + ".result", result.isCorrect ? "correct" : "wrong");
-        interactionIndex++;
-
-        reportQuizSummaryToCmi();
-        // [งานข้อ 21] บันทึกชุดข้อที่ตอบแล้วลง cmi.suspend_data คู่ขนานไปกับ REST — commit
-        // รวมไปกับ setValue อื่นๆ ข้างบนในจังหวะเดียวกันเลย ไม่ยิง commit แยกเพิ่ม
-        saveAnsweredToSuspendData();
-        ScormAPI.commit();
-      }
-
-      var chosenBtn = choicesWrap.children[choiceIndex];
-      chosenBtn.classList.add(result.isCorrect ? "correct" : "incorrect");
-
-      feedback.innerHTML = "";
-
-      var resultText = document.createElement("p");
-      resultText.className = "quiz-modal-result-text " + (result.isCorrect ? "is-correct" : "is-incorrect");
-      resultText.textContent = result.isCorrect ? "ตอบถูกต้อง!" : "ตอบไม่ถูกต้อง";
-      feedback.appendChild(resultText);
-
-      if (result.explanation) {
-        var explanation = document.createElement("p");
-        explanation.className = "quiz-modal-explanation";
-        explanation.textContent = result.explanation;
-        feedback.appendChild(explanation);
-      }
-
-      var canContinue = !REQUIRE_CORRECT_ANSWER || result.isCorrect;
-
-      if (canContinue) {
-        var continueBtn = document.createElement("button");
-        continueBtn.type = "button";
-        continueBtn.className = "quiz-modal-continue-btn";
-        continueBtn.textContent = "เรียนต่อ";
-        continueBtn.addEventListener("click", closeQuizModal);
-        feedback.appendChild(continueBtn);
-      } else {
-        var retryBtn = document.createElement("button");
-        retryBtn.type = "button";
-        retryBtn.className = "quiz-modal-continue-btn";
-        retryBtn.textContent = "ลองใหม่";
-        retryBtn.addEventListener("click", function () {
-          answeredQuestionIds[question.id] = false;
-          openQuizModal(question);
-        });
-        feedback.appendChild(retryBtn);
-      }
+      recordAnswerLocally(question, choiceIndex, result.isCorrect);
+      renderAnswerFeedback(question, choiceIndex, choicesWrap, result);
     })
     .catch(function (err) {
       console.error("Failed to submit answer (attempt " + (attempt + 1) + ")", err);
@@ -583,6 +1705,8 @@ function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
 // ไม่ให้เรียนต่อจนกว่าจะตอบ) ผู้เรียนต้องกด "เล่น" เองอีกทีถึงจะเจอคำถามเดิมขึ้นมาให้ตอบใหม่ ส่วนกรณี
 // ตอบแล้ว (กดจากปุ่ม "เรียนต่อ") ยังคงเล่นวิดีโอต่อให้อัตโนมัติเหมือนเดิม ไม่กระทบพฤติกรรมเดิม
 function closeQuizModal() {
+  // ปิด modal ทั้งที่ sequencing drag listener อาจยังค้างอยู่ (เช่นกดปิดกลาง-ลาก) ต้องเคลียร์ทิ้งด้วย
+  if (typeof activeDragCleanup === "function") { activeDragCleanup(); }
   var overlay = document.getElementById("quiz-overlay");
   overlay.classList.remove("open");
   var question = pendingQuestion;
@@ -742,6 +1866,41 @@ function showResumePrompt(video, resumeSeconds) {
   });
 }
 
+/* ---------------- Still-watching check ---------------- */
+
+// [ยังเรียนอยู่ไหม] ตั้ง timer ใหม่ทุกครั้งที่วิดีโอเริ่มเล่น (ทั้งกดเล่นครั้งแรกและกดเรียนต่อหลัง
+// ปิด popup อื่นๆ เช่นควิซ/resume) ครบ 5 นาทีที่เล่นต่อเนื่องไม่มี pause คั่นเลย ถึงจะเด้งถาม
+// ถ้าระหว่างทางถูก pause ด้วยเหตุอื่น (ควิซ, จบ chapter, ผู้เรียนกด pause เอง) timer จะถูกเคลียร์
+// แล้วเริ่มนับใหม่ตอนกดเล่นต่อ — ไม่มีทางเด้งพร้อมกับ popup อื่นเพราะวิดีโอต้อง "เล่นอยู่" เท่านั้น
+// ถึงจะนับเวลาได้
+function startStillWatchingTimer(video) {
+  stopStillWatchingTimer();
+  stillWatchingTimer = setTimeout(function () {
+    video.pause();
+    showStillWatchingPrompt(video);
+  }, STILL_WATCHING_INTERVAL_MS);
+}
+
+function stopStillWatchingTimer() {
+  if (stillWatchingTimer) {
+    clearTimeout(stillWatchingTimer);
+    stillWatchingTimer = null;
+  }
+}
+
+function showStillWatchingPrompt(video) {
+  var overlay = document.getElementById("still-watching-overlay");
+  overlay.classList.add("open");
+
+  var yesBtn = document.getElementById("btn-still-watching-yes");
+  function onYes() {
+    overlay.classList.remove("open");
+    yesBtn.removeEventListener("click", onYes);
+    video.play();
+  }
+  yesBtn.addEventListener("click", onYes);
+}
+
 /* ---------------- Video behavior ---------------- */
 
 function attachVideoBehavior(video) {
@@ -775,6 +1934,7 @@ function attachVideoBehavior(video) {
   });
 
   video.addEventListener("play", function () {
+    startStillWatchingTimer(video);
     if (!savePositionTimer) {
       savePositionTimer = setInterval(function () {
         if (Math.abs(video.currentTime - lastSavedPosition) >= 1) {
@@ -804,6 +1964,7 @@ function attachVideoBehavior(video) {
 
   video.addEventListener("pause", function () {
     stopSavePositionTimer();
+    stopStillWatchingTimer();
     lastSavedPosition = video.currentTime;
     savePosition(video.currentTime);
     ScormAPI.commit();
@@ -811,6 +1972,7 @@ function attachVideoBehavior(video) {
 
   video.addEventListener("ended", function () {
     stopSavePositionTimer();
+    stopStillWatchingTimer();
     lastSavedPosition = video.currentTime;
     savePosition(video.currentTime);
     ScormAPI.setValue("cmi.core.lesson_status", "completed");
@@ -819,6 +1981,7 @@ function attachVideoBehavior(video) {
 
   window.addEventListener("beforeunload", function () {
     stopSavePositionTimer();
+    stopStillWatchingTimer();
     savePosition(video.currentTime);
     // [งานข้อ 22] ต้อง setValue ทั้ง session_time และ exit ก่อน commit/LMSFinish เสมอ — LMSFinish
     // ไม่รับประกันว่าจะ commit ค่าที่ setValue ไว้ก่อนหน้าให้อัตโนมัติตามสเปก จึง commit เองให้ชัดเจน
@@ -988,6 +2151,17 @@ const LESSON_HTML = `<!DOCTYPE html>
       <div class="resume-actions">
         <button id="btn-resume-yes" type="button" class="resume-primary-btn">เล่นต่อ</button>
         <button id="btn-resume-no" type="button" class="resume-secondary-btn">เริ่มใหม่ตั้งแต่ต้น</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ยังเรียนอยู่ไหม — เด้งทุก 5 นาทีที่วิดีโอเล่นต่อเนื่อง กันเปิดทิ้งไว้เฉยๆ -->
+  <div id="still-watching-overlay" class="quiz-overlay">
+    <div class="quiz-modal resume-modal">
+      <p class="resume-title">ยังเรียนอยู่ไหม?</p>
+      <p class="resume-subtext">กดเรียนต่อเพื่อดูวิดีโอต่อ</p>
+      <div class="resume-actions">
+        <button id="btn-still-watching-yes" type="button" class="resume-primary-btn">เรียนต่อ</button>
       </div>
     </div>
   </div>
@@ -1223,7 +2397,22 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 }
 .quiz-modal-close-btn:hover { background: #F1F5F9; color: #334155; }
 
-.quiz-modal-question { font-weight: 700; font-size: 16px; margin: 0 0 16px; color: #0F1B3D; }
+.quiz-modal-image { display: block; width: 100%; max-height: 240px; object-fit: contain; border-radius: 12px; background: #F1F5F9; }
+/* ===== เพิ่มใหม่: wrapper ครอบรูป+หมุดตัวเลข / คำบรรยายใต้ภาพ ===== */
+.quiz-modal-image-wrap { position: relative; margin: 0 0 6px; }
+.quiz-modal-image-pin { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 999px; background: #FF5A3C; color: #fff; font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px #fff; transition: transform .15s ease, background .15s ease, box-shadow .15s ease; }
+/* ===== เพิ่มใหม่: หมุดบนภาพ "คุยกับ" แถวในรายการ matching — เรืองแสง/ขยายตอน hover/focus แถวที่คู่กัน
+(.is-active) เปลี่ยนจากส้มเป็นน้ำเงินตอนแถวนั้นถูกจับคู่แล้ว (.is-matched) และกดได้ถ้ามีแถวที่คู่กันอยู่
+(.is-linkable) — ดู renderMatchingBody ===== */
+.quiz-modal-image-pin.is-linkable { cursor: pointer; }
+.quiz-modal-image-pin.is-active { transform: translate(-50%, -50%) scale(1.35); box-shadow: 0 0 0 3px #fff, 0 0 0 7px rgba(255,90,60,0.35); }
+.quiz-modal-image-pin.is-matched { background: #0F1B3D; }
+.quiz-modal-image-pin.is-matched.is-active { box-shadow: 0 0 0 3px #fff, 0 0 0 7px rgba(15,27,61,0.35); }
+.quiz-modal-image-caption { font-size: 12px; color: rgba(15,27,61,0.5); margin: 0 0 16px; text-align: center; }
+.quiz-modal-question { font-weight: 800; font-size: 16.5px; margin: 0 0 4px; color: #0F1B3D; }
+/* ===== เพิ่มใหม่: sub-text อธิบายวิธีตอบของ matching/sequencing (เหมือน Final Exam) — เข้มขึ้นจากเดิม
+(0.45 opacity, 12.5px) ให้อ่านชัดขึ้น ===== */
+.quiz-modal-subtext { font-size: 13px; font-weight: 500; color: rgba(15,27,61,0.6); margin: 0 0 16px; }
 .quiz-modal-choices { display: flex; flex-direction: column; gap: 8px; }
 .quiz-modal-choice-btn {
   text-align: left;
@@ -1240,6 +2429,205 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
 .quiz-modal-choice-btn.correct { border-color: #34D399; background: #ECFDF5; font-weight: 600; }
 .quiz-modal-choice-btn.incorrect { border-color: #F87171; background: #FEF2F2; font-weight: 600; }
 .quiz-modal-choice-btn:disabled { cursor: default; opacity: 0.85; }
+
+/* ===== เพิ่มใหม่: matching (จับคู่) — วงกลมเลข + การ์ดฝั่งซ้าย + เส้นประเชื่อม + dropdown ที่เป็นสี
+accent (navy) เมื่อ "เลือกแล้ว" (ยังไม่ส่งคำตอบ) — เขียว/แดงเก็บไว้ใช้เฉพาะหลังส่งคำตอบเท่านั้น ===== */
+.quiz-modal-matching { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.quiz-modal-matching-row { display: flex; align-items: center; gap: 8px; }
+/* ===== เพิ่มใหม่: วงกลมเลขสีส้ม สไตล์เดียวกับหมุดบนภาพ แทนกล่องขาวที่มีแต่เลข/ข้อความเฉยๆ — ตาจะได้
+ลิงก์เลขบนแถวกับเลขหมุดบนภาพเข้าด้วยกันเอง เปลี่ยนเป็นน้ำเงินตอนแถวนั้นถูกจับคู่แล้ว ===== */
+.quiz-modal-matching-badge {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #FF5A3C;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s ease, box-shadow .15s ease;
+}
+.quiz-modal-matching-badge.is-matched { background: #0F1B3D; }
+.quiz-modal-matching-left {
+  flex: 1 1 40%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #E5E7EB;
+  background: #F7F8FA;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0F1B3D;
+  transition: border-color .15s ease;
+}
+/* ===== เพิ่มใหม่: เส้นประไม่มีความหมายตอนยังว่าง — กลายเป็นเส้นทึบมีจุดปลายสีเดียวกันตอนจับคู่แล้ว
+เหมือนได้ "ต่อสาย" จริงๆ ===== */
+.quiz-modal-matching-connector { position: relative; flex: 0 0 18px; height: 0; border-top: 2px dashed #CBD5E1; transition: border-color .15s ease; }
+.quiz-modal-matching-connector::after { content: ""; position: absolute; right: -3px; top: -4px; width: 7px; height: 7px; border-radius: 999px; background: #CBD5E1; transition: background .15s ease; }
+.quiz-modal-matching-connector.is-filled { border-top-style: solid; border-color: #0F1B3D; }
+.quiz-modal-matching-connector.is-filled::after { background: #0F1B3D; }
+.quiz-modal-matching-select {
+  flex: 1 1 45%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #E5E7EB;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: #0F1B3D;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+/* ===== เพิ่มใหม่: "เลือกแล้ว" (ยังไม่ส่งคำตอบ) ใช้สี accent (navy) แทนเขียว กันเข้าใจผิดว่า "ถูกแล้ว"
+ก่อนตรวจ ===== */
+.quiz-modal-matching-select.is-filled { border-color: #0F1B3D; background: rgba(15,27,61,0.06); color: #0F1B3D; font-weight: 600; }
+.quiz-modal-matching-select:disabled { cursor: default; opacity: 0.85; }
+/* ===== เพิ่มใหม่: ขอบโฟกัสบางๆ สี accent แทนขอบดำหนาของ browser default ===== */
+.quiz-modal-matching-select:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,27,61,0.18); border-color: #0F1B3D; }
+/* ===== เพิ่มใหม่: แถวที่ hover/focus อยู่ — ไฮไลต์เบาๆ ให้รู้ว่ากำลังโฟกัสแถวไหน (คู่กับหมุดบนภาพที่
+เรืองแสงพร้อมกัน — ดู .quiz-modal-image-pin.is-active) ===== */
+.quiz-modal-matching-row.is-active .quiz-modal-matching-left { border-color: rgba(15,27,61,0.35); }
+.quiz-modal-matching-row.is-active .quiz-modal-matching-badge:not(.is-matched) { box-shadow: 0 0 0 3px rgba(255,90,60,0.25); }
+/* ===== เพิ่มใหม่: ไฮไลต์ถูก/ผิดเป็นรายคู่หลังส่งคำตอบ (บอกชัดว่าคู่ไหนผิดบ้าง) — เขียว/แดงสงวนไว้ใช้
+ตรงนี้เท่านั้น ===== */
+.quiz-modal-matching-row.is-row-correct .quiz-modal-matching-left,
+.quiz-modal-matching-row.is-row-correct .quiz-modal-matching-select { border-color: #6EE7B7; background: rgba(16,185,129,0.08); }
+.quiz-modal-matching-row.is-row-incorrect .quiz-modal-matching-left,
+.quiz-modal-matching-row.is-row-incorrect .quiz-modal-matching-select { border-color: #FCA5A5; background: rgba(239,68,68,0.08); color: #B91C1C; }
+/* ===== เพิ่มใหม่: หัวข้อ "จับคู่แล้ว N/4" + แถบ progress แบ่งช่อง ===== */
+.quiz-modal-matching-progress { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.quiz-modal-matching-progress-label { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: rgba(15,27,61,0.55); white-space: nowrap; }
+.quiz-modal-matching-progress-bar { flex: 1 1 auto; display: flex; gap: 4px; }
+.quiz-modal-matching-progress-seg { flex: 1 1 0; height: 4px; border-radius: 999px; background: #E5E7EB; transition: background .15s ease; }
+.quiz-modal-matching-progress-seg.is-filled { background: #0F1B3D; }
+/* ===== เพิ่มใหม่: กดปุ่ม "ส่งคำตอบ" ทั้งที่ตอบไม่ครบ — ข้อความแดงเตือน + แถวว่างสั่นเบาๆ แทนการ
+disable ปุ่มเฉยๆ ===== */
+.quiz-modal-incomplete-warning { color: #DC2626; font-size: 13px; font-weight: 700; margin: 0; }
+@keyframes quiz-modal-row-shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+.quiz-modal-matching-row.is-shake { animation: quiz-modal-row-shake 0.4s ease; }
+
+/* ===== เพิ่มใหม่: sequencing (เรียงลำดับ) — ลาก-วางจริงด้วย drag handle จุด 6 จุด ===== */
+.quiz-modal-sequencing-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.quiz-modal-sequencing-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #E5E7EB;
+  background: #fff;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.quiz-modal-sequencing-row.is-dragging { border-color: #FF5A3C; box-shadow: 0 6px 16px rgba(15,27,61,0.14); cursor: grabbing; }
+.quiz-modal-sequencing-badge {
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1.5px solid #FF5A3C;
+  color: #FF5A3C;
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.quiz-modal-sequencing-text { flex: 1 1 auto; min-width: 0; font-size: 13.5px; color: #0F1B3D; }
+.quiz-modal-sequencing-handle {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: none;
+  background: #F1F5F9;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.quiz-modal-sequencing-handle:hover { background: #E5E7EB; color: #334155; }
+/* ===== เพิ่มใหม่: ขอบโฟกัสบางๆ สี accent แทนขอบดำหนาของ browser default (เหมือนที่ปรับใน
+.quiz-modal-matching-select) ===== */
+.quiz-modal-sequencing-handle:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,27,61,0.18); }
+.quiz-modal-sequencing-handle:disabled { cursor: default; opacity: 0.6; }
+/* ===== เพิ่มใหม่: ไฮไลต์ถูก/ผิดเป็นรายข้อหลังส่งคำตอบ (บอกชัดว่าข้อไหนผิดบ้าง) ===== */
+.quiz-modal-sequencing-row.is-row-correct { border-color: #6EE7B7; background: rgba(16,185,129,0.08); }
+.quiz-modal-sequencing-row.is-row-correct .quiz-modal-sequencing-badge { border-color: #10B981; color: #059669; }
+.quiz-modal-sequencing-row.is-row-incorrect { border-color: #FCA5A5; background: rgba(239,68,68,0.08); }
+.quiz-modal-sequencing-row.is-row-incorrect .quiz-modal-sequencing-badge { border-color: #EF4444; color: #DC2626; }
+.quiz-modal-sequencing-row.is-row-incorrect .quiz-modal-sequencing-text { color: #B91C1C; }
+/* ===== เพิ่มใหม่: ไอคอน ✓/✕ ท้ายแถว matching/sequencing หลังส่งคำตอบ ===== */
+.quiz-modal-row-icon { flex: 0 0 auto; font-size: 15px; font-weight: 800; line-height: 1; }
+.quiz-modal-row-icon.is-correct { color: #059669; }
+.quiz-modal-row-icon.is-incorrect { color: #DC2626; }
+
+/* ===== เพิ่มใหม่: ปุ่ม "ส่งคำตอบ" ของ matching/sequencing (ต้องรอเลือก/จัดเรียงครบก่อนถึงส่งได้) ===== */
+.quiz-modal-submit-btn { width: 100%; text-align: center; }
+.quiz-modal-submit-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ===== เพิ่มใหม่: multi_select (เลือกได้หลายคำตอบ) — ปุ่มตัวเลือกมีช่องติ๊กทางซ้าย ===== */
+.quiz-modal-multi-btn { display: flex; align-items: center; gap: 10px; width: 100%; }
+.quiz-modal-multi-box {
+  flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; border: 2px solid #CBD5E1; background: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #fff; line-height: 1;
+}
+.quiz-modal-multi-label { flex: 1 1 auto; min-width: 0; }
+.quiz-modal-multi-btn.is-selected { border-color: #FF5A3C; background: #FFF7F5; }
+.quiz-modal-multi-btn.is-selected .quiz-modal-multi-box { border-color: #FF5A3C; background: #FF5A3C; }
+.quiz-modal-multi-btn.correct .quiz-modal-multi-box { border-color: #10B981; background: #10B981; }
+.quiz-modal-multi-btn.correct .quiz-modal-multi-box:empty::after { content: "✓"; }
+.quiz-modal-multi-btn.incorrect .quiz-modal-multi-box { border-color: #EF4444; background: #EF4444; }
+.quiz-modal-multi-btn.incorrect .quiz-modal-multi-box:empty::after { content: "✕"; }
+.quiz-modal-multi-count { font-size: 12px; font-weight: 600; color: rgba(15,27,61,0.45); margin: 8px 0 12px; }
+
+/* ===== เพิ่มใหม่: drag_drop (เติมคำลงช่องว่าง) — คลังคำ + ช่องว่างในประโยค ธีม navy/ส้ม ===== */
+.quiz-modal-dd-sentence {
+  white-space: pre-wrap; font-size: 14.5px; line-height: 2.6; color: #0F1B3D;
+  background: #fff; border: 1.5px solid #E5E7EB; border-radius: 12px; padding: 12px 14px;
+}
+.quiz-modal-dd-blank {
+  display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
+  min-width: 84px; min-height: 36px; margin: 0 3px; padding: 0 4px;
+  border: 2px dashed rgba(15,27,61,0.3); border-radius: 10px; background: #fff; transition: all .15s ease;
+}
+.quiz-modal-dd-blank.is-active { border-style: solid; border-color: #FF5A3C; background: rgba(255,90,60,0.06); }
+.quiz-modal-dd-blank.is-over { border-style: solid; border-color: #FF5A3C; background: rgba(255,90,60,0.15); }
+.quiz-modal-dd-blank.is-filled { border-style: solid; border-color: #FF5A3C; background: rgba(255,90,60,0.1); }
+.quiz-modal-dd-blank.is-row-correct { border-color: #6EE7B7; background: rgba(16,185,129,0.1); }
+.quiz-modal-dd-blank.is-row-incorrect { border-color: #FCA5A5; background: rgba(239,68,68,0.1); }
+.quiz-modal-dd-empty {
+  min-width: 76px; height: 30px; border: none; background: transparent; font-family: inherit;
+  font-size: 12px; font-weight: 700; color: rgba(15,27,61,0.35); cursor: pointer; border-radius: 8px;
+}
+.quiz-modal-dd-bank {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding: 12px; min-height: 58px;
+  background: #F7F8FA; border-radius: 12px;
+}
+.quiz-modal-dd-bank-empty { align-self: center; font-size: 12.5px; color: rgba(15,27,61,0.4); }
+.quiz-modal-dd-chip {
+  padding: 6px 14px; border-radius: 9px; border: 1.5px solid rgba(15,27,61,0.15); background: #fff;
+  font-family: inherit; font-size: 13.5px; font-weight: 700; color: #0F1B3D; cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 1px 2px rgba(15,27,61,0.06);
+}
+.quiz-modal-dd-chip:hover:not(:disabled) { border-color: #FF5A3C; }
+.quiz-modal-dd-chip.is-placed { border-color: transparent; background: transparent; box-shadow: none; }
+.quiz-modal-dd-chip.is-dragging { opacity: 0.3; }
+.quiz-modal-dd-chip:disabled, .quiz-modal-dd-empty:disabled { cursor: default; opacity: 0.85; }
+.quiz-modal-dd-ghost {
+  position: fixed; z-index: 100000; pointer-events: none; transform: translate(-50%, -50%);
+  padding: 6px 14px; border-radius: 9px; background: #FF5A3C; color: #fff; font-size: 13.5px; font-weight: 700;
+  box-shadow: 0 8px 20px rgba(15,27,61,0.25);
+}
 
 .quiz-modal-feedback { margin-top: 16px; }
 .quiz-modal-result-text { font-weight: 700; font-size: 14.5px; margin: 0 0 6px; }
@@ -1535,7 +2923,7 @@ export async function generateScormPackage(
   const { data: questions, error: questionsError } = await supabase
     .from("quiz_questions")
     .select(
-      "id, question_text, order_index, video_timestamp_seconds, explanation, quiz_choices(choice_text, is_correct, order_index)"
+      "id, question_text, order_index, video_timestamp_seconds, explanation, image_url, image_caption, image_pins, interaction_type, answer_data, quiz_choices(choice_text, is_correct, order_index)"
     )
     .eq("lesson_draft_id", draftId)
     .order("order_index", { ascending: true });

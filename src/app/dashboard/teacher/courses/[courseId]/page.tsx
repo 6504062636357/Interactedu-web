@@ -164,14 +164,14 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
                 บททดสอบท้ายคอร์ส
                 {readiness.examIssue && <span className="ml-1.5 text-red-400">*</span>}
               </Link>
-              <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new`} className="shrink-0 rounded-full bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">+ เพิ่มบทเรียนใหม่</Link>
+              <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new`} className="shrink-0 rounded-full border border-transparent bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">+ เพิ่มบทเรียนใหม่</Link>
               {course.status !== "published" && (
                 <SubmitCourseButton courseId={course.id} ready={readiness.ready} />
               )}
                 </>
               )}
               {course.status === "draft" && (
-                <CourseLifecycleButton courseId={course.id} courseTitle={course.title} mode="delete" redirectTo="/dashboard/teacher/courses" />
+                <CourseLifecycleButton courseId={course.id} courseTitle={course.title} mode="delete" redirectTo="/dashboard/teacher/courses" size="large" />
               )}
             </div>
           </div>

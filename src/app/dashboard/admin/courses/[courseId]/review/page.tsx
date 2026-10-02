@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import type { MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
 import CourseReviewAccordion from "@/components/CourseReviewAccordion";
 import CourseOverview from "@/components/admin/CourseOverview";
 import CertificateSettingsForm from "@/components/certificates/CertificateSettingsForm";
@@ -28,6 +29,12 @@ interface QuizQuestionRow {
   order_index: number;
   video_timestamp_seconds: number | null;
   explanation: string | null;
+  image_url: string | null;
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ + ประเภทคำถาม/เฉลย (จับคู่/เรียงลำดับ)
+  image_caption: string | null;
+  image_pins: { id: string; x: number; y: number }[] | null;
+  interaction_type: "multiple_choice" | "true_false" | "matching" | "sequencing" | null;
+  answer_data: MatchingAnswerData | SequencingAnswerData | null;
   quiz_choices: QuizChoiceRow[];
 }
 
@@ -192,7 +199,7 @@ export default async function AdminCourseReviewPage({
           lesson_drafts (
             id, video_url, content_html, status, created_at,
             quiz_questions (
-              id, question_text, order_index, video_timestamp_seconds, explanation,
+              id, question_text, order_index, video_timestamp_seconds, explanation, image_url, image_caption, image_pins, interaction_type, answer_data,
               quiz_choices ( choice_text, is_correct, order_index )
             ),
             video_quiz_markers (

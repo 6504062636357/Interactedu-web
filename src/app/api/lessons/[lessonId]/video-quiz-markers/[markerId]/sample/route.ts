@@ -54,10 +54,21 @@ export async function GET(
     return NextResponse.json({
       markerId: marker.id,
       questionText: sampled.question_text,
-      // ห้ามส่ง isCorrect ออกไปเด็ดขาด — ตรวจคำตอบทำที่ POST /video-quiz-attempts เท่านั้น
+      imageUrl: sampled.image_url ?? null,
+      // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ (เหมือนทางฝั่ง Final Exam) =====
+      imageCaption: sampled.image_caption ?? null,
+      imagePins: sampled.image_pins ?? null,
+      interactionType: sampled.interactionType,
+      // ห้ามส่ง isCorrect/answerData ออกไปเด็ดขาด — ตรวจคำตอบทำที่ POST /video-quiz-attempts เท่านั้น
       choices: [...sampled.quiz_choices]
         .sort((a, b) => a.order_index - b.order_index)
         .map((choice) => choice.choice_text),
+      // matching/sequencing เพิ่มใหม่ — matchingDisplay/sequencingDisplay ถูกสลับลำดับไว้แล้วและไม่มี
+      // เฉลยติดมา (ดู buildMatchingSequencingDisplay ใน question-bank-sampling.ts) MC/True-False จะได้ null ทั้งคู่
+      matching: sampled.matchingDisplay ?? null,
+      sequencing: sampled.sequencingDisplay ?? null,
+      // drag_drop (เติมคำ): display ที่สลับคำแล้วและไม่มี correct_map — เฉลยอยู่ฝั่ง server (POST /video-quiz-attempts) เท่านั้น
+      dragDrop: sampled.dragDropDisplay ?? null,
     });
   } catch (sampleError) {
     const message = sampleError instanceof Error ? sampleError.message : "สุ่มคำถามไม่สำเร็จ";

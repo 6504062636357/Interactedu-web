@@ -5,9 +5,26 @@ import CourseExamEditor from "@/components/courses/CourseExamEditor";
 
 import { createClient } from "@/utils/supabase/server";
 import CourseExamReviewActions from "@/components/CourseExamReviewActions";
+import type { ExamInteractionType, MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
+
+// ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพ =====
+interface StoredImagePin { id: string; x: number; y: number }
 
 interface StoredChoice { choice_text: string; is_correct: boolean; order_index: number }
-interface StoredQuestion { question_text: string; explanation: string | null; order_index: number; video_timestamp_seconds: number | null;interaction_type: "multiple_choice" | "true_false"; quiz_choices: StoredChoice[] }
+interface StoredQuestion {
+  question_text: string;
+  explanation: string | null;
+  order_index: number;
+  video_timestamp_seconds: number | null;
+  interaction_type: ExamInteractionType;
+  // ===== เพิ่มใหม่: เฉลย matching/sequencing (ไม่มีกับ multiple_choice/true_false)
+  answer_data: MatchingAnswerData | SequencingAnswerData | null;
+  image_url: string | null;
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ =====
+  image_caption: string | null;
+  image_pins: StoredImagePin[] | null;
+  quiz_choices: StoredChoice[];
+}
 interface StoredDraft { id: string; created_at: string; quiz_questions: StoredQuestion[] }
 interface StoredLesson { id: string; order_index: number; lesson_drafts: StoredDraft[] }
 
@@ -35,7 +52,7 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
     // bundling them here used to turn that schema error into a misleading 404.
     supabase.from("courses").select("id, title, created_by").eq("id", courseId).maybeSingle(),
     supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
-    supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
+    supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, answer_data, image_url, image_caption, image_pins, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
     supabase.from("course_exam_configs").select("custom_constraints").eq("course_id", courseId).maybeSingle(),
   ]);
 
@@ -76,7 +93,13 @@ export default async function CourseExamManagementPage({ courseId, workspace }: 
   }).map((question) => ({
     questionText: question.question_text,
     explanation: question.explanation,
+    imageUrl: question.image_url ?? null,
+    // ===== เพิ่มใหม่: ส่งคำบรรยายใต้ภาพ + หมุดต่อให้ CourseExamEditor ไป pre-fill ตอนแก้ไข
+    imageCaption: question.image_caption ?? null,
+    imagePins: question.image_pins ?? null,
      interactionType: question.interaction_type ?? "multiple_choice",
+    // ===== เพิ่มใหม่: ส่งเฉลย matching/sequencing ต่อให้ CourseExamEditor ไป pre-fill ตอนแก้ไข
+    answerData: question.answer_data ?? null,
     choices: [...question.quiz_choices].sort((a, b) => a.order_index - b.order_index).map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
   }));
   

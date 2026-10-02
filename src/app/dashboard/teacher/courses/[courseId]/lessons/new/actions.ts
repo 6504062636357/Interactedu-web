@@ -3,6 +3,9 @@
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { notifyAdmins } from "@/lib/notifications/service";
+import type { DragDropAnswerData, MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
+import { validateDragDropAuthoring, validateMultiSelectAuthoring } from "@/lib/quiz/validators/authoring";
+import { DRAG_DROP_ENABLED, MULTI_SELECT_ENABLED } from "@/lib/quiz/config/rollout";
 
 export interface DraftChoiceInput {
   text: string;
@@ -18,7 +21,24 @@ export interface DraftQuestionInput {
   sourceQuestionId?: string | null; // ใช้เมื่อ sourceType = bank_manual
   // ★ เพิ่มใหม่: ประเภทคำถาม — เดิม hardcode เป็น multiple_choice เสมอทั้งที่ quiz_questions
   // มีคอลัมน์ interaction_type รองรับ true_false อยู่แล้ว ไม่ระบุ = multiple_choice (ของเดิม)
-  interactionType?: "multiple_choice" | "true_false";
+  // ตอนนี้เพิ่ม matching/sequencing สำหรับควิซแทรกกลางวิดีโอแบบ static (ไม่สุ่ม) ด้วย — เกรดฝั่ง
+  // ผู้เรียนตรวจในเครื่องได้ทันที (baked ลง SCORM package เหมือน correctIndex ของ MC/True-False)
+  interactionType?: "multiple_choice" | "true_false" | "multi_select" | "drag_drop" | "matching" | "sequencing";
+  // ===== เพิ่มใหม่: answer_data ของ matching/sequencing (MC/True-False ยังใช้ choices เหมือนเดิม
+  // ไม่ใช้ฟิลด์นี้) shape เดียวกับ src/types/interaction.ts (MatchingAnswerData/SequencingAnswerData)
+  answerData?: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
+  imageUrl?: string | null; // รูปภาพประกอบคำถาม (ไม่บังคับ)
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ (ไม่บังคับ ใช้ได้เฉพาะเมื่อมี imageUrl) =====
+  imageCaption?: string | null;
+  imagePins?: ImagePinInput[] | null;
+}
+
+// ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพประกอบคำถาม — x/y เป็น % ของขนาดภาพ (0-100) ลำดับเลขอ้างจาก
+// ตำแหน่งใน array (index + 1) ไม่ได้เก็บเลขไว้ตรงๆ กันเลขเพี้ยนเวลาลบหมุดกลางๆออก =====
+export interface ImagePinInput {
+  id: string;
+  x: number;
+  y: number;
 }
 
 export interface DraftRandomMarkerInput {
@@ -49,7 +69,11 @@ interface StoredDraftQuestion {
   explanation: string | null;
   source_type: "custom" | "bank_manual" | null;
   source_question_id: string | null;
-  interaction_type: "multiple_choice" | "true_false" | null;
+  interaction_type: "multiple_choice" | "true_false" | "multi_select" | "drag_drop" | "matching" | "sequencing" | null;
+  answer_data: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
+  image_url: string | null;
+  image_caption: string | null;
+  image_pins: ImagePinInput[] | null;
   quiz_choices: StoredDraftChoice[];
 }
 
@@ -256,6 +280,20 @@ async function batchInsertQuestions(
 
   if (validQuestions.length === 0) return null;
 
+  // multi_select / drag_drop: ตรวจฝั่ง server ด้วยตัวตรวจกลางเดียวกับฟอร์ม (ข้อมูลจาก client ไม่น่าเชื่อถือ)
+  // และเคารพสวิตช์เปิดใช้ใน config/rollout.ts — ข้อมูลผิดรูปแบบจะทำให้ตัวเล่นใน SCORM สร้างไม่ได้
+  for (const { q, originalIndex } of validQuestions) {
+    if (q.interactionType === "multi_select") {
+      if (!MULTI_SELECT_ENABLED) return "ยังไม่เปิดให้ใช้คำถามแบบ Multiple Select";
+      const problems = validateMultiSelectAuthoring(q.choices.filter((c) => c.text.trim()));
+      if (problems.length > 0) return `คำถามข้อ ${originalIndex + 1} (Multiple Select): ${problems.join(" / ")}`;
+    } else if (q.interactionType === "drag_drop") {
+      if (!DRAG_DROP_ENABLED) return "ยังไม่เปิดให้ใช้คำถามแบบเติมคำ (ลากวาง)";
+      const problems = validateDragDropAuthoring(q.answerData);
+      if (problems.length > 0) return `คำถามข้อ ${originalIndex + 1} (เติมคำ): ${problems.join(" / ")}`;
+    }
+  }
+
   const questionRows = validQuestions.map(({ q, originalIndex }) => ({
     lesson_draft_id: draftId,
     question_text: q.questionText,
@@ -264,8 +302,18 @@ async function batchInsertQuestions(
     explanation: q.explanation,
     source_type: q.sourceType ?? "custom",
     source_question_id: q.sourceQuestionId ?? null,
-    // ★ เพิ่มใหม่: ไม่ระบุ = multiple_choice (พฤติกรรมเดิม) — รองรับ true_false ที่เลือกได้ตอนสร้างคำถามใหม่แล้ว
+    // ★ เพิ่มใหม่: ไม่ระบุ = multiple_choice (พฤติกรรมเดิม) — รองรับ true_false/matching/sequencing
+    // ที่เลือกได้ตอนสร้างคำถามใหม่แล้ว
     interaction_type: q.interactionType ?? "multiple_choice",
+    // ===== เพิ่มใหม่: answer_data ของ matching/sequencing (null สำหรับ MC/True-False เหมือนเดิม) =====
+    answer_data:
+      q.interactionType === "matching" || q.interactionType === "sequencing" || q.interactionType === "drag_drop"
+        ? q.answerData ?? null
+        : null,
+    image_url: q.imageUrl ?? null,
+    // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลข — ไม่มีรูปก็ไม่มีความหมาย แต่บันทึกไว้เฉยๆไม่เป็นไร =====
+    image_caption: q.imageCaption ?? null,
+    image_pins: q.imagePins ?? null,
   }));
   const orderIndexes = questionRows.map((r) => r.order_index);
 
@@ -309,6 +357,9 @@ async function batchInsertQuestions(
   const choiceRows = validQuestions.flatMap(({ q, originalIndex }) => {
     const questionId = idByOrderIndex.get(originalIndex);
     if (!questionId) return [];
+    // ===== เพิ่มใหม่: matching/sequencing ไม่มี quiz_choices เลย (เฉลยอยู่ใน answer_data ที่ insert
+    // ไปแล้วข้างบน) — กันไว้ชัดๆ ไม่ให้พึ่งพาแค่ว่า client ส่ง choices ว่างมาเท่านั้น
+    if (q.interactionType === "matching" || q.interactionType === "sequencing" || q.interactionType === "drag_drop") return [];
     return q.choices
       .filter((c) => c.text.trim())
       .map((c, cIndex) => ({
@@ -457,6 +508,10 @@ export interface ExistingDraftData {
   draftId: string;
   title: string;
   videoUrl: string | null;
+  // ===== เพิ่มใหม่: ส่งค่าความยาววิดีโอที่บันทึกไว้แล้วกลับไปด้วย กัน videoDuration ฝั่ง client
+  // (useState เริ่มที่ 0) ไปทับค่าที่ถูกต้องเดิมเป็น 0 ถ้าครูกดบันทึกเร็วกว่าที่ <video>
+  // onLoadedMetadata จะทัน (ดูคอมเมนต์ยาวใน LessonDraftForm.tsx ตรง handleSave)
+  videoDurationSeconds: number;
   contentHtml: string;
   status: string;
   videoSegments: Array<{
@@ -475,7 +530,11 @@ export interface ExistingDraftData {
     choices: { text: string; isCorrect: boolean }[];
     sourceType?: "custom" | "bank_manual";
     sourceQuestionId?: string | null;
-    interactionType?: "multiple_choice" | "true_false";
+    interactionType?: "multiple_choice" | "true_false" | "multi_select" | "drag_drop" | "matching" | "sequencing";
+    answerData?: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
+    imageUrl?: string | null;
+    imageCaption?: string | null;
+    imagePins?: ImagePinInput[] | null;
   }[];
   randomMarkers: {
     markerId: string;
@@ -491,7 +550,7 @@ export async function getLessonDraftForEdit(lessonId: string, courseId?: string)
 
   const { data: lesson, error: lessonError } = await supabase
     .from("lessons")
-    .select("id, title, course_id")
+    .select("id, title, course_id, video_duration_seconds")
     .eq("id", lessonId)
     .single();
 
@@ -509,7 +568,7 @@ export async function getLessonDraftForEdit(lessonId: string, courseId?: string)
     .from("lesson_drafts")
     .select(
       `id, video_url, content_html, status,
-       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation, source_type, source_question_id, interaction_type,
+       quiz_questions ( question_text, order_index, video_timestamp_seconds, explanation, source_type, source_question_id, interaction_type, answer_data, image_url, image_caption, image_pins,
          quiz_choices ( choice_text, is_correct, order_index ) )`
     )
     .eq("lesson_id", lessonId)
@@ -543,12 +602,16 @@ export async function getLessonDraftForEdit(lessonId: string, courseId?: string)
       questionText: q.question_text,
       timestampSeconds: q.video_timestamp_seconds,
       explanation: q.explanation,
+      imageUrl: q.image_url ?? null,
+      imageCaption: q.image_caption ?? null,
+      imagePins: q.image_pins ?? null,
       choices: (q.quiz_choices ?? [])
         .sort((a, b) => a.order_index - b.order_index)
         .map((c) => ({ text: c.choice_text, isCorrect: c.is_correct })),
       sourceType: q.source_type ?? "custom",
       sourceQuestionId: q.source_question_id,
       interactionType: q.interaction_type ?? "multiple_choice",
+      answerData: q.answer_data ?? null,
     }));
 
   const randomMarkers = (markersData ?? []).map((m) => ({
@@ -573,6 +636,7 @@ export async function getLessonDraftForEdit(lessonId: string, courseId?: string)
       draftId: draft.id,
       title: lesson.title,
       videoUrl: draft.video_url,
+      videoDurationSeconds: lesson.video_duration_seconds ?? 0,
       contentHtml: draft.content_html ?? "",
       status: draft.status,
       videoSegments,
@@ -756,6 +820,16 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
 export interface BankQuestionForLesson {
   id: string;
   questionText: string;
+  imageUrl: string | null;
+  // ===== เพิ่มใหม่: เดิม query ไม่ได้ select มาเลยทั้ง difficulty/interaction_type/answer_data/
+  // image_caption/image_pins — ทำให้แท็บ "เลือกจากคลังข้อสอบ" แสดงได้แค่ question_text ล้วนๆ
+  // ไม่มีป้ายระดับ/ประเภท และคำถามแบบจับคู่/เรียงลำดับก็หยิบไปใช้ไม่ได้ถูกต้อง (choices ว่างเปล่า) =====
+  difficulty: "easy" | "medium" | "hard";
+  interactionType: "multiple_choice" | "true_false" | "multi_select" | "drag_drop" | "matching" | "sequencing";
+  answerData: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
+  imageCaption: string | null;
+  explanation: string | null;
+  imagePins: ImagePinInput[] | null;
   choices: { text: string; isCorrect: boolean }[];
 }
 
@@ -772,7 +846,7 @@ export async function getBankQuestionsForLesson(
   const { data, error } = await supabase
     .from("question_bank")
     .select(
-      "id, question_text, usage_type, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(lesson_id)"
+      "id, question_text, usage_type, explanation, image_url, image_caption, image_pins, difficulty, interaction_type, answer_data, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(lesson_id)"
     )
     .eq("usage_type", "popup");
 
@@ -786,6 +860,13 @@ export async function getBankQuestionsForLesson(
     questions: filtered.map((q) => ({
       id: q.id,
       questionText: q.question_text,
+      imageUrl: q.image_url ?? null,
+      imageCaption: q.image_caption ?? null,
+      explanation: q.explanation ?? null,
+      imagePins: q.image_pins ?? null,
+      difficulty: (q.difficulty as "easy" | "medium" | "hard") ?? "medium",
+      interactionType: (q.interaction_type as BankQuestionForLesson["interactionType"]) ?? "multiple_choice",
+      answerData: (q.answer_data as MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null) ?? null,
       choices: [...(q.question_bank_choices ?? [])]
         .sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index)
         .map((c: { choice_text: string; is_correct: boolean }) => ({ text: c.choice_text, isCorrect: c.is_correct })),

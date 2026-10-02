@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/client';
 import type { QuestionForValidation, QuestionChoice } from '@/types/interaction';
+import { usesChoiceTable } from './config/interaction-groups';
 
 // ปรับ import ตามที่โปรเจกคุณสร้าง client จริง
 // เช่น import { supabase } from '@/lib/supabase/client';
@@ -30,8 +31,8 @@ export async function fetchQuizQuestionForValidation(
     answer_data: question.answer_data,
   };
 
-  // เฉพาะ MC/True-False ที่ต้องดึง choices เพิ่ม
-  if (question.interaction_type === 'multiple_choice' || question.interaction_type === 'true_false') {
+  // เฉพาะ MC/True-False/multi_select ที่ต้องดึง choices เพิ่ม
+  if (usesChoiceTable(question.interaction_type)) {
     const { data: choices, error: choicesError } = await supabase
       .from('quiz_choices')
       .select('id, choice_text, is_correct, order_index')
@@ -74,7 +75,7 @@ export async function fetchBankQuestionForValidation(
     answer_data: question.answer_data,
   };
 
-  if (question.interaction_type === 'multiple_choice' || question.interaction_type === 'true_false') {
+  if (usesChoiceTable(question.interaction_type)) {
     const { data: choices, error: choicesError } = await supabase
       .from('question_bank_choices')
       .select('id, choice_text, is_correct, order_index')

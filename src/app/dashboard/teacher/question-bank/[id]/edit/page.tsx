@@ -21,7 +21,7 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
       .maybeSingle(),
     supabase
       .from("lessons")
-      .select("id, order_index, course_id, courses!inner(title, created_by, category)")
+      .select("id, title, order_index, course_id, courses!inner(title, created_by, category)")
       .eq("courses.created_by", user.id)
       .order("order_index", { ascending: true }),
   ]);
@@ -36,7 +36,8 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
     // เพิ่มใหม่: เอา category ของคอร์สติดมาด้วย ใช้เตือนตอนครูผูกคำถาม category หนึ่งเข้ากับคอร์สที่ category ไม่ตรงกัน
     courseCategory: (lesson.courses as unknown as { category: string | null }).category,
     orderIndex: lesson.order_index,
-    title: `บทที่ ${lesson.order_index + 1}`,
+    // ใช้ชื่อบทจริงจากตาราง lessons (เดิมสร้างเป็น "บทที่ N" จากลำดับ ทำให้ชื่อไม่ตรงกับที่ตั้งไว้)
+    title: (lesson.title as string | null)?.trim() || `บทที่ ${lesson.order_index + 1}`,
   }));
 
   const initialData = {
@@ -49,6 +50,9 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
     privacyScope: question.privacy_scope,
     interactionType: question.interaction_type,
     answerData: question.answer_data,
+    imageUrl: question.image_url ?? null,
+    imageCaption: question.image_caption ?? null,
+    imagePins: question.image_pins ?? null,
     topicTags: (question.question_bank_topic_tags ?? [])
       .filter((tag: { course_id: string | null }) => tag.course_id)
       .map((tag: { course_id: string | null; lesson_id: string | null }) => ({ courseId: tag.course_id as string, lessonId: tag.lesson_id })),

@@ -257,9 +257,6 @@ export default function LoginPage() {
                 <label htmlFor="password" className="block text-[13px] font-bold text-[#0F1B3D]/70">
                   รหัสผ่าน <span className="text-red-500">*</span>
                 </label>
-                <a href="#" className="text-[12.5px] font-bold text-[#FF5A3C] hover:underline underline-offset-2">
-                  ลืมรหัสผ่าน?
-                </a>
               </div>
               <input
                 ref={passwordRef}
