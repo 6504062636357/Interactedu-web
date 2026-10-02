@@ -80,6 +80,7 @@ interface BankQuestionOption {
   answerData?: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
   imageCaption?: string | null;
   imagePins?: { id: string; x: number; y: number }[] | null;
+  explanation?: string | null;
   choices: { text: string; isCorrect: boolean }[];
 }
 
@@ -230,6 +231,8 @@ export default function LessonDraftForm({
   const [imageFileMeta, setImageFileMeta] = useState<Record<string, { name: string; size: number }>>({});
   // ===== เพิ่มใหม่: รูปที่กำลังเปิดแบบขยายเต็ม (Lightbox) — null = ไม่ได้เปิด =====
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+  // ครูเพิ่มเอง: โมดัลปักหมุดบนรูปของคำถามข้อที่เลือก (อ้างด้วย key)
+  const [pinEditKey, setPinEditKey] = useState<string | null>(null);
   useEffect(() => {
     if (!videoPreviewUrl) return;
     return () => URL.revokeObjectURL(videoPreviewUrl);
@@ -298,10 +301,23 @@ export default function LessonDraftForm({
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, explanation: text || null } : q)));
   }
 
+  function updateQuestionImageCaption(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
+    markDirty();
+    setter((prev) => prev.map((q) => (q.key === key ? { ...q, imageCaption: text || null } : q)));
+  }
+  function updateQuestionPins(
+    setter: typeof setVideoQuizQuestions,
+    key: string,
+    fn: (pins: { id: string; x: number; y: number }[]) => { id: string; x: number; y: number }[]
+  ): void {
+    markDirty();
+    setter((prev) => prev.map((q) => (q.key === key ? { ...q, imagePins: fn(q.imagePins ?? []) } : q)));
+  }
+
   // ===== เพิ่มใหม่: รูปภาพประกอบคำถาม (ไม่บังคับ) =====
   function updateQuestionImageUrl(setter: typeof setVideoQuizQuestions, key: string, url: string | null): void {
     markDirty();
-    setter((prev) => prev.map((q) => (q.key === key ? { ...q, imageUrl: url } : q)));
+    setter((prev) => prev.map((q) => (q.key === key ? { ...q, imageUrl: url, ...(url === null ? { imageCaption: null, imagePins: null } : {}) } : q)));
     if (url === null) {
       setImageFileMeta((prev) => { const next = { ...prev }; delete next[key]; return next; });
     }
@@ -554,7 +570,7 @@ export default function LessonDraftForm({
           key: genId(),
           questionText: picked.questionText,
           timestampSeconds: pinModalTimestamp,
-          explanation: null,
+          explanation: picked.explanation ?? null,
           imageUrl: picked.imageUrl ?? null,
           imageCaption: picked.imageCaption ?? null,
           imagePins: picked.imagePins ?? null,
@@ -721,7 +737,7 @@ export default function LessonDraftForm({
 
     const allQuestions = videoQuizQuestions.map(
       (question) => {
-        const { questionText, choices, timestampSeconds, explanation, sourceType, sourceQuestionId, imageUrl, interactionType } = question;
+        const { questionText, choices, timestampSeconds, explanation, sourceType, sourceQuestionId, imageUrl, imageCaption, imagePins, interactionType } = question;
         // drag_drop: แปลงฟอร์ม (___ ) เป็น answer_data ตอนบันทึก (ตรวจผ่านแล้วด้านบน)
         let answerData = question.answerData;
         if (interactionType === "drag_drop") {
@@ -736,6 +752,8 @@ export default function LessonDraftForm({
           sourceType,
           sourceQuestionId,
           imageUrl,
+          imageCaption: imageUrl ? imageCaption ?? null : null,
+          imagePins: imageUrl && imagePins && imagePins.length > 0 ? imagePins : null,
           interactionType,
           answerData,
         };
@@ -1204,7 +1222,7 @@ export default function LessonDraftForm({
                             (ไม่บังคับ w-full) ให้กรอบพอดีเนื้อรูปจริง แล้ววาดหมุดทับได้ถูกตำแหน่ง ===== */}
                         <button
                           type="button"
-                          onClick={() => setLightboxImageUrl(q.imageUrl!)}
+                          onClick={() => (q.sourceType === "bank_manual" ? setLightboxImageUrl(q.imageUrl!) : setPinEditKey(q.key))}
                           className="group relative inline-block max-h-28 max-w-[10rem] shrink-0 cursor-pointer overflow-hidden rounded-xl border border-[#0F1B3D]/10 shadow-[0_1px_3px_rgba(15,27,61,0.08)]"
                         >
                           <img src={q.imageUrl} alt="" className="block max-h-28 max-w-[10rem] object-contain transition-transform duration-200 group-hover:scale-105" />
@@ -1224,8 +1242,30 @@ export default function LessonDraftForm({
                           </div>
                         </button>
                         <div className="flex flex-col gap-1.5">
-                          {q.imageCaption && (
-                            <p className="text-[11.5px] font-semibold text-[#0F1B3D]/60">{q.imageCaption}</p>
+                          {q.sourceType === "bank_manual" ? (
+                            q.imageCaption && (
+                              <p className="text-[11.5px] font-semibold text-[#0F1B3D]/60">{q.imageCaption}</p>
+                            )
+                          ) : (
+                            <>
+                              <input
+                                value={q.imageCaption ?? ""}
+                                onChange={(e) => updateQuestionImageCaption(setVideoQuizQuestions, q.key, e.target.value)}
+                                placeholder="ชื่อภาพ / คำบรรยายใต้ภาพ (ไม่บังคับ)"
+                                className="w-full min-w-[14rem] rounded-lg border border-[#0F1B3D]/[0.1] bg-[#F7F8FA] px-2.5 py-1.5 text-[12px] text-[#0F1B3D] outline-none focus:border-[#0F1B3D]/30 focus:bg-white"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPinEditKey(q.key)}
+                                className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[#0F1B3D]/15 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-[#0F1B3D] hover:bg-[#F7F8FA]"
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a2 2 0 104 0 2 2 0 10-4 0" />
+                                </svg>
+                                ปักหมุด{(q.imagePins ?? []).length > 0 ? ` (${(q.imagePins ?? []).length})` : ""}
+                              </button>
+                            </>
                           )}
                           {imageFileMeta[q.key] && (
                             <p className="text-[11px] text-slate-400">
@@ -2011,10 +2051,60 @@ export default function LessonDraftForm({
 )}
     </div>
 
+    {pinEditKey && typeof document !== "undefined" && createPortal((() => {
+      const pq = videoQuizQuestions.find((x) => x.key === pinEditKey);
+      if (!pq || !pq.imageUrl) return null;
+      const pins = pq.imagePins ?? [];
+      return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-6" onClick={() => setPinEditKey(null)}>
+          <div className="flex max-h-[90vh] w-fit max-w-[min(92vw,640px)] flex-col gap-3 rounded-2xl bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[12px] font-semibold text-[#0F1B3D]/50">คลิกบนภาพเพื่อปักหมุดถัดไป · คลิกที่ตัวหมุดเพื่อลบทีละอัน</p>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button type="button" disabled={pins.length === 0} title="ย้อนกลับ (ลบหมุดล่าสุด)" onClick={() => updateQuestionPins(setVideoQuizQuestions, pq.key, (p) => p.slice(0, -1))} className="flex h-8 w-8 items-center justify-center rounded-full border border-[#0F1B3D]/15 text-[#0F1B3D] hover:bg-[#F7F8FA] disabled:cursor-not-allowed disabled:opacity-30">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4 4-4m-4 4h11a4 4 0 010 8h-1" /></svg>
+                </button>
+                <button type="button" disabled={pins.length === 0} onClick={() => updateQuestionPins(setVideoQuizQuestions, pq.key, () => [])} className="rounded-full border border-[#0F1B3D]/15 px-2.5 py-1.5 text-[11.5px] font-semibold text-[#0F1B3D] hover:bg-[#F7F8FA] disabled:cursor-not-allowed disabled:opacity-30">ล้างหมุดทั้งหมด</button>
+                <button type="button" onClick={() => setPinEditKey(null)} aria-label="ปิด" className="flex h-8 w-8 items-center justify-center rounded-full text-[#0F1B3D]/50 hover:bg-[#F7F8FA] hover:text-[#0F1B3D]">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+            <div className="relative self-center overflow-hidden rounded-xl bg-[#F1F5F9]">
+              <img
+                src={pq.imageUrl}
+                alt=""
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = ((e.clientX - rect.left) / rect.width) * 100;
+                  const y = ((e.clientY - rect.top) / rect.height) * 100;
+                  updateQuestionPins(setVideoQuizQuestions, pq.key, (p) => [...p, { id: genId(), x, y }]);
+                }}
+                className="block max-h-[65vh] max-w-full cursor-crosshair object-contain"
+              />
+              {pins.map((pin, pinIndex) => (
+                <button
+                  key={pin.id}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); updateQuestionPins(setVideoQuizQuestions, pq.key, (p) => p.filter((x) => x.id !== pin.id)); }}
+                  title="กดเพื่อลบหมุดนี้"
+                  className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-[#FF5A3C] text-[12px] font-bold text-white ring-2 ring-white hover:bg-[#EB4A2D]"
+                  style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                >
+                  {pinIndex + 1}
+                </button>
+              ))}
+            </div>
+            {pq.imageCaption && <p className="text-center text-[12.5px] font-semibold text-[#0F1B3D]">{pq.imageCaption}</p>}
+          </div>
+        </div>
+      );
+    })(), document.body)}
+
     {/* ===== เพิ่มใหม่: Lightbox ขยายรูปประกอบคำถามแบบเต็มจอ ===== */}
-    {lightboxImageUrl && (
+    {lightboxImageUrl && typeof document !== "undefined" && createPortal(
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-6"
         onClick={() => setLightboxImageUrl(null)}
       >
         <button
@@ -2034,7 +2124,7 @@ export default function LessonDraftForm({
           className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
         />
       </div>
-    )}
+    , document.body)}
     </>
   );
 }

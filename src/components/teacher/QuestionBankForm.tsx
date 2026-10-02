@@ -899,7 +899,7 @@ const courseGroups = Object.values(lessonsByCourse)
                   <select
                     value={selectedCourseId}
                     onChange={(e) => { setSelectedCourseId(e.target.value); setPendingLessonValue(""); setUseWholeCourseTag(false); }}
-                    className={`${inputClass} w-auto min-w-[180px] flex-1`}
+                    className={`${inputClass} w-auto min-w-0 max-w-full flex-1 basis-[180px] truncate`}
                   >
                     <option value="">— เลือกคอร์ส —</option>
                     {visibleCourseGroups.map((group) => (
@@ -911,7 +911,7 @@ const courseGroups = Object.values(lessonsByCourse)
                     value={pendingLessonValue}
                     onChange={(e) => setPendingLessonValue(e.target.value)}
                     disabled={!selectedCourseId || useWholeCourseTag || hasWholeCourseTagForSelectedCourse}
-                    className={`${inputClass} w-auto min-w-[160px] flex-1 disabled:opacity-50`}
+                    className={`${inputClass} w-auto min-w-0 max-w-full flex-1 basis-[160px] truncate disabled:opacity-50`}
                   >
                     <option value="">{!selectedCourseId ? "เลือกคอร์สก่อน" : "เลือกบทเรียน..."}</option>
                     {usageType === "popup" && availableLessonsForSelectedCourse.length > 0 && (
@@ -1001,13 +1001,15 @@ const courseGroups = Object.values(lessonsByCourse)
                           key={tagKey(tag)}
                           type="button"
                           onClick={() => removeTag(tag)}
-                          title={tagMismatch ? `หมวดคอร์สไม่ตรงกับคำถาม (คอร์สอยู่หมวด "${tagCourseCategory}")` : undefined}
-                          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-bold text-white ${tagMismatch ? "bg-amber-500" : "bg-[#0F1B3D]"}`}
+                          title={`${courseTitle} · ${tag.lessonId ? (lessonTitle ?? "บทเรียนที่ไม่พบ") : "ทั้งคอร์ส"}${tagMismatch ? ` (หมวดคอร์สไม่ตรงกับคำถาม: คอร์สอยู่หมวด "${tagCourseCategory}")` : ""}`}
+                          className={`flex min-w-0 max-w-full items-center gap-2 rounded-2xl px-3.5 py-1.5 text-left text-[12.5px] font-bold text-white ${tagMismatch ? "bg-amber-500" : "bg-[#0F1B3D]"}`}
                         >
-                          {tagMismatch && <span>⚠</span>}
-                          <span className="text-white/60">{courseTitle} ·</span>{" "}
-                          {tag.lessonId ? (lessonTitle ?? "บทเรียนที่ไม่พบ") : "ทั้งคอร์ส"}
-                          <span className="text-white/60">✕</span>
+                          {tagMismatch && <span className="shrink-0">⚠</span>}
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate text-[11px] font-semibold text-white/60">{courseTitle}</span>
+                            <span className="truncate">{tag.lessonId ? (lessonTitle ?? "บทเรียนที่ไม่พบ") : "ทั้งคอร์ส"}</span>
+                          </span>
+                          <span className="shrink-0 text-white/60">✕</span>
                         </button>
                       );
                     })}
