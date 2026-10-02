@@ -2364,7 +2364,10 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   display: none;
   position: fixed; inset: 0;
   background: rgba(10,14,30,0.55);
-  align-items: center; justify-content: center;
+  /* เนื้อหายาวกว่าจอ → เลื่อนที่ overlay ได้ (กล่องใช้ margin:auto จัดกลางเมื่อสั้น ไม่ล้นบนเมื่อยาว) */
+  align-items: flex-start; justify-content: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   z-index: 999;
   padding: 20px;
 }
@@ -2378,6 +2381,7 @@ video { width: 100%; display: block; background: #000; cursor: pointer; }
   padding: 26px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.25);
   position: relative;
+  margin: auto;
 }
 
 /* [งานข้อ 14] ปุ่มปิด — วางมุมขวาบนของ modal เสมอ ไม่ว่า body ข้างในจะเป็นสถานะไหน */
