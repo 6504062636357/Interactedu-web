@@ -19,9 +19,19 @@
 //   - src/lib/courses/course-final-exam.ts
 //   - src/app/api/courses/[courseId]/final-exam/route.ts
 
+import type { ExamInteractionType } from "@/types/interaction";
+
 export interface FinalQuizAnswer {
   questionId: string;
-  selectedChoiceIndex: number;
+  // ===== เพิ่มใหม่: matching/sequencing ไม่มี selectedChoiceIndex ให้ใช้ ต้องมี field เฉพาะของตัวเอง
+  // (optional ทั้งคู่ — คำถาม multiple_choice/true_false ยังส่งแค่ selectedChoiceIndex เหมือนเดิม)
+  selectedChoiceIndex?: number;
+  // multi_select: index (ตามลำดับที่ส่งให้นักเรียน) ของทุกตัวเลือกที่ติ๊ก — ใช้แทน selectedChoiceIndex
+  selectedChoiceIndexes?: number[];
+  matchingPairs?: { left: string; right: string }[];
+  sequenceOrder?: string[];
+  // drag_drop: blank_id -> word_id ที่นักเรียนวางลงช่องนั้น
+  dragDropPlacements?: Record<string, string>;
 }
 
 export interface FinalQuizDetail {
@@ -29,6 +39,41 @@ export interface FinalQuizDetail {
   isCorrect: boolean;
   correctChoiceIndex: number;
   explanation: string | null;
+}
+
+// ===== เพิ่มใหม่: ข้อมูลเฉลยรายข้อสำหรับหน้า "ดูเฉลยและคำอธิบายละเอียด" (Review Answers)
+// ประกอบฝั่ง server เสมอ แต่ route จะส่งให้ client "เฉพาะตอนสอบผ่านแล้วเท่านั้น" — ตอนยังไม่ผ่าน
+// (ยังอยู่ในลูปสอบซ้ำ) ห้ามส่งเฉลยรายข้อออกไป ไม่งั้นนักเรียนจำเฉลยแล้วสอบซ้ำจนผ่านได้
+export interface FinalExamReviewItem {
+  questionId: string;
+  lessonTitle: string;
+  questionText: string;
+  imageUrl: string | null;
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ (แสดงในหน้า Review Answers ด้วย) =====
+  imageCaption: string | null;
+  imagePins: { id: string; x: number; y: number }[] | null;
+  interactionType: ExamInteractionType;
+  isCorrect: boolean;
+  explanation: string | null;
+  // multiple_choice / true_false
+  choices: string[] | null;
+  selectedChoiceIndex: number | null;
+  correctChoiceIndex: number | null;
+  // multi_select — ตอบ/เฉลยได้หลาย index (ใช้ choices ชุดเดียวกับข้างบน)
+  selectedChoiceIndexes?: number[] | null;
+  correctChoiceIndexes?: number[] | null;
+  // drag_drop — โจทย์ที่มี {{blank_id}} + คำตอบของนักเรียนเทียบเฉลยรายช่อง
+  dragDrop?: {
+    template: string;
+    blanks: { id: string; studentWord: string; correctWord: string; isCorrect: boolean }[];
+  } | null;
+  // matching — แถวละ 1 คู่ (ซ้าย) พร้อมคำตอบที่นักเรียนเลือกเทียบกับคำตอบที่ถูก
+  matching: { left: string; studentRight: string; correctRight: string; isCorrect: boolean }[] | null;
+  // sequencing — ลำดับที่นักเรียนจัดเทียบกับลำดับที่ถูกต้อง
+  sequencing: {
+    studentOrder: { id: string; text: string }[];
+    correctOrder: { id: string; text: string }[];
+  } | null;
 }
 
 export interface FinalQuizGrade {
@@ -40,4 +85,5 @@ export interface FinalQuizGrade {
   passPercentage: number;
   passed: boolean;
   details: FinalQuizDetail[];
+  review?: FinalExamReviewItem[];
 }

@@ -2,6 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
+import { validateDragDropAuthoring, validateMultiSelectAuthoring } from "@/lib/quiz/validators/authoring";
+import { DRAG_DROP_ENABLED, MULTI_SELECT_ENABLED } from "@/lib/quiz/config/rollout";
+
+// แปลง error ดิบจากฐานข้อมูล (เช่น "violates check constraint ...") เป็นข้อความที่ครูอ่านรู้เรื่อง
+// — ข้อความเทคนิคเต็มยังถูก log ฝั่งเซิร์ฟเวอร์ไว้ให้ผู้ดูแลตรวจสอบ ไม่ส่งไปให้ผู้ใช้เห็น
+function toTeacherSaveError(error: { message?: string; code?: string } | null | undefined, action: "save" | "delete" = "save"): string {
+  console.error("[question-bank]", action, error?.code, error?.message);
+  if (error?.code === "42501") return "คุณไม่มีสิทธิ์ดำเนินการกับข้อสอบข้อนี้";
+  return action === "delete"
+    ? "ลบข้อสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
+    : "บันทึกข้อสอบไม่สำเร็จ กรุณาตรวจสอบข้อมูลคำตอบหรือลองใหม่อีกครั้ง";
+}
 
 export type Difficulty = "easy" | "medium" | "hard";
 // ตัดตัวเลือก "code_practical" ออกแล้ว (ไม่เคยมีโค้ดจุดไหนใช้ branch ตามค่านี้เลยนอกจาก
@@ -10,14 +22,22 @@ export type QuestionFormat = "multiple_choice";
 export type UsageType = "popup" | "final";
 export type PrivacyScope = "private" | "department" | "public";
 
-export type InteractionType = "multiple_choice" | "true_false" | "sequencing" | "matching" | "fill_in_blank" | "note_callout";
+export type InteractionType = "multiple_choice" | "true_false" | "multi_select" | "sequencing" | "matching" | "fill_in_blank" | "drag_drop" | "note_callout";
 
 // type ที่รองรับ choices (question_bank_choices) — ต้อง sync กับ frontend ENABLED_INTERACTION_TYPES
-const CHOICE_BASED_TYPES: InteractionType[] = ["multiple_choice", "true_false"];
+const CHOICE_BASED_TYPES: InteractionType[] = ["multiple_choice", "true_false", "multi_select"];
 
 export interface QuestionBankChoiceInput {
   text: string;
   isCorrect: boolean;
+}
+
+// ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพประกอบคำถาม x/y เป็น % ของขนาดภาพ (0-100) — shape เดียวกับ
+// ImagePinInput ใน src/app/dashboard/teacher/courses/[courseId]/lessons/new/actions.ts =====
+export interface ImagePinInput {
+  id: string;
+  x: number;
+  y: number;
 }
 
 // เป้าหมายการผูกเนื้อหา 1 รายการ: เลือกคอร์ส+บทเรียน (lessonId มีค่า) หรือเลือกทั้งคอร์ส (lessonId เป็น null)
@@ -38,6 +58,10 @@ export interface QuestionBankInput {
   choices: QuestionBankChoiceInput[];
   interactionType: InteractionType;
   answerData: unknown | null;// ใช้เฉพาะ sequencing/matching/fill_in_blank/note_callout
+  imageUrl: string | null; // รูปภาพประกอบคำถาม (ถ้ามี) — public URL บน R2
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ (ไม่บังคับ ใช้ได้เมื่อมี imageUrl) =====
+  imageCaption: string | null;
+  imagePins: ImagePinInput[] | null;
 }
 
 async function requireTeacher(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -50,6 +74,20 @@ async function requireTeacher(supabase: Awaited<ReturnType<typeof createClient>>
 
 function validateQuestion(input: QuestionBankInput): string | null {
   if (!input.questionText.trim()) return "กรุณากรอกคำถาม";
+
+  // multi_select: ตรวจแยกก่อน (ถูกได้หลายข้อ) — ใช้ได้ทั้ง Final Exam และ Pop-up Quiz (popup UI ใน generate.ts รองรับแล้ว)
+  if (input.interactionType === "multi_select") {
+    if (!MULTI_SELECT_ENABLED) return "ยังไม่เปิดให้ใช้คำถามแบบ Multiple Select";
+    const problems = validateMultiSelectAuthoring(input.choices.filter((choice) => choice.text.trim()));
+    return problems.length > 0 ? problems.join(" / ") : null;
+  }
+
+  // drag_drop (เติมคำแบบลากวาง): ใช้ได้ทั้ง Final Exam และ Pop-up Quiz
+  if (input.interactionType === "drag_drop") {
+    if (!DRAG_DROP_ENABLED) return "ยังไม่เปิดให้ใช้คำถามแบบเติมคำ (ลากวาง)";
+    const problems = validateDragDropAuthoring(input.answerData);
+    return problems.length > 0 ? problems.join(" / ") : null;
+  }
 
   const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
 
@@ -166,10 +204,13 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
       privacy_scope: input.privacyScope,
       interaction_type: input.interactionType,
       answer_data: isChoiceBased ? null : input.answerData,
+      image_url: input.imageUrl || null,
+      image_caption: input.imageCaption?.trim() || null,
+      image_pins: input.imagePins ?? null,
     })
     .select("id")
     .single();
-  if (questionError || !question) return { error: questionError?.message ?? "สร้างคำถามไม่สำเร็จ" };
+  if (questionError || !question) return { error: toTeacherSaveError(questionError) };
 
   if (isChoiceBased) {
     const choiceRows = input.choices
@@ -181,7 +222,7 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
         order_index: index,
       }));
     const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
-    if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
+    if (choicesError) return { error: toTeacherSaveError(choicesError) };
   }
   // const choiceRows = input.choices
   //   .filter((choice) => choice.text.trim())
@@ -199,7 +240,7 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
     const { error: tagsError } = await supabase
       .from("question_bank_topic_tags")
       .insert(buildTagRows(question.id, input.topicTags, courseMap, lessonMap));
-    if (tagsError) return { error: `บันทึกแท็กคอร์ส/บทเรียนไม่สำเร็จ: ${tagsError.message}` };
+    if (tagsError) return { error: toTeacherSaveError(tagsError) };
   }
 
   revalidatePath("/dashboard/teacher/question-bank");
@@ -236,34 +277,37 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
       privacy_scope: input.privacyScope,
       interaction_type: input.interactionType,
       answer_data: isChoiceBased ? null : input.answerData,
+      image_url: input.imageUrl || null,
+      image_caption: input.imageCaption?.trim() || null,
+      image_pins: input.imagePins ?? null,
     })
     .eq("id", id);
-  if (updateError) return { error: updateError.message };
+  if (updateError) return { error: toTeacherSaveError(updateError) };
 
   // แทนที่ choices/tags ทั้งชุด (ง่ายและปลอดภัยกว่า diff รายตัว)
   const { error: deleteChoicesError } = await supabase.from("question_bank_choices").delete().eq("question_id", id);
-  if (deleteChoicesError) return { error: deleteChoicesError.message };
+  if (deleteChoicesError) return { error: toTeacherSaveError(deleteChoicesError) };
   // const choiceRows = input.choices
   //   .filter((choice) => choice.text.trim())
   //   .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
   // const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
-  // if (insertChoicesError) return { error: insertChoicesError.message };
+  // if (insertChoicesError) return { error: toTeacherSaveError(insertChoicesError) };
     if (isChoiceBased) {
     const choiceRows = input.choices
       .filter((choice) => choice.text.trim())
       .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
     const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
-    if (insertChoicesError) return { error: insertChoicesError.message };
+    if (insertChoicesError) return { error: toTeacherSaveError(insertChoicesError) };
   }
 
   const { error: deleteTagsError } = await supabase.from("question_bank_topic_tags").delete().eq("question_id", id);
-  if (deleteTagsError) return { error: deleteTagsError.message };
+  if (deleteTagsError) return { error: toTeacherSaveError(deleteTagsError) };
     if (input.topicTags.length) {
     const { courseMap, lessonMap } = await fetchTitleMaps(supabase, input.topicTags);
     const { error: insertTagsError } = await supabase
       .from("question_bank_topic_tags")
       .insert(buildTagRows(id, input.topicTags, courseMap, lessonMap));
-    if (insertTagsError) return { error: insertTagsError.message };
+    if (insertTagsError) return { error: toTeacherSaveError(insertTagsError) };
   }
 
   revalidatePath("/dashboard/teacher/question-bank");
@@ -281,7 +325,7 @@ export async function deleteQuestionBankItem(id: string): Promise<{ error?: stri
   if (!auth.isAdmin && existing.owner_teacher_id !== auth.user.id) return { error: "ไม่มีสิทธิ์ลบคำถามนี้" };
 
   const { error } = await supabase.from("question_bank").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: toTeacherSaveError(error, "delete") };
 
   revalidatePath("/dashboard/teacher/question-bank");
   return {};
@@ -314,10 +358,13 @@ export async function copyQuestionBankItem(sourceId: string): Promise<{ error?: 
       source_question_id: source.id,
       interaction_type: source.interaction_type,
       answer_data: source.answer_data,
+      image_url: source.image_url,
+      image_caption: source.image_caption,
+      image_pins: source.image_pins,
     })
     .select("id")
     .single();
-  if (copyError || !copied) return { error: copyError?.message ?? "คัดลอกคำถามไม่สำเร็จ" };
+  if (copyError || !copied) return { error: toTeacherSaveError(copyError) };
 
   const choiceRows = (source.question_bank_choices ?? []).map((choice: { choice_text: string; is_correct: boolean; order_index: number }) => ({
     question_id: copied.id,

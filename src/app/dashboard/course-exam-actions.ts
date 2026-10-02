@@ -3,12 +3,27 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 import { loadSampledFinalExamQuestions } from "@/lib/courses/question-bank-sampling";
+import type { DragDropAnswerData, DragDropDisplay, ExamInteractionType, MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
+import { validateDragDropAuthoring, validateMultiSelectAuthoring } from "@/lib/quiz/validators/authoring";
+import { DRAG_DROP_ENABLED, MULTI_SELECT_ENABLED } from "@/lib/quiz/config/rollout";
+
+// type ที่รองรับ choices (quiz_choices) — matching/sequencing ใช้ answerData แทน (ไม่มี choices)
+const CHOICE_BASED_TYPES = ["multiple_choice", "true_false", "multi_select"] as const;
+
+// ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพ (ตามแบบ actions.ts ของ question-bank/lessons อื่นๆ) =====
+interface ImagePinInput { id: string; x: number; y: number }
 
 export interface CourseExamQuestionInput {
   questionText: string;
   explanation: string | null;
   choices: { text: string; isCorrect: boolean }[];
-  interactionType: "multiple_choice" | "true_false";
+  interactionType: ExamInteractionType;
+  imageUrl?: string | null;
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ =====
+  imageCaption?: string | null;
+  imagePins?: ImagePinInput[] | null;
+  // ===== เพิ่มใหม่: เฉลยของ matching/sequencing (ไม่ใช้กับ multiple_choice/true_false) =====
+  answerData?: MatchingAnswerData | SequencingAnswerData | DragDropAnswerData | null;
 }
 
 export async function saveCourseFinalExam(input: {
@@ -33,13 +48,42 @@ export async function saveCourseFinalExam(input: {
   for (let index = 0; index < input.questions.length; index += 1) {
     const question = input.questions[index];
     if (!question.questionText.trim()) return { error: `กรุณากรอกคำถามข้อ ${index + 1}` };
-    const choices = question.choices.filter((choice) => choice.text.trim());
-    if (choices.length < 2) return { error: `คำถามข้อ ${index + 1} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก` };
-    if (choices.filter((choice) => choice.isCorrect).length !== 1) {
-      return { error: `คำถามข้อ ${index + 1} ต้องมีคำตอบที่ถูกเพียง 1 ตัวเลือก` };
-    }
-    if (question.interactionType === "true_false" && choices.length !== 2) {
-      return { error: `คำถามข้อ ${index + 1} เป็น True/False ต้องมี 2 ตัวเลือกเท่านั้น` };
+    const isChoiceBased = (CHOICE_BASED_TYPES as readonly string[]).includes(question.interactionType);
+
+    // ===== เพิ่มใหม่: แยก validate ตาม interactionType — matching/sequencing ไม่มี choices เลย
+    // จะใช้เงื่อนไข "ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก" แบบเดิมไม่ได้ =====
+    if (question.interactionType === "multi_select") {
+      // multi_select ถูกได้หลายข้อ — ใช้ตัวตรวจกลางตัวเดียวกับฟอร์ม (รายงานทุกปัญหาที่เจอ)
+      if (!MULTI_SELECT_ENABLED) return { error: `คำถามข้อ ${index + 1}: ยังไม่เปิดให้ใช้คำถามแบบ Multiple Select` };
+      const problems = validateMultiSelectAuthoring(question.choices.filter((choice) => choice.text.trim()));
+      if (problems.length > 0) return { error: `คำถามข้อ ${index + 1} (Multiple Select): ${problems.join(" / ")}` };
+    } else if (isChoiceBased) {
+      const choices = question.choices.filter((choice) => choice.text.trim());
+      if (choices.length < 2) return { error: `คำถามข้อ ${index + 1} ต้องมีตัวเลือกอย่างน้อย 2 ตัวเลือก` };
+      if (choices.filter((choice) => choice.isCorrect).length !== 1) {
+        return { error: `คำถามข้อ ${index + 1} ต้องมีคำตอบที่ถูกเพียง 1 ตัวเลือก` };
+      }
+      if (question.interactionType === "true_false" && choices.length !== 2) {
+        return { error: `คำถามข้อ ${index + 1} เป็น True/False ต้องมี 2 ตัวเลือกเท่านั้น` };
+      }
+    } else if (question.interactionType === "matching") {
+      const pairs = (question.answerData as MatchingAnswerData | null | undefined)?.pairs ?? [];
+      const filled = pairs.filter((pair) => pair.left?.trim() && pair.right?.trim());
+      if (filled.length < 2) return { error: `คำถามข้อ ${index + 1} (Matching) ต้องกรอกคู่จับคู่ให้ครบทั้งฝั่งซ้ายและขวา อย่างน้อย 2 คู่` };
+      const leftValues = filled.map((pair) => pair.left.trim());
+      if (new Set(leftValues).size !== leftValues.length) {
+        return { error: `คำถามข้อ ${index + 1} (Matching) รายการฝั่งซ้ายห้ามซ้ำกัน` };
+      }
+    } else if (question.interactionType === "drag_drop") {
+      // เติมคำแบบลากวาง — ใช้ตัวตรวจกลางตัวเดียวกับฟอร์มและ server (รายงานทุกปัญหาที่เจอ)
+      if (!DRAG_DROP_ENABLED) return { error: `คำถามข้อ ${index + 1}: ยังไม่เปิดให้ใช้คำถามแบบเติมคำ (ลากวาง)` };
+      const problems = validateDragDropAuthoring(question.answerData);
+      if (problems.length > 0) return { error: `คำถามข้อ ${index + 1} (เติมคำ): ${problems.join(" / ")}` };
+    } else if (question.interactionType === "sequencing") {
+      const items = (question.answerData as SequencingAnswerData | null | undefined)?.items ?? [];
+      if (items.filter((item) => item.text?.trim()).length < 2) {
+        return { error: `คำถามข้อ ${index + 1} (Sequencing) ต้องกรอกรายการที่จะให้เรียงลำดับ อย่างน้อย 2 รายการ` };
+      }
     }
   }
 
@@ -87,6 +131,7 @@ export async function saveCourseFinalExam(input: {
 
   for (let questionIndex = 0; questionIndex < input.questions.length; questionIndex += 1) {
     const question = input.questions[questionIndex];
+    const isChoiceBased = (CHOICE_BASED_TYPES as readonly string[]).includes(question.interactionType);
     const { data: createdQuestion, error: questionError } = await supabase
       .from("quiz_questions")
       .insert({
@@ -96,21 +141,29 @@ export async function saveCourseFinalExam(input: {
         video_timestamp_seconds: null,
         order_index: questionIndex,
         interaction_type: question.interactionType,
+        // ===== เพิ่มใหม่: เฉลย matching/sequencing เก็บใน answer_data (jsonb) — choice-based ไม่ใช้ ให้เป็น null
+        answer_data: isChoiceBased ? null : question.answerData ?? null,
+        image_url: question.imageUrl ?? null,
+        image_caption: question.imageCaption?.trim() || null,
+        image_pins: question.imagePins ?? null,
       })
       .select("id")
       .single();
     if (questionError || !createdQuestion) return { error: questionError?.message ?? "บันทึกคำถามไม่สำเร็จ" };
 
-    const choiceRows = question.choices
-      .filter((choice) => choice.text.trim())
-      .map((choice, choiceIndex) => ({
-        question_id: createdQuestion.id,
-        choice_text: choice.text.trim(),
-        is_correct: choice.isCorrect,
-        order_index: choiceIndex,
-      }));
-    const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
-    if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
+    // matching/sequencing ไม่มี choices เลย (เฉลยอยู่ใน answer_data ด้านบนแล้ว) — insert แค่ตอน choice-based เท่านั้น
+    if (isChoiceBased) {
+      const choiceRows = question.choices
+        .filter((choice) => choice.text.trim())
+        .map((choice, choiceIndex) => ({
+          question_id: createdQuestion.id,
+          choice_text: choice.text.trim(),
+          is_correct: choice.isCorrect,
+          order_index: choiceIndex,
+        }));
+      const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
+      if (choicesError) return { error: `บันทึกตัวเลือกไม่สำเร็จ: ${choicesError.message}` };
+    }
   }
 
   // if (!isAdmin) {
@@ -233,8 +286,16 @@ export interface PreviewQuestion {
   id: string;
   lessonId: string | null;
   questionText: string;
+  imageUrl: string | null;
+  // ===== เพิ่มใหม่: คำบรรยาย/หมุดบนรูป — พรีวิวหน้าตั้งค่าสุ่มข้อสอบขาดไปเหมือนกับ imageUrl เดิม =====
+  imageCaption: string | null;
+  imagePins: { id: string; x: number; y: number }[] | null;
   choices: { text: string; isCorrect: boolean }[];
-   interactionType: "multiple_choice" | "true_false"; 
+  interactionType: ExamInteractionType;
+  // ===== เพิ่มใหม่: preview ของ matching/sequencing (สลับลำดับแล้ว ไม่มีเฉลย เหมือนที่ส่งให้นักเรียนจริง)
+  matching: { left: string[]; rightOptions: string[] } | null;
+  sequencing: { id: string; text: string }[] | null;
+  dragDrop: DragDropDisplay | null;
 }
 
 // ★ แก้ใหม่: เดิมฟังก์ชันนี้รับแค่ courseId แล้วไปอ่านกติกาที่ "บันทึกไว้ล่าสุด" จาก DB มาพรีวิว
@@ -276,10 +337,16 @@ export async function previewCourseExamSample(input: {
         id: question.id,
         lessonId: question.lessonId ?? null,
         questionText: question.question_text,
+        imageUrl: question.image_url ?? null,
+        imageCaption: question.image_caption ?? null,
+        imagePins: question.image_pins ?? null,
         interactionType: question.interactionType,
         choices: [...question.quiz_choices]
           .sort((a, b) => a.order_index - b.order_index)
           .map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
+        matching: question.matchingDisplay ?? null,
+        sequencing: question.sequencingDisplay ?? null,
+        dragDrop: question.dragDropDisplay ?? null,
       })),
     };
   } catch (sampleError) {

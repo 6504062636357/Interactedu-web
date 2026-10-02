@@ -53,6 +53,10 @@ function setup(options = {}) {
   const dependencies = {
     '@/utils/supabase/server': { createClient: async () => client },
     'next/cache': { revalidatePath() {} },
+    // ตัวตรวจ/แฟล็กของคำถามประเภทใหม่ (multi_select/drag_drop) — lessons/new/actions.ts import มาใช้ ที่นี่ใช้ stub ผ่านเสมอ
+    // (ตรรกะจริงทดสอบแยกใน tests/quiz-new-types.test.cjs)
+    '@/lib/quiz/validators/authoring': { validateMultiSelectAuthoring: () => [], validateDragDropAuthoring: () => [] },
+    '@/lib/quiz/config/rollout': { MULTI_SELECT_ENABLED: true, DRAG_DROP_ENABLED: true },
     '@/lib/notifications/service': { createNotification: async value => notifications.push(value), notifyAdmins: async value => notifications.push(value) },
     '@/lib/courses/question-bank-sampling': {
       loadSampledPopupQuestion: async () => ({}),

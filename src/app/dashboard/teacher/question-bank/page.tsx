@@ -8,7 +8,7 @@ type TopicTagRow = {
   course_id: string | null;
   lesson_id: string | null;
   courses: { title: string } | null;
-  lessons: { order_index: number } | null;
+  lessons: { order_index: number; title: string | null } | null;
 };
 
 function getTopicLabel(tags: TopicTagRow[], category: string | null): string {
@@ -18,7 +18,7 @@ function getTopicLabel(tags: TopicTagRow[], category: string | null): string {
         const courseTitle = tag.courses?.title ?? "";
         // เลือกทั้งคอร์ส + บทเรียน
         if (tag.lesson_id && tag.lessons) {
-          return `${courseTitle} / บทที่ ${tag.lessons.order_index + 1}`;
+          return `${courseTitle} / ${tag.lessons.title?.trim() || `บทที่ ${tag.lessons.order_index + 1}`}`;
         }
         // เลือกคอร์สอย่างเดียว
         return courseTitle;
@@ -38,18 +38,29 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
   // RLS จัดการ scope ให้อยู่แล้ว (owner + public + department ที่ match category)
-  const { data, error } = await supabase
+  // ครูเห็นเฉพาะข้อสอบที่ตัวเองสร้าง (ไม่ยุ่งกับของครูท่านอื่น) — แอดมินยังเห็นทั้งหมด
+  let bankQuery = supabase
     .from("question_bank")
     .select(`
-      id, question_text, category, difficulty, usage_type, privacy_scope, owner_teacher_id,
+      id, question_text, category, difficulty, usage_type, interaction_type, privacy_scope, owner_teacher_id,
       question_bank_topic_tags (
         course_id,
         lesson_id,
         courses ( title ),
-        lessons ( order_index )
+        lessons ( order_index, title )
       )
     `)
     .order("created_at", { ascending: false });
+  if (profile?.role === "teacher") bankQuery = bankQuery.eq("owner_teacher_id", user.id);
+  const { data, error } = await bankQuery;
+
+  // คอร์สที่ครูคนนี้เป็นเจ้าของ — ใช้เป็นตัวกรองในหน้ารายการ
+  const { data: ownCourseRows } = await supabase
+    .from("courses")
+    .select("id, title")
+    .eq("created_by", user.id)
+    .order("title", { ascending: true });
+  const ownCourses = (ownCourseRows ?? []).map((course) => ({ id: course.id as string, title: (course.title as string) ?? "" }));
 
   const questions = (data ?? []).map((question) => ({
     id: question.id,
@@ -57,8 +68,12 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
     category: question.category,
     difficulty: question.difficulty,
     usageType: question.usage_type,
+    interactionType: question.interaction_type ?? "multiple_choice",
     privacyScope: question.privacy_scope,
     isOwner: question.owner_teacher_id === user.id,
+    courseIds: ((question.question_bank_topic_tags ?? []) as unknown as TopicTagRow[])
+      .map((tag) => tag.course_id)
+      .filter((id): id is string => Boolean(id)),
     topicLabel: getTopicLabel(
       (question.question_bank_topic_tags ?? []) as unknown as TopicTagRow[],
       question.category
@@ -98,7 +113,7 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
           โหลดคลังข้อสอบไม่สำเร็จ: {error.message}
         </p>
       )}
-      <QuestionBankList questions={questions} />
+      <QuestionBankList questions={questions} ownCourses={ownCourses} />
     </div>
   );
 }

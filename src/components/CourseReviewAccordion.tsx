@@ -3,6 +3,8 @@
 import { useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { approveLesson, rejectLesson } from "@/app/dashboard/admin/courses/[courseId]/review/actions";
+import DragDropAnswerSummary from "@/components/courses/DragDropAnswerSummary";
+import type { ExamInteractionType, MatchingAnswerData, SequencingAnswerData } from "@/types/interaction";
 
 interface QuizChoice {
   choice_text: string;
@@ -16,8 +18,19 @@ interface QuizQuestion {
   order_index: number;
   video_timestamp_seconds: number | null;
   explanation: string | null;
+  image_url?: string | null;
+  // ===== เพิ่มใหม่: คำบรรยายใต้ภาพ + หมุดตัวเลขชี้เป้าบนภาพ + ประเภทคำถาม/เฉลย (จับคู่/เรียงลำดับ) —
+  // เดิมหน้านี้ query ไม่ได้ select field พวกนี้มาเลย ทำให้คำถามจับคู่/เรียงลำดับโชว์เป็นการ์ดเปล่า
+  // (ไม่มี quiz_choices ให้ใช้) และรูปก็ไม่เคยมีหมุด/แคปชันให้เห็น (เหมือนบั๊กเดียวกับที่เคยแก้ใน
+  // AdminLessonOverview.tsx — ที่นี่เป็นคนละ component คนละ query เลยต้องแก้แยกอีกจุด)
+  image_caption?: string | null;
+  image_pins?: { id: string; x: number; y: number }[] | null;
+  interaction_type?: ExamInteractionType | null;
+  answer_data?: MatchingAnswerData | SequencingAnswerData | Record<string, unknown> | null;
   quiz_choices: QuizChoice[];
 }
+
+const MATCHING_PAIR_COLORS = ["#0F1B3D", "#00B37E", "#FF8A3D", "#2F8FFF", "#FF4FA3", "#C98500"];
 
 interface VideoQuizMarker {
   id: string;
@@ -294,37 +307,114 @@ export default function CourseReviewAccordion({
                         ...randomMarkers.map((m) => ({ kind: "random" as const, ts: m.timestamp_seconds, marker: m })),
                       ].sort((a, b) => a.ts - b.ts);
 
-                      const renderQuestion = (q: QuizQuestion, qi: number) => (
-                        <div key={q.id}>
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="text-[11px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-0.5 rounded-full shrink-0">
-                              ⏱ {formatTimestamp(q.video_timestamp_seconds ?? 0)}
-                            </span>
-                            <p className="text-[13.5px] font-bold text-[#0F1B3D]">
-                              {qi + 1}. {q.question_text}
-                            </p>
+                      const renderQuestion = (q: QuizQuestion, qi: number) => {
+                        const interactionType = q.interaction_type ?? "multiple_choice";
+                        const matchingData = interactionType === "matching" ? (q.answer_data as MatchingAnswerData | null) : null;
+                        const sequencingData = interactionType === "sequencing" ? (q.answer_data as SequencingAnswerData | null) : null;
+                        return (
+                          <div key={q.id}>
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[11px] font-bold text-[#FF5A3C] bg-[#FF5A3C]/10 px-2 py-0.5 rounded-full shrink-0">
+                                ⏱ {formatTimestamp(q.video_timestamp_seconds ?? 0)}
+                              </span>
+                              <p className="text-[13.5px] font-bold text-[#0F1B3D]">
+                                {qi + 1}. {q.question_text}
+                              </p>
+                            </div>
+                            {q.image_url && (
+                              /* ===== แก้เพิ่ม: คำบรรยายอยู่ด้านล่างภาพ ชิดภาพไม่เว้นช่องว่าง จัดกึ่งกลางเทียบกับ
+                                  ความกว้างของรูป (กล่องนอกเป็น inline-block) ไม่ใช่กึ่งกลางการ์ด ===== */
+                              <div className="mb-1.5 inline-block max-w-full">
+                                <div className="relative">
+                                  <img src={q.image_url} alt="" className="h-20 w-auto max-w-full rounded-lg border border-[#0F1B3D]/[0.08] object-contain bg-white" />
+                                  {/* ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพ (อ่านอย่างเดียว) ===== */}
+                                  {(q.image_pins ?? []).map((pin, pinIndex) => (
+                                    <span
+                                      key={pin.id}
+                                      className="absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-[#FF5A3C] text-[9px] font-bold text-white ring-1 ring-white"
+                                      style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                                    >
+                                      {pinIndex + 1}
+                                    </span>
+                                  ))}
+                                </div>
+                                {q.image_caption && (
+                                  <p className="mt-0 text-center text-[11.5px] font-semibold text-[#0F1B3D]/50">{q.image_caption}</p>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ===== เพิ่มใหม่: แสดงคู่จับคู่พร้อมเฉลย (เดิมคำถามประเภทนี้ไม่มี
+                                quiz_choices เลยโชว์เป็นการ์ดเปล่าไม่มีเนื้อหาให้รีวิวอะไรเลย) ===== */}
+                            {interactionType === "matching" && matchingData && (
+                              <div className="space-y-1 pl-4">
+                                <span className="inline-flex items-center rounded-full bg-[#0F1B3D]/[0.06] px-2 py-0.5 text-[10px] font-bold text-[#0F1B3D]/60">จับคู่</span>
+                                {matchingData.pairs.map((pair, pIndex) => {
+                                  const color = MATCHING_PAIR_COLORS[pIndex % MATCHING_PAIR_COLORS.length];
+                                  return (
+                                    <div key={pIndex} className="flex items-center gap-2 text-[13px] text-[#0F1B3D]/70">
+                                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white" style={{ backgroundColor: color }}>
+                                        {pIndex + 1}
+                                      </span>
+                                      <span className="rounded-md px-1.5 py-0.5" style={{ backgroundColor: `${color}14` }}>{pair.left}</span>
+                                      <span className="text-[#0F1B3D]/30" aria-hidden="true">→</span>
+                                      <span className="rounded-md px-1.5 py-0.5" style={{ backgroundColor: `${color}14` }}>{pair.right}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {interactionType === "drag_drop" && <DragDropAnswerSummary answerData={q.answer_data} />}
+
+                            {/* ===== เพิ่มใหม่: แสดงลำดับที่ถูกต้องของ sequencing (เหตุผลเดียวกับ matching
+                                ด้านบน) ===== */}
+                            {interactionType === "sequencing" && sequencingData && (
+                              <div className="space-y-1 pl-4">
+                                <span className="inline-flex items-center rounded-full bg-[#0F1B3D]/[0.06] px-2 py-0.5 text-[10px] font-bold text-[#0F1B3D]/60">เรียงลำดับ</span>
+                                <ol className="space-y-1">
+                                  {sequencingData.correct_order.map((itemId, orderIndex) => {
+                                    const item = sequencingData.items.find((it) => it.id === itemId);
+                                    return (
+                                      <li key={itemId} className="flex items-center gap-2 text-[13px] text-[#0F1B3D]/70">
+                                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#0F1B3D] text-[9px] font-bold text-white">
+                                          {orderIndex + 1}
+                                        </span>
+                                        {item?.text ?? "(รายการถูกลบ)"}
+                                      </li>
+                                    );
+                                  })}
+                                </ol>
+                              </div>
+                            )}
+
+                            {(q.quiz_choices ?? []).length > 0 && (
+                              <ul className="space-y-1 pl-4">
+                                {interactionType === "multi_select" && (
+                                  <li className="list-none"><span className="mb-1 inline-flex items-center rounded-full bg-[#0F1B3D]/[0.06] px-2 py-0.5 text-[10px] font-bold text-[#0F1B3D]/60">เลือกได้หลายคำตอบ</span></li>
+                                )}
+                                {q.quiz_choices
+                                  .sort((a, b) => a.order_index - b.order_index)
+                                  .map((c, ci) => (
+                                    <li
+                                      key={ci}
+                                      className={`text-[13px] flex items-center gap-2 ${
+                                        c.is_correct ? "text-[#00B37E] font-bold" : "text-[#0F1B3D]/60"
+                                      }`}
+                                    >
+                                      {c.is_correct && "✓"} {c.choice_text}
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
+                            {q.explanation && (
+                              <p className="text-[12.5px] text-[#0F1B3D]/40 mt-1.5 pl-4">
+                                คำอธิบาย: {q.explanation}
+                              </p>
+                            )}
                           </div>
-                          <ul className="space-y-1 pl-4">
-                            {q.quiz_choices
-                              .sort((a, b) => a.order_index - b.order_index)
-                              .map((c, ci) => (
-                                <li
-                                  key={ci}
-                                  className={`text-[13px] flex items-center gap-2 ${
-                                    c.is_correct ? "text-[#00B37E] font-bold" : "text-[#0F1B3D]/60"
-                                  }`}
-                                >
-                                  {c.is_correct && "✓"} {c.choice_text}
-                                </li>
-                              ))}
-                          </ul>
-                          {q.explanation && (
-                            <p className="text-[12.5px] text-[#0F1B3D]/40 mt-1.5 pl-4">
-                              คำอธิบาย: {q.explanation}
-                            </p>
-                          )}
-                        </div>
-                      );
+                        );
+                      };
 
                       return (
                         <>

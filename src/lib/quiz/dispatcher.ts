@@ -8,6 +8,8 @@ import { validateTrueFalse } from './validators/true-false';
 import { validateSequencing } from './validators/sequencing';
 import { validateMatching } from './validators/matching';
 import { validateFillInBlank } from './validators/fill-in-blank';
+import { validateMultiSelect } from './validators/multi-select';
+import { validateDragDrop } from './validators/drag-drop';
 
 export function validateAnswer(
   question: QuestionForValidation,
@@ -28,6 +30,12 @@ export function validateAnswer(
 
     case 'fill_in_blank':
       return validateFillInBlank(question, studentAnswer as any);
+
+    case 'multi_select':
+      return validateMultiSelect(question, studentAnswer as any);
+
+    case 'drag_drop':
+      return validateDragDrop(question, studentAnswer as any);
 
     case 'note_callout':
       throw new Error('note_callout ไม่มีคำตอบให้ตรวจ — ห้ามเรียก validateAnswer กับ type นี้');

@@ -296,16 +296,55 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
   let hasCustomExamQuestions = false;
   let customExamIssue: string | null = null;
   if (latestDraftIds.length > 0 && !examConfig) {
+      // ===== เพิ่มใหม่: ต้องดึง interaction_type/answer_data มาด้วย ไม่งั้น matching/sequencing
+      // (ไม่มี quiz_choices เลย) จะโดนเช็คด้วยเงื่อนไข choices เดิม แล้วฟ้อง "ตัวเลือกไม่ครบ" เสมอ
+      // ทั้งที่กรอกครบแล้ว (เพราะเฉลยของสองแบบนี้อยู่ใน answer_data ไม่ใช่ quiz_choices)
       const { data: questions, error: questionsError } = await supabase
         .from("quiz_questions")
-        .select("id, question_text, quiz_choices(choice_text, is_correct)")
+        .select("id, question_text, interaction_type, answer_data, quiz_choices(choice_text, is_correct)")
         .in("lesson_draft_id", latestDraftIds)
         .is("video_timestamp_seconds", null);
       hasCustomExamQuestions = (questions?.length ?? 0) > 0;
       if (questionsError) customExamIssue = "ตรวจสอบบททดสอบท้ายคอร์สไม่สำเร็จ กรุณาลองใหม่";
-      else if (questions?.some((question) => !question.question_text?.trim() ||
-        question.quiz_choices.filter((choice) => choice.choice_text?.trim()).length < 2 ||
-        question.quiz_choices.filter((choice) => choice.is_correct && choice.choice_text?.trim()).length !== 1)) {
+      else if (questions?.some((question) => {
+        if (!question.question_text?.trim()) return true;
+        const interactionType = question.interaction_type ?? "multiple_choice";
+        if (interactionType === "matching") {
+          const pairs = (question.answer_data as { pairs?: { left: string; right: string }[] } | null)?.pairs ?? [];
+          return pairs.filter((pair) => pair.left?.trim() && pair.right?.trim()).length < 2;
+        }
+        if (interactionType === "sequencing") {
+          const items = (question.answer_data as { items?: { text: string }[] } | null)?.items ?? [];
+          return items.filter((item) => item.text?.trim()).length < 2;
+        }
+        if (interactionType === "drag_drop") {
+          // เช็คโครงสร้างเบา ๆ ว่าเฉลยครบ (ตัวตรวจเต็มรันตอนบันทึกแล้ว) — เขียนตรงนี้แทนการ import
+          // เพราะเทสเดิม (tests/admin-course-flow) โหลดไฟล์นี้ใน sandbox ที่อนุญาตเฉพาะ dependency ที่ระบุไว้
+          const data = question.answer_data as { template?: unknown; blanks?: { id: string }[]; correct_map?: Record<string, string> } | null;
+          const correctMap = data?.correct_map;
+          return (
+            !data ||
+            typeof data.template !== "string" ||
+            !Array.isArray(data.blanks) ||
+            data.blanks.length < 1 ||
+            !correctMap ||
+            data.blanks.some((blank) => !Object.prototype.hasOwnProperty.call(correctMap, blank.id))
+          );
+        }
+        if (interactionType === "multi_select") {
+          // ถูกได้หลายข้อ — ห้ามใช้กฎ "ถูกเพียง 1 ข้อ" ด้านล่าง ไม่งั้นจะฟ้องว่าไม่ครบทั้งที่ถูกต้อง
+          // กฎเดียวกับ validateMultiSelectAuthoring (ตัวเลือกที่กรอกแล้ว >= 2, ถูก >= 1, ไม่ถูกทุกข้อ)
+          // เขียนตรงนี้แทนการ import เพราะเทสเดิม (tests/admin-course-flow) โหลดไฟล์นี้ใน sandbox ที่อนุญาตเฉพาะ dependency ที่ระบุไว้
+          type ChoiceRow = { choice_text?: string | null; is_correct?: boolean | null };
+          const filled = question.quiz_choices.filter((choice: ChoiceRow) => choice.choice_text?.trim());
+          const correct = filled.filter((choice: ChoiceRow) => choice.is_correct).length;
+          return filled.length < 2 || correct < 1 || correct === filled.length;
+        }
+        return (
+          question.quiz_choices.filter((choice) => choice.choice_text?.trim()).length < 2 ||
+          question.quiz_choices.filter((choice) => choice.is_correct && choice.choice_text?.trim()).length !== 1
+        );
+      })) {
         customExamIssue = "บททดสอบท้ายคอร์สยังมีคำถามหรือตัวเลือกไม่ครบ กรุณาแก้ไขก่อนเผยแพร่";
       }
   }

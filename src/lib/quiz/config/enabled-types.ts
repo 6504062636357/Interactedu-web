@@ -9,8 +9,10 @@ export const ENABLED_INTERACTION_TYPES: InteractionType[] = [
   'multiple_choice',
   'true_false',
   // 'fill_in_blank',   // เปิดเมื่อ validator + UI พร้อม
-  // 'sequencing',      // เปิดเมื่อ validator + UI พร้อม
-  // 'matching',        // เปิดเมื่อ validator + UI พร้อม
+  'sequencing', // เปิดแล้ว — เฉพาะ Final Exam (สุ่มจากคลังข้อสอบ) เท่านั้น ดู FINAL_EXAM_ENABLED_TYPES ใน question-bank-sampling.ts
+  'multi_select', // เปิดแล้ว — Final Exam + Pop-up Quiz (คุมด้วยสวิตช์ใน rollout.ts)
+  'drag_drop',    // เปิดแล้ว — Final Exam + Pop-up Quiz (คุมด้วยสวิตช์ใน rollout.ts)
+  'matching',   // เปิดแล้ว — เฉพาะ Final Exam (สุ่มจากคลังข้อสอบ) เท่านั้น ดู FINAL_EXAM_ENABLED_TYPES ใน question-bank-sampling.ts
 ];
 
 // Final Exam อาจอยากจำกัดกว่านี้อีกชั้น (เช่น preset "quick_check" เอาแค่ MC)

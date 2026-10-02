@@ -108,6 +108,7 @@ async function renderOverview(options = {}) {
     scorm_tracking: ['first', 'second'].map(id => ({ ...record(id, !!options.complete, id === 'second' ? '2026-09-21' : '2026-09-20'), enrollment_id: 'enrollment', cmi_data: { core: { lesson_location: '297' } } })),
     courses: [course],
     certificates: options.certificate ? [{ id: 'certificate', course_id: 'course', user_id: 'student', status: options.certificate, issued_at: '2026-09-21' }] : [],
+    student_study_time: [],
     quiz_attempts: options.passed ? [{ id: 'attempt', enrollment_id: 'enrollment', passed: true, score: 90, submitted_at: '2026-09-21' }] : [],
   };
   const client = {
@@ -135,6 +136,7 @@ async function renderOverview(options = {}) {
     '@/utils/supabase/server': { createClient: async () => client },
     '@/lib/constants/course-cover': { DEFAULT_COURSE_COVER_URL: '/cover.png' },
     '@/lib/courses/student-progress': progress,
+    '@/lib/courses/study-time': load('src/lib/courses/study-time.ts'),
     '@/components/certificates/ClaimCertificateButton': { default: () => React.createElement('button', { 'data-claim': true }, 'Claim') },
   }).default;
   return renderToStaticMarkup(await page({ params: Promise.resolve({ courseId: 'course' }) }));

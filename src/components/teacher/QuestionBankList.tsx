@@ -11,21 +11,24 @@ interface QuestionBankRow {
   category: string | null;
   difficulty: "easy" | "medium" | "hard";
   usageType: "popup" | "final";
+  interactionType: string;
   privacyScope: "private" | "department" | "public";
   isOwner: boolean;
+  courseIds: string[];
   topicLabel: string;
 }
 
 const DIFFICULTY_LABEL: Record<string, string> = { easy: "ง่าย", medium: "ปานกลาง", hard: "ยาก" };
-const SCOPE_LABEL: Record<string, string> = { private: "ส่วนตัว", department: "หมวดวิชา", public: "สาธารณะ" };
+const TYPE_LABEL: Record<string, string> = {
+  multiple_choice: "ปรนัย",
+  true_false: "ถูก/ผิด",
+  multi_select: "เลือกหลายคำตอบ",
+  matching: "จับคู่",
+  sequencing: "เรียงลำดับ",
+  drag_drop: "เติมคำ",
+};
 const USAGE_LABEL: Record<string, string> = { popup: "Pop-up", final: "Final Exam" };
 const UNCATEGORIZED = "ไม่ระบุหมวดหมู่";
-
-const SCOPE_BADGE_CLASS: Record<string, string> = {
-  private: "bg-slate-100 text-slate-600",
-  department: "bg-blue-50 text-blue-700",
-  public: "bg-emerald-50 text-emerald-700",
-};
 
 const USAGE_BADGE_CLASS: Record<string, string> = {
   popup: "bg-violet-50 text-violet-700",
@@ -41,7 +44,7 @@ const DIFFICULTY_BADGE_CLASS: Record<string, string> = {
 
 const PAGE_SIZE = 15;
 
-export default function QuestionBankList({ questions }: { questions: QuestionBankRow[] }) {
+export default function QuestionBankList({ questions, ownCourses }: { questions: QuestionBankRow[]; ownCourses: { id: string; title: string }[] }) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const folders = useMemo(() => {
@@ -66,6 +69,7 @@ export default function QuestionBankList({ questions }: { questions: QuestionBan
     <CategoryQuestionList
       category={activeCategory}
       questions={folder?.items ?? []}
+      ownCourses={ownCourses}
       onBack={() => setActiveCategory(null)}
     />
   );
@@ -123,16 +127,19 @@ function FolderGrid({
 function CategoryQuestionList({
   category,
   questions,
+  ownCourses,
   onBack,
 }: {
   category: string;
   questions: QuestionBankRow[];
+  ownCourses: { id: string; title: string }[];
   onBack: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<string>("all");
   const [usageFilter, setUsageFilter] = useState<string>("all");
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   // const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -147,11 +154,12 @@ function CategoryQuestionList({
     return questions.filter((question) => {
       if (difficultyFilter !== "all" && question.difficulty !== difficultyFilter) return false;
       if (usageFilter !== "all" && question.usageType !== usageFilter) return false;
-      if (scopeFilter !== "all" && question.privacyScope !== scopeFilter) return false;
+      if (typeFilter !== "all" && question.interactionType !== typeFilter) return false;
+      if (courseFilter !== "all" && !question.courseIds.includes(courseFilter)) return false;
       if (keyword && !question.questionText.toLowerCase().includes(keyword)) return false;
       return true;
     });
-  }, [questions, difficultyFilter, usageFilter, scopeFilter, search]);
+  }, [questions, difficultyFilter, usageFilter, typeFilter, courseFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -258,12 +266,18 @@ function CategoryQuestionList({
           <option value="popup">Pop-up Quiz</option>
           <option value="final">Final Exam</option>
         </select>
-        {/* <select value={scopeFilter} onChange={(e) => resetPageFilters(() => setScopeFilter(e.target.value))} className={selectClass}>
-          <option value="all">ทุกสิทธิ์การเข้าถึง</option>
-          <option value="private">ส่วนตัว</option>
-          <option value="department">หมวดวิชา</option>
-          <option value="public">สาธารณะ</option>
-        </select> */}
+        <select value={typeFilter} onChange={(e) => resetPageFilters(() => setTypeFilter(e.target.value))} className={selectClass}>
+          <option value="all">ทุกประเภทคำถาม</option>
+          {Object.entries(TYPE_LABEL).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+        <select value={courseFilter} onChange={(e) => resetPageFilters(() => setCourseFilter(e.target.value))} className={selectClass}>
+          <option value="all">ทุกคอร์สของฉัน</option>
+          {ownCourses.map((course) => (
+            <option key={course.id} value={course.id}>{course.title}</option>
+          ))}
+        </select>
       </div>
 
       {selectedIds.size > 0 && (
@@ -324,7 +338,7 @@ function CategoryQuestionList({
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                       <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${DIFFICULTY_BADGE_CLASS[question.difficulty]}`}>{DIFFICULTY_LABEL[question.difficulty]}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${USAGE_BADGE_CLASS[question.usageType]}`}>{USAGE_LABEL[question.usageType]}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${SCOPE_BADGE_CLASS[question.privacyScope]}`}>{SCOPE_LABEL[question.privacyScope]}</span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">{TYPE_LABEL[question.interactionType] ?? question.interactionType}</span>
                       {!question.isOwner && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">ของครูท่านอื่น</span>}
                     </div>
                   </div>
