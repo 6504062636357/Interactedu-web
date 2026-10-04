@@ -142,6 +142,8 @@ export async function POST(request: NextRequest) {
       .select('id')
       .eq('student_id', user.id)
       .eq('course_id', courseId)
+      .eq('status', 'approved')
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
       .single();
 
     if (!enrollment) return NextResponse.json({ error: 'Enrollment not found' }, { status: 404 });
@@ -322,6 +324,8 @@ export async function GET(request: NextRequest) {
     .select('id')
     .eq('student_id', user.id)
     .eq('course_id', courseId)
+    .eq('status', 'approved')
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
 
   // ยังไม่ลงทะเบียน (หรือครูเปิดดู) — ไม่ error เพื่อให้ยังเปิดบทเรียนดูได้ แค่ไม่มี state เดิม

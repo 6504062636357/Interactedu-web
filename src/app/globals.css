@@ -12,6 +12,9 @@
   --border-soft: rgba(15, 27, 61, 0.08);
   --shadow-soft: 0 10px 35px rgba(15, 27, 61, 0.06);
   --shadow-lifted: 0 24px 60px rgba(15, 27, 61, 0.12);
+  --font-sans-th: "Noto Sans Thai";
+  --font-sans-en: "Noto Sans Thai";
+  --font-geist-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 @theme inline {

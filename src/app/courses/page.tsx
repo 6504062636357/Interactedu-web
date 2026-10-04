@@ -8,6 +8,7 @@ import AppBrand from "@/components/AppBrand";
 
 const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สทั้งหมด", href: "/courses" },
+  { label: "สมาชิก 1 เดือน", href: "/membership" },
   { label: "เส้นทางสายอาชีพ", href: "/#career-paths" },
   { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
@@ -42,6 +43,12 @@ function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatar
           </nav>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/membership"
+              className="inline-flex rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-bold text-[#3157D5] transition-colors hover:bg-blue-50 md:hidden"
+            >
+              สมาชิกรายเดือน
+            </Link>
             {displayName ? (
               <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" />
             ) : (
@@ -156,7 +163,8 @@ export default async function CoursesPage({
       .from("enrollments")
       .select("course_id")
       .eq("student_id", user.id)
-      .eq("status", "approved");
+      .eq("status", "approved")
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`);
     enrolledCourseIds = (enrollmentRows ?? []).map((e) => e.course_id as string);
   }
 

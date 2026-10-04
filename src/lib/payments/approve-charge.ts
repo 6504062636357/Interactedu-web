@@ -32,9 +32,11 @@ export async function approveEnrollmentForCharge(chargeId: string): Promise<bool
   const course = courseData(enrollment);
   const storedAmount = Number(enrollment.paid_amount ?? 0);
   const paidAmount = storedAmount > 0 ? storedAmount : Math.max(0, Number(course?.price ?? 0));
-  const approvalValues: { status: string; paid_amount: number; approved_at?: string } = {
+  const approvalValues: { status: string; paid_amount: number; approved_at?: string; membership_order_id: null; access_expires_at: null } = {
     status: "approved",
     paid_amount: paidAmount,
+    membership_order_id: null,
+    access_expires_at: null,
   };
   if (enrollment.status !== "approved") approvalValues.approved_at = new Date().toISOString();
   const { error: updateError } = await supabase
@@ -56,4 +58,3 @@ export async function approveEnrollmentForCharge(chargeId: string): Promise<bool
 
   return true;
 }
-

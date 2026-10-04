@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { activateMembershipForCharge } from "@/lib/payments/activate-membership";
 import { approveEnrollmentForCharge } from "@/lib/payments/approve-charge";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -27,10 +28,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (charge.status === "successful") {
       try {
-        await approveEnrollmentForCharge(event.data.id);
+        const membershipActivated = await activateMembershipForCharge(event.data.id);
+        if (!membershipActivated) await approveEnrollmentForCharge(event.data.id);
       } catch (error) {
-        console.error("[omise webhook] enrollment approval failed", error);
-        return NextResponse.json({ error: "Unable to approve enrollment" }, { status: 500 });
+        console.error("[omise webhook] payment approval failed", error);
+        return NextResponse.json({ error: "Unable to approve payment" }, { status: 500 });
       }
     }
   }

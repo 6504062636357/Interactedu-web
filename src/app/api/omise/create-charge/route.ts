@@ -32,12 +32,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // กันสร้างซ้ำถ้ามี enrollment pending อยู่แล้ว
   const { data: existing } = await supabase
     .from("enrollments")
-    .select("id, status")
+    .select("id, status, access_expires_at")
     .eq("student_id", user.id)
     .eq("course_id", courseId)
     .maybeSingle();
 
-  if (existing?.status === "approved") {
+  if (existing?.status === "approved"
+    && (!existing.access_expires_at || new Date(existing.access_expires_at).getTime() > Date.now())) {
     return NextResponse.json({ error: "Already enrolled" }, { status: 400 });
   }
 
@@ -83,6 +84,8 @@ console.log("Omise charge response:", JSON.stringify(charge, null, 2)); // เ�
         status: "pending",
         payment_slip_url: charge.id,
         paid_amount: course.price,
+        membership_order_id: null,
+        access_expires_at: null,
       })
       .eq("id", existing.id);
     if (updateError) {

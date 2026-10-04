@@ -28,6 +28,7 @@ export async function GET(request: Request): Promise<Response> {
     .eq("student_id", user.id)
     .eq("course_id", courseId)
     .eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
   if (enrollmentError) return Response.json({ error: "Could not load enrollment" }, { status: 500 });
   if (!enrollment) return Response.json({ error: "Forbidden" }, { status: 403 });

@@ -16,20 +16,37 @@ export async function enrollFreeCourse(courseId: string, slug: string): Promise<
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
 
-  const [{ data: enrollment, error }, { data: course }] = await Promise.all([
-    supabase
-      .from("enrollments")
-      .insert({
+  const [{ data: existing, error: existingError }, { data: course }] = await Promise.all([
+    supabase.from("enrollments").select("id, status, access_expires_at")
+      .eq("student_id", user.id).eq("course_id", courseId).maybeSingle(),
+    supabase.from("courses").select("title").eq("id", courseId).maybeSingle(),
+  ]);
+
+  if (existingError) {
+    console.error("Failed to check existing free enrollment:", existingError.message);
+    redirect(`/courses/${slug}/enroll?error=1`);
+  }
+  if (existing?.status === "approved"
+    && (!existing.access_expires_at || new Date(existing.access_expires_at).getTime() > Date.now())) {
+    redirect(`/courses/${slug}/success`);
+  }
+
+  const enrollmentQuery = existing
+    ? supabase.from("enrollments").update({
+        status: "approved",
+        approved_at: new Date().toISOString(),
+        paid_amount: 0,
+        membership_order_id: null,
+        access_expires_at: null,
+      }).eq("id", existing.id).select("id").single()
+    : supabase.from("enrollments").insert({
         student_id: user.id,
         course_id: courseId,
         status: "approved",
         approved_at: new Date().toISOString(),
         paid_amount: 0,
-      })
-      .select("id")
-      .single(),
-    supabase.from("courses").select("title").eq("id", courseId).maybeSingle(),
-  ]);
+      }).select("id").single();
+  const { data: enrollment, error } = await enrollmentQuery;
 
   if (error) {
     console.error("Failed to create free enrollment:", error.message);

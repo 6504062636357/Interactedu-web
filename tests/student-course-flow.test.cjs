@@ -100,7 +100,14 @@ test('resume time reads SCORM 1.2 and 2004, ignoring invalid bookmarks', () => {
 async function renderOverview(options = {}) {
   const course = { id: 'course', title: 'Course details', description: 'Learn the course objectives', certificate_enabled: true, certificate_pass_percentage: 70 };
   const tables = {
-    enrollments: [{ id: 'enrollment', course_id: 'course', student_id: options.foreign ? 'other-student' : 'student', status: options.pending ? 'pending' : 'approved', courses: course }],
+    enrollments: [{
+      id: 'enrollment',
+      course_id: 'course',
+      student_id: options.foreign ? 'other-student' : 'student',
+      status: options.pending ? 'pending' : 'approved',
+      access_expires_at: options.expired ? '2000-01-01T00:00:00.000Z' : options.membership ? '2999-01-01T00:00:00.000Z' : null,
+      courses: course,
+    }],
     modules: [{ id: 'module', course_id: 'course', title: 'Module', order_index: 0, lessons: [
       { id: 'first', title: 'First lesson', order_index: 0, is_published: true, scorm_source: 'generated' },
       { id: 'second', title: 'Second lesson', order_index: 1, is_published: !options.unpublished, scorm_source: 'generated' },
@@ -119,6 +126,11 @@ async function renderOverview(options = {}) {
       const query = {
         select() { return query; }, order() { return query; }, limit() { return query; },
         eq(key, value) { filters.push(row => row[key] === value); return query; },
+        or(expression) {
+          const expiry = expression.match(/access_expires_at\.is\.null,access_expires_at\.gt\.(.+)$/)?.[1];
+          if (expiry) filters.push(row => !row.access_expires_at || new Date(row.access_expires_at) > new Date(expiry));
+          return query;
+        },
         not(key, _operator, value) { filters.push(row => row[key] !== value); return query; },
         maybeSingle() { single = true; return query; },
         then(resolve, reject) {
@@ -166,4 +178,6 @@ test('overview requires login and the current student approved enrollment', asyn
   await assert.rejects(renderOverview({ noUser: true }), /REDIRECT/);
   await assert.rejects(renderOverview({ foreign: true }), /NOT_FOUND/);
   await assert.rejects(renderOverview({ pending: true }), /NOT_FOUND/);
+  await assert.rejects(renderOverview({ expired: true }), /NOT_FOUND/);
+  assert.ok((await renderOverview({ membership: true })).includes('Learn the course objectives'));
 });

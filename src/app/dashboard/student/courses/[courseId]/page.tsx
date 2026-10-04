@@ -28,7 +28,8 @@ export default async function StudentCourseOverview({ params }: { params: Promis
 
   const { data: enrollment, error: enrollmentError } = await supabase.from("enrollments")
     .select("id, courses(id, title, description, cover_image_url, category)")
-    .eq("student_id", user.id).eq("course_id", courseId).eq("status", "approved").maybeSingle();
+    .eq("student_id", user.id).eq("course_id", courseId).eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`).maybeSingle();
   if (enrollmentError) throw new Error("โหลดข้อมูลการลงทะเบียนไม่สำเร็จ");
   if (!enrollment) notFound();
   const course = Array.isArray(enrollment.courses) ? enrollment.courses[0] : enrollment.courses;

@@ -110,6 +110,7 @@ export async function ensureCertificateForCourse({
         .eq("student_id", userId)
         .eq("course_id", courseId)
         .eq("status", "approved")
+        .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
         .maybeSingle(),
     ]);
 

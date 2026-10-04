@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
+import { Banknote, LayoutDashboard } from "lucide-react";
 
 type UserRole = "student" | "teacher" | "admin";
 
@@ -58,15 +59,6 @@ function IconHeart(): ReactElement {
   );
 }
 
-function IconCard(): ReactElement {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FF5A3C">
-      <rect x="3" y="6" width="18" height="12" rx="2" strokeWidth="1.8" />
-      <path d="M3 10h18" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
 function IconSettings(): ReactElement {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FF5A3C">
@@ -106,11 +98,13 @@ function getMenuItems(role: UserRole): MenuItem[] {
 
   // student (default)
   return [
+    { label: "ภาพรวมการเรียน", href: "/dashboard/student", icon: <LayoutDashboard size={17} aria-hidden="true" /> },
     { label: "โปรไฟล์", href: "/dashboard/student/profile", icon: <IconUser /> },
     { label: "คอร์สของฉัน", href: "/dashboard/student/courses", icon: <IconPlay /> },
+    { label: "สมาชิกรายเดือน", href: "/membership", icon: <Banknote size={17} aria-hidden="true" /> },
     { label: "ใบประกาศฯ", href: "/dashboard/student/certificates", icon: <IconAward /> },
     { label: "คอร์สโปรดของฉัน", href: "/dashboard/student/favorites", icon: <IconHeart /> },
-    { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: <IconCard /> },
+    { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: <Banknote size={17} aria-hidden="true" /> },
     { label: "การตั้งค่า", href: "/dashboard/student/settings", icon: <IconSettings /> },
   ];
 }
@@ -174,7 +168,7 @@ export default function ProfileDropdown({ displayName, role, avatarUrl }: Profil
       </button>
 
       {open && (
-        <div role="menu" className="absolute right-0 z-50 mt-2.5 w-64 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.28)] backdrop-blur-xl">
+        <div role="menu" className="absolute right-0 z-50 mt-2.5 max-h-[calc(100dvh-90px)] w-64 overflow-y-auto rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.28)] backdrop-blur-xl">
           <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3.5">
             <p className="truncate text-[13px] font-extrabold text-[#0F1B3D]">{displayName}</p>
             <p className="mt-0.5 text-[10.5px] font-medium text-slate-400">บัญชี{roleLabel}</p>
