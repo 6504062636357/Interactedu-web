@@ -26,6 +26,8 @@ export async function GET(
       .select("id")
       .eq("student_id", user.id)
       .eq("course_id", lesson.course_id)
+      .eq("status", "approved")
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
       .maybeSingle();
     if (!enrollment) return NextResponse.json({ error: "Not enrolled" }, { status: 403 });
     enrollmentId = enrollment.id;

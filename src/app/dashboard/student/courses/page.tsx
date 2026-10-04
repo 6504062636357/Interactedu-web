@@ -117,6 +117,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
     .select("id, course_id, courses(id, title, cover_image_url)")
     .eq("student_id", user.id)
     .eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .order("created_at", { ascending: false });
 
   const enrollments = (data ?? []) as unknown as EnrollmentRow[];

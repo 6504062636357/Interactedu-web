@@ -56,6 +56,7 @@ export default async function EnrollPage({
     .select("id, status")
     .eq("student_id", user.id)
     .eq("course_id", typedCourse.id)
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
 
   // ถ้าเคยอนุมัติเข้าเรียนแล้ว พาไปหน้า Success

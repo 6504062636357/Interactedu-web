@@ -169,7 +169,7 @@ export default function LoginPage() {
         } else if (profile?.role === "teacher") {
           router.push("/dashboard/teacher");
         } else {
-          router.push("/");
+          router.push("/dashboard/student");
         }
       }
     } catch (catchError) {

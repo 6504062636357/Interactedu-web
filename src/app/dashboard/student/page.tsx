@@ -6,7 +6,7 @@ import { summarizeStudentProgress, type StudentProgressLesson } from "@/lib/cour
 import { formatCourseVideoDuration, formatStudyTime } from "@/lib/courses/study-time";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 import { createClient } from "@/utils/supabase/server";
-import { Award, BookOpen, CheckCircle, Clock3, GraduationCap, Play, type LucideIcon } from "lucide-react";
+import { ArrowRight, Award, Banknote, BookOpen, CheckCircle, Clock3, GraduationCap, Play, type LucideIcon } from "lucide-react";
 
 interface EnrolledCourse {
   id: string;
@@ -78,6 +78,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     .select("id, course_id, courses(id, title, cover_image_url)")
     .eq("student_id", user.id)
     .eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .order("created_at", { ascending: false });
 
   const enrollments = (enrollmentData ?? []) as unknown as EnrollmentRow[];
@@ -150,11 +151,35 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     }
   }
 
-  const { count: certificateCount } = await supabase
-    .from("certificates")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .eq("status", "issued");
+  const [certificateResult, offerResult, membershipResult] = await Promise.all([
+    supabase.from("certificates")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "issued"),
+    supabase.from("membership_settings")
+      .select("monthly_price, enabled")
+      .eq("id", true)
+      .maybeSingle(),
+    supabase.from("student_membership_orders")
+      .select("expires_at")
+      .eq("student_id", user.id)
+      .eq("status", "active")
+      .gt("expires_at", new Date().toISOString())
+      .order("expires_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const certificateCount = certificateResult.count;
+  if (offerResult.error || membershipResult.error) {
+    console.error("[student dashboard] Could not load membership", offerResult.error?.message, membershipResult.error?.message);
+  }
+  const offer = offerResult.data;
+  const membershipExpiresAt = membershipResult.data?.expires_at ?? null;
+  const membershipPrice = Number(offer?.monthly_price);
+  const offerVisible = !offerResult.error && offer?.enabled && Number.isFinite(membershipPrice) && membershipPrice > 0;
+  const paymentReady = Boolean(process.env.OMISE_SECRET_KEY && (process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY) && !membershipResult.error);
+  const membershipActive = Boolean(membershipExpiresAt && !membershipResult.error);
+  const canSubscribe = offerVisible && paymentReady;
 
   return (
     <div>
@@ -168,6 +193,30 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
           </div>
           <Link href="/courses" className="inline-flex w-fit items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-[12px] font-extrabold text-[#0F1B3D] shadow-lg transition hover:-translate-y-0.5">
             <BookOpen size={15} /> ค้นหาคอร์สใหม่
+          </Link>
+        </div>
+      </section>
+
+      <section aria-labelledby="student-membership-title" className="mb-7 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-[0_8px_30px_rgba(15,27,61,0.04)]">
+        <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="flex min-w-0 items-start gap-4">
+            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${membershipActive ? "bg-emerald-100 text-emerald-700" : "bg-[#0F1B3D] text-[#FFCB47]"}`}><Banknote size={23} aria-hidden="true" /></span>
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#3157D5]">สมาชิก Interact Edu</p>
+              <h2 id="student-membership-title" className="mt-1 text-[18px] font-extrabold text-[#0F1B3D] sm:text-[20px]">{membershipActive ? "สิทธิ์เรียนทุกคอร์สของคุณ" : "เรียนทุกคอร์สในแพ็กเกจเดียว"}</h2>
+              {membershipActive ? (
+                <p className="mt-1 text-sm leading-6 text-slate-600">ใช้งานได้ถึง {new Date(membershipExpiresAt!).toLocaleDateString("th-TH", { dateStyle: "long" })}</p>
+              ) : offerResult.error ? (
+                <p className="mt-1 text-sm leading-6 text-slate-600">ยังโหลดรายละเอียดแพ็กเกจไม่ได้</p>
+              ) : offerVisible ? (
+                <p className="mt-1 text-sm leading-6 text-slate-600">฿{membershipPrice.toLocaleString("th-TH")} / เดือน · {canSubscribe ? "พร้อมสมัครด้วย PromptPay" : "ยังไม่เปิดรับชำระเงิน"}</p>
+              ) : (
+                <p className="mt-1 text-sm leading-6 text-slate-600">แพ็กเกจรายเดือนยังไม่เปิดรับสมัคร</p>
+              )}
+            </div>
+          </div>
+          <Link href={membershipActive ? "/dashboard/student/courses" : "/membership"} className={`inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] focus-visible:ring-offset-2 ${membershipActive || canSubscribe ? "bg-[#0F1B3D] text-white hover:bg-[#3157D5]" : "border border-slate-200 text-[#0F1B3D] hover:border-[#3157D5] hover:text-[#3157D5]"}`}>
+            {membershipActive ? "ไปคอร์สของฉัน" : "ดูรายละเอียดแพ็กเกจ"} <ArrowRight size={16} aria-hidden="true" />
           </Link>
         </div>
       </section>

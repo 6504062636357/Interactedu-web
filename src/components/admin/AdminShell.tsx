@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Settings, UserRound, X } from "lucide-react";
+import { Banknote, Menu, Settings, UserRound, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import LogoutButton from "@/components/LogoutButton";
@@ -113,6 +113,12 @@ export default function AdminShell({ children, displayName, avatarUrl, pendingCo
       href: "/dashboard/admin/users",
       match: (path) => path.startsWith("/dashboard/admin/users"),
       icon: <UsersIcon />,
+    },
+    {
+      label: "แพ็กเกจรายเดือน",
+      href: "/dashboard/admin/membership",
+      match: (path) => path.startsWith("/dashboard/admin/membership"),
+      icon: <Banknote size={18} strokeWidth={1.8} aria-hidden="true" />,
     },
     {
       label: "ใบรับรอง",

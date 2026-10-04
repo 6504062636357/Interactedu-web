@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, type FormEvent, type ChangeEvent } from "react";
+import { useState, useRef, useSyncExternalStore, type FormEvent, type ChangeEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AppBrand from "@/components/AppBrand";
 
@@ -31,33 +30,28 @@ const NAME_PATTERN = /^[a-zA-Zก-๙\s.'-]+$/;
 
 const OFFLINE_MESSAGE = "ไม่มีการเชื่อมต่ออินเทอร์เน็ต กรุณาตรวจสอบสัญญาณเน็ตของคุณ";
 
+function subscribeConnection(onChange: () => void): () => void {
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+  return () => {
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+  };
+}
+
 export default function CreateAccountPage() {
-  const router = useRouter();
   const [form, setForm] = useState<SignUpFormState>(initialFormState);
   const [role, setRole] = useState<Role>("student");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [successEmail, setSuccessEmail] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [isOffline, setIsOffline] = useState<boolean>(false);
+  const isOffline = useSyncExternalStore(subscribeConnection, () => !navigator.onLine, () => false);
   const supabase = createClient();
   // ref แยกจาก isSubmitting state เพราะ state update เป็น async — ดับเบิลคลิกเร็วๆ อาจมี
   // handleSubmit ตัวที่สองเริ่มทำงานก่อน re-render จะ disable ปุ่มจริง เช็ค ref ตัวนี้ก่อนเลย
   // เพื่อกันยิง request ซ้ำแบบ synchronous ทันทีที่ event ที่สองเข้ามา
   const isSubmittingRef = useRef<boolean>(false);
-
-  // แถบแจ้งเตือนด้านบนสุดของจอ: เด้งขึ้นทันทีที่เน็ตหลุด ไม่ต้องรอให้กดส่งฟอร์มก่อนถึงจะรู้
-  useEffect(() => {
-    setIsOffline(!navigator.onLine);
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
 
   const fullNameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -212,10 +206,6 @@ export default function CreateAccountPage() {
         setSuccessEmail(form.email);
         setForm(initialFormState);
 
-        // หน่วงเวลา 2 วินาทีให้เห็นสถานะสำเร็จ แล้วพาวิ่งไปหน้าแรก (Landing Page)
-        setTimeout(() => {
-          router.push("/");
-        }, 2000);
       }
     } catch (err) {
       console.error("Unexpected sign up error:", err);
@@ -271,13 +261,18 @@ export default function CreateAccountPage() {
 
           {/* Success state */}
           {successEmail ? (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-4 text-center">
-              <p className="text-[14px] font-semibold text-emerald-700 mb-1">
-                สมัครสมาชิกสำเร็จ!
-              </p>
-              <p className="text-[13px] text-emerald-600 leading-relaxed">
-                บัญชี <span className="font-medium">{successEmail}</span> ถูกสร้างแล้ว คุณสามารถเข้าสู่ระบบได้ทันที
-              </p>
+            <div className="space-y-4">
+              <div role="status" className="rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-4 text-center">
+                <p className="text-[14px] font-semibold text-emerald-700 mb-1">สมัครสมาชิกสำเร็จ!</p>
+                <p className="text-[13px] text-emerald-600 leading-relaxed">บัญชี <span className="font-medium">{successEmail}</span> ถูกสร้างแล้ว คุณสามารถเข้าสู่ระบบได้ทันที</p>
+              </div>
+              {role === "student" && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
+                  <p className="text-sm font-bold text-[#0F1B3D]">เริ่มเรียนกับ Interact Edu</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">ดูคอร์สทั้งหมดและแพ็กเกจรายเดือนได้หลังเข้าสู่ระบบ</p>
+                </div>
+              )}
+              <Link href="/login" className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[#0F1B3D] px-4 py-3 text-sm font-bold text-white">{role === "student" ? "เข้าสู่ระบบเพื่อเริ่มเรียน" : "เข้าสู่ระบบ"}</Link>
             </div>
           ) : (
             <>

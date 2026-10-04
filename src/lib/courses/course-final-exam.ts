@@ -106,6 +106,7 @@ async function loadCourseExamData(
     .eq("student_id", userId)
     .eq("course_id", courseId)
     .eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
   if (enrollmentError) throw new Error(enrollmentError.message);
   if (!enrollment) throw new Error("An approved enrollment is required");
@@ -667,4 +668,3 @@ export async function gradeCourseFinalExam(
     review,
   };
 }
-

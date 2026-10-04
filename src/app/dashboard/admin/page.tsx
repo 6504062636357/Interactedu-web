@@ -128,6 +128,9 @@ export default async function AdminDashboardPage(): Promise<ReactElement> {
           <p className="mt-2 text-[14px] text-slate-600">ดูสิ่งที่ต้องจัดการและความเคลื่อนไหวล่าสุดได้ในหน้าเดียว</p>
         </div>
         <div className="flex flex-wrap gap-2.5">
+          <Link href="/dashboard/admin/membership" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:border-slate-300 hover:bg-slate-50">
+            แพ็กเกจรายเดือน
+          </Link>
           <Link href="/dashboard/admin/users" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-bold text-[#0F1B3D] transition-colors hover:border-slate-300 hover:bg-slate-50">
             จัดการผู้ใช้
           </Link>

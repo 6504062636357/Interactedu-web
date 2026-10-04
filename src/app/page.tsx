@@ -88,6 +88,7 @@ function RatingChip({ avgRating, reviewCount }: { avgRating: number; reviewCount
 
 const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สทั้งหมด", href: "/courses" },
+  { label: "สมาชิกรายเดือน", href: "/membership" },
   { label: "เส้นทางสายอาชีพ", href: "#career-paths" },
   { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
@@ -760,6 +761,7 @@ export default async function Page(): Promise<ReactElement> {
       .select("course_id")
       .eq("student_id", user.id)
       .eq("status", "approved")
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
       .in("course_id", courseIds);
     for (const row of enrollmentRows ?? []) enrolledCourseIds.add(row.course_id as string);
   }

@@ -55,6 +55,7 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
     .select("id, created_at, course_id, courses(id, title, slug, cover_image_url, category)")
     .eq("student_id", user.id)
     .eq("status", "approved")
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .order("created_at", { ascending: false });
 
   const enrollments = (enrollmentsRaw ?? []) as unknown as EnrollmentWithCourse[];

@@ -1,24 +1,9 @@
 import type { Metadata } from "next";
-import { Noto_Sans, Noto_Sans_Thai, Geist_Mono } from "next/font/google";
+import "@fontsource/noto-sans-thai/400.css";
+import "@fontsource/noto-sans-thai/500.css";
+import "@fontsource/noto-sans-thai/600.css";
+import "@fontsource/noto-sans-thai/700.css";
 import "./globals.css";
-
-const notoSans = Noto_Sans({
-  variable: "--font-sans-en",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const notoSansThai = Noto_Sans_Thai({
-  variable: "--font-sans-th",
-  subsets: ["thai"],
-  weight: ["400", "500", "600", "700"],
-});
-
-// เก็บ mono ไว้เผื่อใช้กับโค้ด/ตัวเลข ถ้าไม่ใช้แล้วลบทิ้งได้
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -34,10 +19,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="th"
-      className={`${notoSans.variable} ${notoSansThai.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="th" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
         {/* ★ Polyfill crypto.randomUUID สำหรับ non-secure context (เปิดผ่าน http:// + IP)
             บน HTTP ตัว crypto.randomUUID เป็น undefined (มีเฉพาะ HTTPS/localhost) ทำให้ client

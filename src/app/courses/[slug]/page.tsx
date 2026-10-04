@@ -190,6 +190,7 @@ export default async function CourseDetailPage({
       .eq("student_id", user.id)
       .eq("course_id", typedCourse.id)
       .eq("status", "approved")
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
       .maybeSingle();
 
     isEnrolled = Boolean(enrollment);

@@ -3,7 +3,7 @@
 import {
   Award,
   ChevronRight,
-  CreditCard,
+  Banknote,
   Gauge,
   GraduationCap,
   Heart,
@@ -19,9 +19,10 @@ const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon; exact?: 
   { label: "ภาพรวม", href: "/dashboard/student", icon: Gauge, exact: true },
   { label: "โปรไฟล์", href: "/dashboard/student/profile", icon: UserRound },
   { label: "คอร์สของฉัน", href: "/dashboard/student/courses", icon: GraduationCap },
+  { label: "สมาชิกรายเดือน", href: "/membership", icon: Banknote },
   { label: "ใบประกาศฯ", href: "/dashboard/student/certificates", icon: Award },
   { label: "คอร์สโปรด", href: "/dashboard/student/favorites", icon: Heart },
-  { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: CreditCard },
+  { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: Banknote },
   { label: "การตั้งค่า", href: "/dashboard/student/settings", icon: Settings },
 ];
 
