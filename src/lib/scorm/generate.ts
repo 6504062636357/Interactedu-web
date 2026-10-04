@@ -1873,19 +1873,31 @@ function showResumePrompt(video, resumeSeconds) {
 // ถ้าระหว่างทางถูก pause ด้วยเหตุอื่น (ควิซ, จบ chapter, ผู้เรียนกด pause เอง) timer จะถูกเคลียร์
 // แล้วเริ่มนับใหม่ตอนกดเล่นต่อ — ไม่มีทางเด้งพร้อมกับ popup อื่นเพราะวิดีโอต้อง "เล่นอยู่" เท่านั้น
 // ถึงจะนับเวลาได้
+// [แก้: นับเวลาเล่นแบบสะสม] เดิม timer เริ่มนับ 0 ใหม่ทุกครั้งที่ pause (เช่นหยุดตอบควิซ) ทำให้บทที่มีควิซ
+// ถี่ๆ ไม่เคยเล่นต่อเนื่องครบ 5 นาที กล่องเลยแทบไม่ขึ้น — ตอนนี้สะสมเฉพาะเวลาที่วิดีโอ "เล่นอยู่จริง"
+// (pause ไม่ทำให้เสียเวลาที่สะสมไว้ และเวลาที่หยุดอยู่ไม่ถูกนับ) รีเซ็ตเป็น 0 เฉพาะตอนผู้เรียนกด "เรียนต่อ"
+var stillWatchingAccumulatedMs = 0;
+var stillWatchingPlayStartedAt = 0;
+
 function startStillWatchingTimer(video) {
   stopStillWatchingTimer();
+  stillWatchingPlayStartedAt = Date.now();
+  var remaining = Math.max(1000, STILL_WATCHING_INTERVAL_MS - stillWatchingAccumulatedMs);
   stillWatchingTimer = setTimeout(function () {
     video.pause();
     showStillWatchingPrompt(video);
-  }, STILL_WATCHING_INTERVAL_MS);
+  }, remaining);
 }
 
 function stopStillWatchingTimer() {
   if (stillWatchingTimer) {
     clearTimeout(stillWatchingTimer);
     stillWatchingTimer = null;
+    if (stillWatchingPlayStartedAt) {
+      stillWatchingAccumulatedMs += Date.now() - stillWatchingPlayStartedAt;
+    }
   }
+  stillWatchingPlayStartedAt = 0;
 }
 
 function showStillWatchingPrompt(video) {
@@ -1896,6 +1908,7 @@ function showStillWatchingPrompt(video) {
   function onYes() {
     overlay.classList.remove("open");
     yesBtn.removeEventListener("click", onYes);
+    stillWatchingAccumulatedMs = 0;
     video.play();
   }
   yesBtn.addEventListener("click", onYes);
@@ -1973,6 +1986,9 @@ function attachVideoBehavior(video) {
   video.addEventListener("ended", function () {
     stopSavePositionTimer();
     stopStillWatchingTimer();
+    // [แก้บั๊ก] เดิมเวลาเล่นสะสมของกล่อง "ยังเรียนอยู่ไหม" ไม่ถูกล้างตอนวิดีโอจบ พอกดเล่นซ้ำ
+    // (replay) เวลาสะสมรอบเก่าจะค้างต่อ ทำให้กล่องขึ้นเร็วผิดปกติในรอบใหม่ (ไม่ครบ 5 นาทีจริง)
+    stillWatchingAccumulatedMs = 0;
     lastSavedPosition = video.currentTime;
     savePosition(video.currentTime);
     ScormAPI.setValue("cmi.core.lesson_status", "completed");

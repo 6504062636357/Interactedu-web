@@ -1222,7 +1222,7 @@ export default function LessonDraftForm({
                             (ไม่บังคับ w-full) ให้กรอบพอดีเนื้อรูปจริง แล้ววาดหมุดทับได้ถูกตำแหน่ง ===== */}
                         <button
                           type="button"
-                          onClick={() => (q.sourceType === "bank_manual" ? setLightboxImageUrl(q.imageUrl!) : setPinEditKey(q.key))}
+                          onClick={() => setPinEditKey(q.key)}
                           className="group relative inline-block max-h-28 max-w-[10rem] shrink-0 cursor-pointer overflow-hidden rounded-xl border border-[#0F1B3D]/10 shadow-[0_1px_3px_rgba(15,27,61,0.08)]"
                         >
                           <img src={q.imageUrl} alt="" className="block max-h-28 max-w-[10rem] object-contain transition-transform duration-200 group-hover:scale-105" />
@@ -1242,12 +1242,7 @@ export default function LessonDraftForm({
                           </div>
                         </button>
                         <div className="flex flex-col gap-1.5">
-                          {q.sourceType === "bank_manual" ? (
-                            q.imageCaption && (
-                              <p className="text-[11.5px] font-semibold text-[#0F1B3D]/60">{q.imageCaption}</p>
-                            )
-                          ) : (
-                            <>
+                          <>
                               <input
                                 value={q.imageCaption ?? ""}
                                 onChange={(e) => updateQuestionImageCaption(setVideoQuizQuestions, q.key, e.target.value)}
@@ -1265,8 +1260,7 @@ export default function LessonDraftForm({
                                 </svg>
                                 ปักหมุด{(q.imagePins ?? []).length > 0 ? ` (${(q.imagePins ?? []).length})` : ""}
                               </button>
-                            </>
-                          )}
+                          </>
                           {imageFileMeta[q.key] && (
                             <p className="text-[11px] text-slate-400">
                               {imageFileMeta[q.key].name} · {formatFileSize(imageFileMeta[q.key].size)}
