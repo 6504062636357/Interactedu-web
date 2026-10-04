@@ -11,7 +11,7 @@ type PaymentState =
   | { step: "success" }
   | { step: "error"; message: string; chargeId?: string; imageUrl?: string };
 
-export default function MembershipPayment(): ReactElement {
+export default function MembershipPayment({ durationMonths }: { durationMonths: 1 | 12 }): ReactElement {
   const [state, setState] = useState<PaymentState>({ step: "idle" });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
@@ -19,7 +19,11 @@ export default function MembershipPayment(): ReactElement {
   const startPayment = async (): Promise<void> => {
     setState({ step: "loading" });
     try {
-      const response = await fetch("/api/omise/create-membership-charge", { method: "POST" });
+      const response = await fetch("/api/omise/create-membership-charge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationMonths }),
+      });
       const data = await response.json();
       if (!response.ok || !data.qrImageUrl || !data.chargeId) {
         setState({ step: "error", message: response.status === 503 ? "ระบบชำระเงินยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง" : "ไม่สามารถสร้าง QR ได้ กรุณาลองใหม่" });

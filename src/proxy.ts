@@ -7,7 +7,7 @@ const ROLE_ROUTES: Record<string, string> = {
   "/dashboard/admin": "admin",
 };
 
-const PROTECTED_PREFIXES = ["/dashboard"];
+const PROTECTED_PREFIXES = ["/dashboard", "/play/"];
 const AUTH_ONLY_PAGES = ["/login", "/signup"];
 
 export async function proxy(request: NextRequest) {
@@ -19,7 +19,8 @@ export async function proxy(request: NextRequest) {
   const { supabaseResponse, supabase, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
-  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))
+    || /^\/courses\/[^/]+\/(?:enroll|success)(?:\/|$)/.test(pathname);
   const isAuthPage = AUTH_ONLY_PAGES.some((p) => pathname.startsWith(p));
 
   // ยังไม่ login แต่จะเข้าหน้าที่ต้อง protect -> เด้งไป /login
@@ -78,7 +79,7 @@ export async function proxy(request: NextRequest) {
     return new NextResponse("ตรวจสอบสถานะบัญชีไม่สำเร็จ กรุณาลองใหม่", { status: 503 });
   }
   if (user && !userIsActive) {
-    if (pathname.startsWith("/api")) return NextResponse.json({ error: "บัญชีนี้ถูกปิดใช้งาน" }, { status: 403 });
+    if (pathname.startsWith("/api")) return NextResponse.json({ error: "บัญชีนี้ถูกพักการใช้งาน" }, { status: 403 });
     return NextResponse.redirect(new URL("/account-inactive", request.url));
   }
 

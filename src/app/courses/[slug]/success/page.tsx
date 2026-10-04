@@ -72,7 +72,7 @@ export default async function EnrollSuccessPage({
   return (
     <div className="app-canvas flex min-h-screen w-full flex-col">
       <header className="app-topbar sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-[74px] items-center justify-between">
             <AppBrand compact />
             <ProfileDropdown displayName={displayName} avatarUrl={profile?.avatar_url} role={role} />
@@ -80,7 +80,7 @@ export default async function EnrollSuccessPage({
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-12 text-center sm:px-6 sm:py-16">
         <PaymentSuccessIllustration />
 
         <h1 className="mt-8 text-[26px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
@@ -100,7 +100,7 @@ export default async function EnrollSuccessPage({
       </main>
 
      <footer className="border-t border-[#0F1B3D]/[0.06] bg-white py-6">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 flex items-center gap-3">
+      <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
         <span className="text-[13px] text-[#0F1B3D]/50 font-medium">ติดตามเราได้ที่</span>
         
         <a

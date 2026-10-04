@@ -2,12 +2,13 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
+import { getActivePlusExpiry } from "@/lib/payments/active-plus";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import { redirect } from "next/navigation";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
 import AppBrand from "@/components/AppBrand";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
-import { BookOpen, BrainCircuit, BriefcaseBusiness, Calculator, Code2, Compass, Languages, Laptop, Megaphone, Palette, Search, PlayCircle, Award, type LucideIcon } from "lucide-react";
+import { ArrowRight, Banknote, BookOpen, BrainCircuit, BriefcaseBusiness, Calculator, Check, Code2, Compass, Languages, Laptop, Megaphone, Palette, QrCode, Search, ShieldCheck, PlayCircle, Award, type LucideIcon } from "lucide-react";
 interface Course {
   id: string;
   title: string;
@@ -88,7 +89,7 @@ function RatingChip({ avgRating, reviewCount }: { avgRating: number; reviewCount
 
 const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สทั้งหมด", href: "/courses" },
-  { label: "สมาชิกรายเดือน", href: "/membership" },
+  { label: "Interact Edu Plus", href: "/membership" },
   { label: "เส้นทางสายอาชีพ", href: "#career-paths" },
   { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
@@ -112,14 +113,14 @@ const avatarStack: { initial: string; bg: string }[] = [
   { initial: "P", bg: "#0F1B3D" },
 ];
 
-function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatarUrl: string | null }): ReactElement {
+function Navbar({ displayName, avatarUrl, plusExpiresAt }: { displayName: string | null; avatarUrl: string | null; plusExpiresAt: string | null }): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-[72px] items-center justify-between">
           <AppBrand compact />
 
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden xl:flex items-center gap-1">
             {navLinks.map((link) => (
               <Link
                 key={link.label}
@@ -134,7 +135,7 @@ function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatar
           <div className="flex items-center gap-2">
             {displayName ? (
               // role เป็น "student" เสมอตรงนี้ เพราะ teacher/admin ถูก redirect ออกไปแล้วก่อนถึงจุดนี้
-              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" />
+              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" plusExpiresAt={plusExpiresAt} />
             ) : (
               <>
                 <Link
@@ -245,8 +246,8 @@ function HeroPreviewCard(): ReactElement {
 function Hero(): ReactElement {
   return (
     <section className="relative">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 pb-16 lg:pt-20 lg:pb-20">
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-14 lg:gap-12 items-center">
+      <div className="mx-auto w-full max-w-7xl px-4 pt-10 pb-12 sm:px-6 sm:pt-16 sm:pb-16 lg:px-8 lg:pt-20 lg:pb-20">
+        <div className="grid min-w-0 items-center gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-12">
           <div>
             <p className="text-[13px] font-semibold text-[#FF5A3C] tracking-[0.04em] mb-4">
               แพลตฟอร์มเรียนรู้ออนไลน์
@@ -313,6 +314,50 @@ function Hero(): ReactElement {
         </div>
       </div>
       <Marquee />
+    </section>
+  );
+}
+
+function MembershipPromo({ monthlyPrice, annualPrice }: { monthlyPrice: number; annualPrice: number }): ReactElement {
+  return (
+    <section className="mx-auto w-full max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
+      <div className="relative overflow-hidden rounded-[28px] border border-[#3157D5]/10 bg-[#F3F6FF] p-6 sm:p-9 lg:flex lg:items-center lg:justify-between lg:gap-10">
+        <div aria-hidden="true" className="absolute -right-16 -top-20 h-56 w-56 rounded-full border-[34px] border-[#3157D5]/[0.06]" />
+        <div className="relative max-w-2xl">
+          <p className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-extrabold tracking-[0.08em] text-[#3157D5]">
+            <Banknote size={14} aria-hidden="true" /> INTERACT EDU PLUS
+          </p>
+          <h2 className="mt-4 text-[24px] font-extrabold leading-tight tracking-[-0.03em] text-[#0F1B3D] sm:text-[30px]">
+            เรียนได้ทุกคอร์ส ด้วยสมาชิกหนึ่งแพ็กเกจ
+          </h2>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#0F1B3D]/60">
+            เลือกคอร์สใหม่ได้ตลอดช่วงสมาชิก ชำระผ่าน PromptPay และเริ่มเรียนได้เมื่อระบบยืนยันรายการ
+          </p>
+          <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-[#0F1B3D]/70">
+            <li className="inline-flex items-center gap-1.5"><Check size={15} className="text-emerald-600" aria-hidden="true" />ไม่มีตัดเงินอัตโนมัติ</li>
+            <li className="inline-flex items-center gap-1.5"><Check size={15} className="text-emerald-600" aria-hidden="true" />สแกน QR ผ่านแอปธนาคาร</li>
+          </ul>
+        </div>
+        <div className="relative mt-6 flex min-w-0 flex-col gap-4 rounded-2xl border border-white bg-white p-5 shadow-[0_12px_35px_-20px_rgba(15,27,61,0.35)] sm:flex-row sm:items-center sm:justify-between lg:mt-0 lg:w-[min(34vw,380px)] lg:flex-col lg:items-stretch">
+          <div>
+            <p className="text-xs font-bold text-slate-500">เริ่มต้นรายเดือน · รายปีก็คุ้มกว่า</p>
+            <p className="mt-1 text-[30px] font-black tracking-[-0.04em] text-[#0F1B3D]">
+              ฿{monthlyPrice.toLocaleString("th-TH")}
+              <span className="ml-1 text-sm font-semibold tracking-normal text-slate-500">/ เดือน</span>
+            </p>
+            <p className="mt-1 text-xs font-semibold text-[#3157D5]">หรือ ฿{annualPrice.toLocaleString("th-TH")} / ปี</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+              <ShieldCheck size={14} aria-hidden="true" />ชำระครั้งเดียว ปลอดภัยผ่าน PromptPay
+            </p>
+          </div>
+          <Link
+            href="/membership"
+            className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 text-sm font-extrabold text-white transition hover:bg-[#2446B8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] focus-visible:ring-offset-2"
+          >
+            <QrCode size={17} aria-hidden="true" /> ดูแพ็กเกจและชำระเงิน <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+        </div>
+      </div>
     </section>
   );
 }
@@ -425,7 +470,7 @@ const howItWorksSteps: HowItWorksStep[] = [
 function HowItWorks(): ReactElement {
   return (
     <section id="how-it-works" className="scroll-mt-24 relative overflow-hidden">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-16 lg:pt-24 pb-6 lg:pb-8">
+      <div className="mx-auto w-full max-w-7xl px-4 pt-12 pb-6 sm:px-6 lg:px-8 lg:pt-24 lg:pb-8">
         <div className="mb-14 text-center max-w-2xl mx-auto">
           <p className="text-[12.5px] font-bold text-[#3157D5] tracking-[0.04em] mb-2.5">
             เริ่มต้นง่ายๆ ใน 3 ขั้นตอน
@@ -488,7 +533,7 @@ function CareerPaths({ courses }: { courses: PathCourse[] }): ReactElement | nul
   if (courses.length === 0) return null;
 
   return (
-    <section id="career-paths" className="scroll-mt-24 max-w-7xl mx-auto px-6 lg:px-8 pt-14 lg:pt-20 pb-10 lg:pb-14">
+    <section id="career-paths" className="mx-auto w-full max-w-7xl scroll-mt-24 px-4 pt-14 pb-10 sm:px-6 lg:px-8 lg:pt-20 lg:pb-14">
       <div className="mb-10">
         <p className="text-[12.5px] font-bold text-[#3157D5] tracking-[0.04em] mb-2.5">
           เลือกเส้นทางของคุณ
@@ -557,7 +602,7 @@ function CourseCard({ course }: { course: Course }): ReactElement {
 
 function CourseCatalog({ courses, loadFailed }: { courses: Course[]; loadFailed: boolean }): ReactElement {
   return (
-    <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-10 lg:pt-14 pb-20 lg:pb-28">
+    <section className="mx-auto w-full max-w-7xl px-4 pt-10 pb-20 sm:px-6 lg:px-8 lg:pt-14 lg:pb-28">
       <div className="mb-14 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
         <div>
           <p className="text-[12.5px] font-bold text-[#FF5A3C] tracking-[0.04em] mb-2.5">
@@ -607,7 +652,7 @@ function logHomepageQueryError(label: string, error: { message: string }): void 
 
 function CtaBanner(): ReactElement {
   return (
-    <section className="max-w-7xl mx-auto px-6 lg:px-8 pb-20 lg:pb-28">
+    <section className="mx-auto w-full max-w-7xl px-4 pb-20 sm:px-6 lg:px-8 lg:pb-28">
       <div className="rounded-2xl bg-[#0F1B3D] px-8 py-14 sm:px-16 sm:py-16 text-center">
         <h2 className="text-[28px] sm:text-[36px] font-extrabold text-white tracking-[-0.02em] leading-tight max-w-xl mx-auto text-balance">
           พร้อมเริ่มต้นเส้นทางใหม่แล้วหรือยัง?
@@ -647,7 +692,7 @@ function CtaBanner(): ReactElement {
 function Footer(): ReactElement {
   return (
     <footer className="border-t border-[#0F1B3D]/[0.06] bg-white">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-5">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-5 px-4 py-10 sm:flex-row sm:px-6 lg:px-8">
         <div className="flex flex-col items-center sm:items-start gap-1.5">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#0F1B3D] flex items-center justify-center">
@@ -700,6 +745,7 @@ export default async function Page(): Promise<ReactElement> {
   const displayName = user
     ? (user.user_metadata?.full_name as string | undefined) ?? user.email?.split("@")[0] ?? "ผู้ใช้"
     : null;
+  const plusExpiresAt = user ? await getActivePlusExpiry(supabase, user.id) : null;
 
   const courseQuery = supabase
     .from("courses")
@@ -716,17 +762,26 @@ export default async function Page(): Promise<ReactElement> {
     .eq("status", "published")
     .order("created_at", { ascending: false })
     .limit(48);
+  const membershipOfferQuery = supabase
+    .from("membership_settings")
+    .select("monthly_price, annual_price, enabled")
+    .eq("id", true)
+    .maybeSingle();
 
   const [
     { data: courses, error },
     { data: pathCoursesData, error: pathCoursesError },
-  ] = await Promise.all([courseQuery, pathCoursesQuery]);
+    { data: membershipOffer, error: membershipOfferError },
+  ] = await Promise.all([courseQuery, pathCoursesQuery, membershipOfferQuery]);
 
   if (error) {
     logHomepageQueryError("Failed to fetch courses", error);
   }
   if (pathCoursesError) {
     logHomepageQueryError("Failed to fetch career path courses", pathCoursesError);
+  }
+  if (membershipOfferError) {
+    logHomepageQueryError("Failed to fetch membership offer", membershipOfferError);
   }
 
   // ดึงคะแนนรีวิวของคอร์สที่โชว์ในหน้านี้ แล้วคำนวณเฉลี่ย/นับจำนวนเอง
@@ -778,8 +833,13 @@ export default async function Page(): Promise<ReactElement> {
 
   return (
     <div className="min-h-screen w-full app-canvas">
-      <Navbar displayName={displayName} avatarUrl={avatarUrl} />
+      <Navbar displayName={displayName} avatarUrl={avatarUrl} plusExpiresAt={plusExpiresAt} />
       <Hero />
+      {membershipOffer?.enabled
+        && Number.isFinite(Number(membershipOffer.monthly_price)) && Number(membershipOffer.monthly_price) > 0
+        && Number.isFinite(Number(membershipOffer.annual_price)) && Number(membershipOffer.annual_price) > 0 && (
+        <MembershipPromo monthlyPrice={Number(membershipOffer.monthly_price)} annualPrice={Number(membershipOffer.annual_price)} />
+      )}
       <HowItWorks />
       <CareerPaths courses={oneCoursePerCategory(pathCoursesData ?? [])} />
       <CourseCatalog courses={coursesWithRatings} loadFailed={Boolean(error)} />

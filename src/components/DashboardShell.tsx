@@ -13,6 +13,7 @@ interface DashboardShellProps {
   displayName: string;
   avatarUrl?: string | null;
   role: DashboardRole;
+  plusExpiresAt?: string | null;
 }
 
 const ROLE_LABEL: Record<DashboardRole, string> = {
@@ -26,11 +27,12 @@ export default function DashboardShell({
   displayName,
   avatarUrl,
   role,
+  plusExpiresAt = null,
 }: DashboardShellProps): ReactElement {
   return (
     <div className="app-canvas w-full text-[#0F1B3D]">
       <header className="app-topbar sticky top-0 z-50">
-        <div className="mx-auto flex h-[74px] max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-[68px] w-full max-w-[1600px] items-center justify-between gap-3 px-3 sm:h-[74px] sm:px-5 md:px-6 xl:px-8">
           <div className="flex min-w-0 items-center gap-4">
             <AppBrand compact />
             <span className="hidden h-6 w-px bg-slate-200 sm:block" />
@@ -38,7 +40,7 @@ export default function DashboardShell({
               {ROLE_LABEL[role]}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
             {role === "student" && (
               <Link
                 href="/courses"
@@ -51,16 +53,16 @@ export default function DashboardShell({
               </Link>
             )}
             <NotificationBell />
-            <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role={role} />
+            <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role={role} plusExpiresAt={plusExpiresAt} />
           </div>
         </div>
       </header>
 
-      <main className="relative mx-auto max-w-[1440px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-9">
-        <div className="grid items-start gap-5 lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-7">
+      <main className="relative mx-auto w-full max-w-[1600px] min-w-0 px-3 py-4 sm:px-5 sm:py-6 md:px-6 xl:px-8 xl:py-9">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-4 sm:gap-5 xl:grid-cols-[clamp(220px,19vw,264px)_minmax(0,1fr)] xl:gap-7">
           {sidebar}
-          <div className="app-surface min-h-[520px] min-w-0 p-5 sm:p-7 xl:p-9">
-            <div className="animate-fade-up">{children}</div>
+          <div className="app-surface min-h-[520px] min-w-0 p-4 sm:p-6 xl:p-8">
+            <div className="animate-fade-up min-w-0">{children}</div>
           </div>
         </div>
       </main>

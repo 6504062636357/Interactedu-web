@@ -166,6 +166,7 @@ a {
   position: relative;
   isolation: isolate;
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 12% 5%, rgba(49, 87, 213, 0.08), transparent 23rem),
     radial-gradient(circle at 92% 2%, rgba(255, 90, 60, 0.07), transparent 22rem),
@@ -180,6 +181,8 @@ a {
 }
 
 .app-surface {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid rgba(15, 27, 61, 0.07);
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.92);
@@ -188,6 +191,8 @@ a {
 }
 
 .app-nav-surface {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid rgba(15, 27, 61, 0.07);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.86);

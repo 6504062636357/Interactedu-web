@@ -69,17 +69,17 @@ export default async function EnrollPage({
   return (
     <div className="app-canvas min-h-screen w-full">
       <header className="app-topbar sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-[74px] items-center justify-between">
             <AppBrand compact />
           </div>
         </div>
       </header>
 
-      <section className="max-w-5xl mx-auto px-6 lg:px-8 py-12">
+      <section className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
         <h1 className="text-[26px] font-extrabold text-[#0F1B3D] tracking-[-0.02em] mb-8">คำสั่งซื้อ</h1>
 
-        <div className="grid lg:grid-cols-[1.4fr_1fr] gap-8">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:gap-8">
           <div className="bg-white rounded-3xl border border-[#0F1B3D]/[0.06] p-7">
             <div className="flex items-center gap-1.5 mb-5">
               <span className="w-1 h-4 bg-[#FF5A3C] rounded-full" />

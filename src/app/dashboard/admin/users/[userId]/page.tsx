@@ -1,7 +1,10 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import AdminAccountStatusSwitch from "@/components/admin/AdminAccountStatusSwitch";
 import AdminUserProfileForm from "@/components/admin/AdminUserProfileForm";
+import AdminUserArchivePanel from "@/components/admin/AdminUserArchivePanel";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 
 type DirectoryUser = {
@@ -9,7 +12,9 @@ type DirectoryUser = {
   phone: string | null; university: string | null; faculty: string | null;
   created_at: string; last_sign_in_at: string | null;
   enrollment_count: number; certificate_count: number;
+  is_active?: boolean | null;
 };
+type AccountState = DirectoryUser & { is_active: boolean; archived_at: string | null };
 
 export default async function AdminUserDetailPage({ params }: { params: Promise<{ userId: string }> }): Promise<ReactElement> {
   const { userId } = await params;
@@ -21,17 +26,18 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
 
   const { data: actorProfile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", actor.id)
     .maybeSingle();
+  if (actorProfile?.is_active === false) redirect("/account-inactive");
   if (actorProfile?.role !== "admin") redirect("/dashboard");
 
   // RPC นี้ตรวจบทบาทแอดมินในฐานข้อมูลและคืนข้อมูล Auth โดยไม่ต้องใช้ server secret key
-  const [directoryRes, profileRes, enrollmentsRes, certificatesRes, coursesRes] = await Promise.all([
+  const [directoryRes, profileRes, enrollmentsRes, certificatesRes, coursesRes, accountStateRes] = await Promise.all([
     supabase.rpc("admin_list_users"),
     supabase
       .from("profiles")
-      .select("id, full_name, role, phone, university, faculty, created_at")
+      .select("id, full_name, role, phone, university, faculty, created_at, is_active")
       .eq("id", userId)
       .maybeSingle(),
     supabase
@@ -49,13 +55,15 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       .select("id, title, course_code, status, created_at")
       .eq("created_by", userId)
       .order("created_at", { ascending: false }),
+    supabase.rpc("admin_get_user_account_state", { p_user_id: userId }),
   ]);
 
   const profile = profileRes.data;
   const directoryUser = ((directoryRes.data ?? []) as DirectoryUser[]).find((row) => row.id === userId);
-  if (!directoryUser && !profile) notFound();
+  const accountState = accountStateRes.error ? undefined : ((accountStateRes.data ?? []) as AccountState[]).find((row) => row.id === userId);
+  if (!directoryUser && !profile && !accountState) notFound();
 
-  const user: DirectoryUser = directoryUser ?? {
+  const user: DirectoryUser = accountState ?? directoryUser ?? {
     id: userId,
     email: null,
     full_name: profile?.full_name ?? null,
@@ -68,11 +76,46 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
     enrollment_count: 0,
     certificate_count: 0,
   };
-  const hasProfile = Boolean(profile || directoryUser?.role);
+  const hasProfile = Boolean(profile || directoryUser?.role || accountState);
+  const archivedAt = accountState?.archived_at ?? null;
+  let accountActive: boolean | null = typeof accountState?.is_active === "boolean"
+    ? accountState.is_active
+    : typeof profile?.is_active === "boolean"
+      ? profile.is_active
+      : typeof directoryUser?.is_active === "boolean"
+        ? directoryUser.is_active
+        : null;
+  if (accountActive === null && hasProfile) {
+    try {
+      const { data: status, error } = await createAdminClient()
+        .from("profiles")
+        .select("is_active")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) console.error("[admin user detail] account status", error.message);
+      if (typeof status?.is_active === "boolean") accountActive = status.is_active;
+    } catch (error) {
+      console.error("[admin user detail] account status fallback unavailable", error);
+    }
+  }
+  const statusDisabledReason = archivedAt
+    ? "บัญชีนี้ถูกลบแล้ว"
+    : user.id === actor.id
+      ? "ไม่สามารถเปลี่ยนสถานะบัญชีตัวเอง"
+      : !hasProfile || !user.role
+        ? "บัญชีนี้ยังไม่มีบทบาท"
+        : accountActive === null
+          ? "ยังไม่ทราบสถานะบัญชี"
+          : null;
+  const archiveDisabledReason = user.id === actor.id
+    ? "ไม่สามารถลบบัญชีตัวเอง"
+    : !accountState
+      ? "ระบบลบบัญชียังไม่พร้อม กรุณาตรวจการตั้งค่าฐานข้อมูล"
+      : null;
   const enrollmentCount = Math.max(Number(user.enrollment_count) || 0, enrollmentsRes.data?.length ?? 0);
   const certificateCount = Math.max(Number(user.certificate_count) || 0, certificatesRes.data?.length ?? 0);
-  const enrollmentsIncomplete = Boolean(enrollmentsRes.error || (directoryUser && (enrollmentsRes.data?.length ?? 0) < enrollmentCount));
-  const certificatesIncomplete = Boolean(certificatesRes.error || (directoryUser && (certificatesRes.data?.length ?? 0) < certificateCount));
+  const enrollmentsIncomplete = Boolean(enrollmentsRes.error || (enrollmentsRes.data?.length ?? 0) < enrollmentCount);
+  const certificatesIncomplete = Boolean(certificatesRes.error || (certificatesRes.data?.length ?? 0) < certificateCount);
 
   if (directoryRes.error) console.error("[admin user detail] directory", directoryRes.error.message);
   if (profileRes.error) console.error("[admin user detail] profile", profileRes.error.message);
@@ -91,11 +134,25 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         </div>
       </section>
 
+      <section aria-labelledby="account-status-title" className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 id="account-status-title" className="text-base font-extrabold text-[#0F1B3D]">สถานะบัญชี</h2>
+          <p className="mt-1 text-sm text-slate-500">{archivedAt ? "บัญชีถูกลบออกจากรายชื่อและปิดการเข้าใช้ระบบแล้ว" : accountActive === false ? "บัญชีถูกพักการใช้งาน ผู้ใช้จะเข้าแดชบอร์ดและใช้สิทธิ์เรียนไม่ได้" : accountActive === true ? "บัญชีใช้งานได้ตามปกติ" : "ยังโหลดสถานะบัญชีไม่สำเร็จ"}</p>
+        </div>
+        <AdminAccountStatusSwitch
+          key={`${user.id}-${accountActive}`}
+          userId={user.id}
+          userName={user.full_name ?? user.email ?? "ผู้ใช้"}
+          initialActive={accountActive}
+          disabledReason={statusDisabledReason}
+        />
+      </section>
+
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[["เบอร์โทร", user.phone ?? "—"], ["มหาวิทยาลัย", user.university ?? "—"], ["คณะ/สาขา", user.faculty ?? "—"], ["เข้าใช้ล่าสุด", user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "—"]].map(([label, value]) => <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-[11px] font-bold text-slate-400">{label}</p><p className="mt-1 break-words text-[13px] font-bold text-[#0F1B3D]">{value}</p></div>)}
       </div>
 
-      {hasProfile ? (
+      {hasProfile && !archivedAt ? (
         <AdminUserProfileForm
           userId={user.id}
           initialFullName={user.full_name}
@@ -103,9 +160,9 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
           initialUniversity={user.university}
           initialFaculty={user.faculty}
         />
-      ) : (
+      ) : !hasProfile ? (
         <p className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">บัญชีนี้ยังไม่มีข้อมูลในตาราง profiles จึงยังแก้ไขโปรไฟล์ไม่ได้</p>
-      )}
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-base font-extrabold text-[#0F1B3D]">คอร์สที่ลงทะเบียน</h2><p className="mb-4 text-xs text-slate-400">{enrollmentCount} รายการ</p>{enrollmentsIncomplete && !!enrollmentsRes.data?.length && <p className="mb-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">แสดงข้อมูลการลงทะเบียนได้ไม่ครบ</p>}{enrollmentsRes.data?.length ? <div className="space-y-2">{enrollmentsRes.data.map((enrollment) => { const course = enrollment.courses as unknown as { id: string; title: string; course_code: string | null } | null; return course ? <Link key={enrollment.id} href={`/dashboard/admin/courses/${course.id}`} className="group flex items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5]/40"><span className="min-w-0"><span className="block truncate text-[13px] font-bold text-[#0F1B3D] transition-colors group-hover:text-[#3157D5]">{course.title}</span><span className="mt-1 block text-[11px] text-slate-400">{course.course_code ?? "—"} · {enrollment.status} · ลงทะเบียน {new Date(enrollment.created_at).toLocaleDateString("th-TH")}</span></span><span className="shrink-0 text-xs font-bold text-[#3157D5]">ดูคอร์ส →</span></Link> : <div key={enrollment.id} className="rounded-xl bg-slate-50 p-3"><p className="text-[13px] font-bold text-slate-500">ไม่พบคอร์ส</p><p className="mt-1 text-[11px] text-slate-400">สถานะ {enrollment.status}</p></div>; })}</div> : enrollmentsIncomplete ? <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">แสดงข้อมูลการลงทะเบียนได้ไม่ครบ</p> : <p className="py-8 text-center text-sm text-slate-400">ยังไม่มีการลงทะเบียน</p>}</section>
@@ -113,6 +170,13 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       </div>
 
       {coursesRes.data?.length ? <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-base font-extrabold text-[#0F1B3D]">คอร์สที่สร้าง</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{coursesRes.data.map((course) => <Link key={course.id} href={`/dashboard/admin/courses/${course.id}`} className="rounded-xl border border-slate-100 p-4 hover:bg-slate-50"><p className="text-[13.5px] font-bold text-[#0F1B3D]">{course.title}</p><p className="mt-1 text-[11px] text-slate-400">{course.course_code ?? "—"} · {course.status}</p></Link>)}</div></section> : null}
+      <AdminUserArchivePanel
+        userId={user.id}
+        userName={user.full_name ?? user.email ?? "ผู้ใช้"}
+        confirmationValue={accountState?.email || user.id}
+        disabledReason={archiveDisabledReason}
+        archivedAt={archivedAt}
+      />
     </div>
   );
 }

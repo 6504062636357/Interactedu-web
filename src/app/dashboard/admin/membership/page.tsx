@@ -30,7 +30,7 @@ export default async function AdminMembershipPage({
 
   const { data: offer, error } = await supabase
     .from("membership_settings")
-    .select("monthly_price, enabled")
+    .select("monthly_price, annual_price, annual_regular_price, enabled")
     .eq("id", true)
     .maybeSingle();
   if (error) console.error("[admin membership] Failed to load offer", error.code, error.message);
@@ -48,8 +48,8 @@ export default async function AdminMembershipPage({
       </Link>
       <header>
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#3157D5]">Membership</p>
-        <h1 className="mt-1 flex items-center gap-3 text-[30px] font-extrabold tracking-[-0.035em] text-[#0F1B3D]"><Banknote aria-hidden="true" />แพ็กเกจรายเดือน</h1>
-        <p className="mt-1 text-[14px] text-slate-600">สมาชิกเข้าเรียนได้ทุกคอร์สที่เผยแพร่ ขณะที่สิทธิ์ยังไม่หมดอายุ</p>
+        <h1 className="mt-1 flex items-center gap-3 text-[30px] font-extrabold tracking-[-0.035em] text-[#0F1B3D]"><Banknote aria-hidden="true" />แพ็กเกจสมาชิก</h1>
+        <p className="mt-1 text-[14px] text-slate-600">สมาชิกเข้าเรียนได้ทุกคอร์สที่เผยแพร่ตลอดอายุแพ็กเกจ</p>
       </header>
 
       <form action={updateMembershipOffer} className="space-y-6 rounded-[22px] border border-slate-200/80 bg-white p-5 shadow-[0_8px_30px_rgba(15,27,61,0.035)] sm:p-7">
@@ -60,31 +60,39 @@ export default async function AdminMembershipPage({
         )}
         {unavailable && (
           <div role="alert" className="rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-900">
-            <p className="font-bold">{needsSetup ? "ระบบแพ็กเกจรายเดือนยังไม่พร้อมใช้งาน" : "โหลดแพ็กเกจรายเดือนไม่สำเร็จ"}</p>
-            <p className="mt-1">{needsSetup ? "กรุณาติดตั้งฐานข้อมูลแพ็กเกจรายเดือนให้เรียบร้อย แล้วกลับมาตั้งราคาและเปิดขาย" : "กรุณาลองโหลดหน้านี้ใหม่อีกครั้ง ยังไม่มีการเปลี่ยนแปลงแพ็กเกจ"}</p>
+            <p className="font-bold">{needsSetup ? "ระบบแพ็กเกจสมาชิกยังไม่พร้อมใช้งาน" : "โหลดแพ็กเกจสมาชิกไม่สำเร็จ"}</p>
+            <p className="mt-1">{needsSetup ? "กรุณาติดตั้งฐานข้อมูลแพ็กเกจสมาชิกให้เรียบร้อย แล้วกลับมาตั้งราคาและเปิดขาย" : "กรุณาลองโหลดหน้านี้ใหม่อีกครั้ง ยังไม่มีการเปลี่ยนแปลงแพ็กเกจ"}</p>
             <Link href="/dashboard/admin/membership" className="mt-3 inline-flex font-bold underline">โหลดข้อมูลใหม่</Link>
           </div>
         )}
         {saved && !unavailable && <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">บันทึกแพ็กเกจเรียบร้อยแล้ว</p>}
         {saveError && (
           <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-            {saveError === "price" ? "กรุณากำหนดราคา 0–1,000,000 บาท และมากกว่า 0 บาทเมื่อเปิดขาย" : "บันทึกไม่สำเร็จ กรุณาลองใหม่"}
+            {saveError === "price" ? "กรุณากำหนดราคาทุกแพ็กเกจเป็น 0–1,000,000 บาท (มากกว่า 0 บาทเมื่อเปิดขาย) และราคาปกติรายปีต้องไม่น้อยกว่าราคาขาย" : "บันทึกไม่สำเร็จ กรุณาลองใหม่"}
           </p>
         )}
-        <label className="block">
-          <span className="text-sm font-bold text-[#0F1B3D]">ราคาสมาชิกรายเดือน (บาท)</span>
-          <input
-            name="monthlyPrice"
-            type="number"
-            min="0"
-            max="1000000"
-            step="0.01"
-            required
-            disabled={unavailable}
-            defaultValue={offer?.monthly_price ?? ""}
-            className="mt-2 block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-[#3157D5]"
-          />
-        </label>
+        <div className="grid gap-5 sm:grid-cols-3">
+          {[
+            { name: "monthlyPrice", label: "รายเดือน (บาท)", value: offer?.monthly_price },
+            { name: "annualPrice", label: "รายปี ราคาขาย (บาท)", value: offer?.annual_price },
+            { name: "annualRegularPrice", label: "รายปี ราคาปกติ (บาท)", value: offer?.annual_regular_price },
+          ].map((price) => (
+            <label key={price.name} className="block">
+              <span className="text-sm font-bold text-[#0F1B3D]">{price.label}</span>
+              <input
+                name={price.name}
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.01"
+                required
+                disabled={unavailable}
+                defaultValue={price.value ?? ""}
+                className="mt-2 block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-[#3157D5]"
+              />
+            </label>
+          ))}
+        </div>
         <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-4">
           <input
             name="enabled"
