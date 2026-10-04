@@ -6,6 +6,7 @@ import { summarizeStudentProgress, type StudentProgressLesson } from "@/lib/cour
 import { formatCourseVideoDuration, formatStudyTime } from "@/lib/courses/study-time";
 import { createClient } from "@/utils/supabase/server";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
+import { formatRemainingAccess } from "@/lib/courses/access-expiry";
 
 interface EnrolledCourse {
   id: string;
@@ -16,6 +17,7 @@ interface EnrolledCourse {
 interface EnrollmentRow {
   id: string;
   course_id: string;
+  access_expires_at: string | null;
   courses: EnrolledCourse;
 }
 
@@ -50,6 +52,7 @@ interface CourseCardData {
   href: string;
   studySeconds: number | null;
   videoSeconds: number;
+  accessExpiresAt: string | null;
 }
 
 function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
@@ -96,6 +99,11 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
           <p>เรียนแล้ว {course.studySeconds === null ? "—" : formatStudyTime(course.studySeconds)}</p>
           <p>ความยาวคลิปรวม {formatCourseVideoDuration(course.videoSeconds) ?? "ยังไม่ระบุ"}</p>
         </div>
+        {course.accessExpiresAt && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            {formatRemainingAccess(course.accessExpiresAt)} · สิทธิ์เรียนถึง {new Date(course.accessExpiresAt).toLocaleDateString("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })}
+          </p>
+        )}
         <p className="mt-auto self-end pt-3 text-right text-xs font-bold text-[#3157D5]">
           ดูรายละเอียดและบทเรียน
         </p>
@@ -114,7 +122,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
 
   const { data } = await supabase
     .from("enrollments")
-    .select("id, course_id, courses(id, title, cover_image_url)")
+    .select("id, course_id, access_expires_at, courses(id, title, cover_image_url)")
     .eq("student_id", user.id)
     .eq("status", "approved")
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
@@ -187,6 +195,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         href: `/dashboard/student/courses/${e.course_id}`,
         studySeconds: studyTimeResult.error ? null : studyTimeByEnrollment.get(e.id) ?? 0,
         videoSeconds: allLessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds ?? 0), 0),
+        accessExpiresAt: e.access_expires_at,
       });
     }
   }

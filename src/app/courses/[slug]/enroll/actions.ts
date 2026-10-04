@@ -4,6 +4,20 @@ import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
 import { createNotification, notifyAdmins } from "@/lib/notifications/service";
 
+async function requireActiveStudent(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  slug: string,
+): Promise<void> {
+  const { data: profile, error } = await supabase.from("profiles")
+    .select("role, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error || !profile) redirect(`/courses/${slug}/enroll?error=1`);
+  if (!profile.is_active) redirect("/account-inactive");
+  if (profile.role !== "student") redirect("/dashboard");
+}
+
 // 1. คอร์สฟรี: อนุมัติทันที + ส่งโนติหานักเรียน
 export async function enrollFreeCourse(courseId: string, slug: string): Promise<void> {
   const supabase = await createClient();
@@ -15,6 +29,7 @@ export async function enrollFreeCourse(courseId: string, slug: string): Promise<
   if (!user) {
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
+  await requireActiveStudent(supabase, user.id, slug);
 
   const [{ data: existing, error: existingError }, { data: course }] = await Promise.all([
     supabase.from("enrollments").select("id, status, access_expires_at")
@@ -84,6 +99,7 @@ export async function enrollPaidCourseAuto(
   if (!user) {
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
+  await requireActiveStudent(supabase, user.id, slug);
 
   const { data: course } = await supabase
     .from("courses")
@@ -139,6 +155,7 @@ export async function enrollPaidCourseManualSlip(
   if (!user) {
     redirect(`/login?redirect=/courses/${slug}/enroll`);
   }
+  await requireActiveStudent(supabase, user.id, slug);
 
   const { data: course } = await supabase
     .from("courses")

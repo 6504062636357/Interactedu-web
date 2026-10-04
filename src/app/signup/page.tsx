@@ -269,7 +269,7 @@ export default function CreateAccountPage() {
               {role === "student" && (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
                   <p className="text-sm font-bold text-[#0F1B3D]">เริ่มเรียนกับ Interact Edu</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">ดูคอร์สทั้งหมดและแพ็กเกจรายเดือนได้หลังเข้าสู่ระบบ</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">ดูคอร์สทั้งหมดและแพ็กเกจ Plus ได้หลังเข้าสู่ระบบ</p>
                 </div>
               )}
               <Link href="/login" className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[#0F1B3D] px-4 py-3 text-sm font-bold text-white">{role === "student" ? "เข้าสู่ระบบเพื่อเริ่มเรียน" : "เข้าสู่ระบบ"}</Link>

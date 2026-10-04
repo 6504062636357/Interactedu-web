@@ -83,14 +83,14 @@ function formatPrice(price: number): string {
 function DetailNavbar(): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="flex h-[74px] items-center justify-between">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex h-[68px] items-center justify-between gap-3 sm:h-[74px]">
           <AppBrand compact />
           <Link
             href="/"
             className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-bold text-slate-600 shadow-sm transition hover:border-[#3157D5]/20 hover:text-[#3157D5]"
           >
-            ← กลับไปหน้าคอร์สทั้งหมด
+            <span className="sm:hidden">← คอร์สทั้งหมด</span><span className="hidden sm:inline">← กลับไปหน้าคอร์สทั้งหมด</span>
           </Link>
         </div>
       </div>
@@ -231,8 +231,8 @@ export default async function CourseDetailPage({
 
       {/* Hero banner แบบเดียวกับภาพตัวอย่าง */}
       <section className="bg-gradient-to-br from-[#FFCB47] to-[#FF5A3C]">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10">
-          <div className="grid lg:grid-cols-[1.4fr_1fr] gap-8 bg-white rounded-[28px] p-4 sm:p-5 shadow-[0_25px_60px_-25px_rgba(15,27,61,0.4)]">
+        <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
+          <div className="grid min-w-0 gap-6 rounded-[28px] bg-white p-4 shadow-[0_25px_60px_-25px_rgba(15,27,61,0.4)] sm:p-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:gap-8">
             <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#0F1B3D] to-[#182852] aspect-[16/9] lg:aspect-auto">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -285,8 +285,8 @@ export default async function CourseDetailPage({
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-6 lg:px-8 py-10">
-        <div className="grid lg:grid-cols-[1.4fr_1fr] gap-10 lg:gap-12">
+      <section className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="grid min-w-0 gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:gap-12">
           <div>
             <div className="flex items-center gap-8 pb-8 border-b border-[#0F1B3D]/[0.08]">
               <StatItem label="ความยาวคอร์ส" value={formatDuration(totalDurationSeconds)} />
@@ -327,7 +327,7 @@ export default async function CourseDetailPage({
 
       {/* ★ เพิ่มใหม่: ส่วนรีวิวจากผู้เรียน — สรุปคะแนน + ฟอร์มส่งรีวิว (เฉพาะคนที่ลงทะเบียนแล้ว) + รายการความคิดเห็น */}
       {/* id="reviews" ไว้ให้หน้าอื่น (เช่นหน้าคอร์สของฉัน) ลิงก์มาเด้งตรงส่วนนี้ได้ด้วย #reviews */}
-      <section id="reviews" className="max-w-7xl mx-auto px-6 lg:px-8 pb-16 scroll-mt-20">
+      <section id="reviews" className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 pb-16 sm:px-6 lg:px-8">
         <CourseReviews
           courseId={typedCourse.id}
           slug={typedCourse.slug}

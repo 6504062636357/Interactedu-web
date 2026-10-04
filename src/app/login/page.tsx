@@ -157,8 +157,9 @@ export default function LoginPage() {
           return;
         }
         if (profile?.is_active === false) {
+          const { data: archiveState } = await supabase.from("profiles").select("archived_at").eq("id", data.user.id).maybeSingle();
           await supabase.auth.signOut({ scope: "local" });
-          setFormError("บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ");
+          router.replace(archiveState?.archived_at ? "/account-inactive?reason=archived" : "/account-inactive");
           return;
         }
 

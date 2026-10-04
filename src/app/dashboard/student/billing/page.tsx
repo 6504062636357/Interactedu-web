@@ -25,6 +25,7 @@ interface MembershipBillingRow {
   paid_amount: number | string;
   created_at: string;
   expires_at: string | null;
+  duration_months: number;
 }
 
 function formatDateTime(iso: string): string {
@@ -66,7 +67,7 @@ export default async function BillingPage(): Promise<ReactElement> {
       .order("created_at", { ascending: false }),
     supabase
       .from("student_membership_orders")
-      .select("id, status, paid_amount, created_at, expires_at")
+      .select("id, status, paid_amount, created_at, expires_at, duration_months")
       .eq("student_id", user.id)
       .order("created_at", { ascending: false }),
   ]);
@@ -102,12 +103,12 @@ export default async function BillingPage(): Promise<ReactElement> {
             return (
               <div key={`membership-${order.id}`} className="overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.06]">
                 <div className="flex items-center justify-between bg-[#3157D5]/5 px-5 py-3">
-                  <span className="text-[13px] font-bold text-[#0F1B3D]">สมาชิกรายเดือน: {order.id.slice(0, 8).toUpperCase()}</span>
+                  <span className="text-[13px] font-bold text-[#0F1B3D]">Plus {order.duration_months === 12 ? "รายปี" : "รายเดือน"}: {order.id.slice(0, 8).toUpperCase()}</span>
                   <span className={`rounded-full px-3 py-1 text-[11.5px] font-bold ${badge.className}`}>{badge.label}</span>
                 </div>
                 <div className="flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-[14.5px] font-bold text-[#0F1B3D]">เข้าเรียนได้ทุกคอร์สเป็นเวลา 1 เดือน</p>
+                    <p className="text-[14.5px] font-bold text-[#0F1B3D]">เข้าเรียนได้ทุกคอร์สเป็นเวลา {order.duration_months === 12 ? "12 เดือน" : "1 เดือน"}</p>
                     <p className="mt-1 text-[12.5px] text-[#0F1B3D]/40">วันที่สั่งซื้อ: {formatDateTime(order.created_at)}</p>
                     {order.expires_at && <p className="text-[12.5px] text-[#0F1B3D]/40">ใช้สิทธิ์ได้ถึง: {formatDateTime(order.expires_at)}</p>}
                   </div>
@@ -168,8 +169,13 @@ export default async function BillingPage(): Promise<ReactElement> {
           })}
         </div>
       ) : !loadError ? (
-        <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
-          <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ยังไม่มีประวัติการสั่งซื้อ</p>
+        <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 bg-white px-5 py-14 text-center">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F3F6FF] text-xl font-extrabold text-[#3157D5]" aria-hidden="true">฿</span>
+          <h2 className="mt-4 text-base font-extrabold text-[#0F1B3D]">ยังไม่มีประวัติการชำระเงิน</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">เมื่อสมัคร Plus หรือซื้อคอร์ส รายการชำระเงินจะแสดงในหน้านี้ คุณสามารถดูแพ็กเกจ Plus ได้ทุกเมื่อ</p>
+          <Link href="/membership" className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 text-sm font-bold text-white transition hover:bg-[#2446B8]">
+            ดูแพ็กเกจ Plus
+          </Link>
         </div>
       ) : null}
     </div>

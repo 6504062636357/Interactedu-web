@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Banknote, LayoutDashboard } from "lucide-react";
+import PlusBadge from "@/components/PlusBadge";
 
 type UserRole = "student" | "teacher" | "admin";
 
@@ -13,6 +14,7 @@ interface ProfileDropdownProps {
   displayName: string;
   role: UserRole;
   avatarUrl?: string | null;
+  plusExpiresAt?: string | null;
 }
 
 interface MenuItem {
@@ -101,7 +103,7 @@ function getMenuItems(role: UserRole): MenuItem[] {
     { label: "ภาพรวมการเรียน", href: "/dashboard/student", icon: <LayoutDashboard size={17} aria-hidden="true" /> },
     { label: "โปรไฟล์", href: "/dashboard/student/profile", icon: <IconUser /> },
     { label: "คอร์สของฉัน", href: "/dashboard/student/courses", icon: <IconPlay /> },
-    { label: "สมาชิกรายเดือน", href: "/membership", icon: <Banknote size={17} aria-hidden="true" /> },
+    { label: "Interact Edu Plus", href: "/membership", icon: <Banknote size={17} aria-hidden="true" /> },
     { label: "ใบประกาศฯ", href: "/dashboard/student/certificates", icon: <IconAward /> },
     { label: "คอร์สโปรดของฉัน", href: "/dashboard/student/favorites", icon: <IconHeart /> },
     { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: <Banknote size={17} aria-hidden="true" /> },
@@ -122,7 +124,7 @@ function ProfileAvatar({ displayName, avatarUrl }: { displayName: string; avatar
   );
 }
 
-export default function ProfileDropdown({ displayName, role, avatarUrl }: ProfileDropdownProps): ReactElement {
+export default function ProfileDropdown({ displayName, role, avatarUrl, plusExpiresAt = null }: ProfileDropdownProps): ReactElement {
   const [open, setOpen] = useState<boolean>(false);
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -156,6 +158,7 @@ export default function ProfileDropdown({ displayName, role, avatarUrl }: Profil
       >
         <ProfileAvatar key={avatarUrl ?? "no-avatar"} displayName={displayName} avatarUrl={avatarUrl} />
         <span className="hidden max-w-36 truncate sm:inline">{displayName}</span>
+        {role === "student" && plusExpiresAt && <span className="hidden sm:inline-flex"><PlusBadge key={plusExpiresAt} expiresAt={plusExpiresAt} /></span>}
         <svg
           width="13"
           height="13"
@@ -170,7 +173,7 @@ export default function ProfileDropdown({ displayName, role, avatarUrl }: Profil
       {open && (
         <div role="menu" className="absolute right-0 z-50 mt-2.5 max-h-[calc(100dvh-90px)] w-64 overflow-y-auto rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_24px_60px_-16px_rgba(15,27,61,0.28)] backdrop-blur-xl">
           <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3.5">
-            <p className="truncate text-[13px] font-extrabold text-[#0F1B3D]">{displayName}</p>
+            <div className="flex flex-wrap items-center gap-2"><p className="min-w-0 truncate text-[13px] font-extrabold text-[#0F1B3D]">{displayName}</p>{role === "student" && plusExpiresAt && <PlusBadge key={plusExpiresAt} expiresAt={plusExpiresAt} />}</div>
             <p className="mt-0.5 text-[10.5px] font-medium text-slate-400">บัญชี{roleLabel}</p>
           </div>
           <div className="p-2">

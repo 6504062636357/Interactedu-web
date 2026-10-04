@@ -192,25 +192,25 @@ export default function AdminShell({ children, displayName, avatarUrl, pendingCo
 
   return (
     <div className="app-canvas min-h-screen text-[#0F1B3D]">
-      <header className="app-topbar sticky top-0 z-40 lg:ml-72">
-        <div className="mx-auto flex h-[74px] max-w-[1400px] items-center justify-between gap-3 px-4 sm:px-7 lg:px-9">
+      <header className="app-topbar sticky top-0 z-40 xl:ml-72">
+        <div className="mx-auto flex h-[68px] w-full max-w-[1600px] items-center justify-between gap-2 px-3 sm:h-[74px] sm:px-5 md:px-6 xl:px-8">
           <div className="min-w-0">
-            <div className="w-9 overflow-hidden sm:w-auto lg:hidden">
+            <div className="w-9 overflow-hidden sm:w-auto xl:hidden">
               <AppBrand href="/dashboard/admin" compact />
             </div>
-            <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-500 lg:inline-flex">
+            <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-500 xl:inline-flex">
               พื้นที่ผู้ดูแลระบบ
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
-            <p className="mr-1 hidden text-right lg:block">
+            <p className="mr-1 hidden text-right xl:block">
               <span className="block text-[10px] font-medium text-slate-400">ยินดีต้อนรับ</span>
               <span className="block max-w-40 truncate text-[12px] font-bold text-[#0F1B3D]">{displayName}</span>
             </p>
             <button
               type="button"
               onClick={() => setMenuOpen((open) => !open)}
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm lg:hidden"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm xl:hidden"
               aria-expanded={menuOpen}
               aria-controls="admin-mobile-menu"
               aria-label={menuOpen ? "ปิดเมนูผู้ดูแลระบบ" : "เปิดเมนูผู้ดูแลระบบ"}
@@ -222,13 +222,13 @@ export default function AdminShell({ children, displayName, avatarUrl, pendingCo
           </div>
         </div>
         {menuOpen && (
-          <div id="admin-mobile-menu" className="max-h-[calc(100dvh-74px)] overflow-y-auto border-t border-slate-100 px-4 py-4 lg:hidden">
+          <div id="admin-mobile-menu" className="max-h-[calc(100dvh-68px)] overflow-y-auto border-t border-slate-100 px-3 py-4 sm:max-h-[calc(100dvh-74px)] sm:px-5 xl:hidden">
             {nav}
           </div>
         )}
       </header>
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col overflow-y-auto border-r border-slate-200/70 bg-white/90 px-5 py-6 shadow-[10px_0_40px_rgba(15,27,61,0.035)] backdrop-blur-xl lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col overflow-y-auto border-r border-slate-200/70 bg-white/90 px-5 py-6 shadow-[10px_0_40px_rgba(15,27,61,0.035)] backdrop-blur-xl xl:flex">
         <div className="mb-9 px-1">
           <AppBrand href="/dashboard/admin" subtitle="Admin workspace" />
         </div>
@@ -239,9 +239,9 @@ export default function AdminShell({ children, displayName, avatarUrl, pendingCo
         <div className="mt-auto">{accountPanel}</div>
       </aside>
 
-      <main className="admin-workspace min-w-0 lg:pl-72">
-        <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-7 lg:px-9 lg:py-9">
-          <div className="animate-fade-up">{children}</div>
+      <main className="admin-workspace min-w-0 xl:pl-72">
+        <div className="mx-auto w-full max-w-[1600px] min-w-0 px-3 py-4 sm:px-5 sm:py-6 md:px-6 xl:px-8 xl:py-9">
+          <div className="animate-fade-up min-w-0">{children}</div>
         </div>
       </main>
     </div>

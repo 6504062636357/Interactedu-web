@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { summarizeStudentProgress } from "@/lib/courses/student-progress";
 import StudentProfileClient from "@/components/StudentProfileClient";
+import { selectPlusPlans, type PlusPlanDetails } from "@/lib/payments/plus-plan";
 import { ArrowUpRight, Award, BookOpenText, GraduationCap, Play } from "lucide-react";
 import { createClient } from "@/utils/supabase/server";
 
@@ -49,6 +50,30 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
     .select("full_name, avatar_url")
     .eq("id", user.id)
     .single();
+
+  const now = new Date().toISOString();
+  const plusQuery = supabase.from("student_membership_orders")
+    .select("starts_at, expires_at, duration_months")
+    .eq("student_id", user.id)
+    .eq("status", "active")
+    .gt("expires_at", now)
+    .order("starts_at", { ascending: true });
+  const plusResult = await plusQuery;
+  let plusRows: PlusPlanDetails[] = (plusResult.data ?? []).map((row) => ({
+    durationMonths: row.duration_months === 12 ? 12 : 1,
+    startsAt: row.starts_at,
+    expiresAt: row.expires_at,
+  }));
+  if (plusResult.error?.code === "42703" && plusResult.error.message.includes("duration_months")) {
+    const legacyResult = await supabase.from("student_membership_orders")
+      .select("starts_at, expires_at")
+      .eq("student_id", user.id)
+      .eq("status", "active")
+      .gt("expires_at", now)
+      .order("starts_at", { ascending: true });
+    plusRows = (legacyResult.data ?? []).map((row) => ({ durationMonths: 1, startsAt: row.starts_at, expiresAt: row.expires_at }));
+  }
+  const { current: currentPlus, upcoming: upcomingPlus } = selectPlusPlans(plusRows, new Date(now));
 
   const { data: enrollmentsRaw } = await supabase
     .from("enrollments")
@@ -100,6 +125,8 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
       <StudentProfileClient
         initialProfile={{ full_name: profile?.full_name ?? "", avatar_url: profile?.avatar_url ?? "" }}
         email={user.email ?? ""}
+        currentPlus={currentPlus}
+        upcomingPlus={upcomingPlus}
       >
       <div className="mb-9 grid gap-3 sm:grid-cols-3">
         <div className="flex items-center gap-4 rounded-[20px] border border-blue-100 bg-blue-50/70 p-4">

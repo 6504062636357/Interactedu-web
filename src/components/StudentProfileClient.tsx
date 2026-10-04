@@ -4,15 +4,20 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Rea
 import { useRouter } from "next/navigation";
 import { GraduationCap, Mail, Pencil, UserRound } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import PlusBadge from "@/components/PlusBadge";
+import { formatRemainingAccess } from "@/lib/courses/access-expiry";
+import type { PlusPlanDetails } from "@/lib/payments/plus-plan";
 
 interface Profile {
   full_name: string;
   avatar_url: string;
 }
 
-export default function StudentProfileClient({ initialProfile, email, children }: {
+export default function StudentProfileClient({ initialProfile, email, currentPlus, upcomingPlus, children }: {
   initialProfile: Profile;
   email: string;
+  currentPlus: PlusPlanDetails | null;
+  upcomingPlus: PlusPlanDetails | null;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -180,7 +185,7 @@ export default function StudentProfileClient({ initialProfile, email, children }
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-bold text-white/90">
                   <GraduationCap size={14} /> ผู้เรียน
                 </span>
-                <h2 className="mt-3 break-words text-[25px] font-extrabold tracking-[-0.03em] sm:text-[30px]">{displayName}</h2>
+                <div className="mt-3 flex flex-wrap items-center gap-2.5"><h2 className="break-words text-[25px] font-extrabold tracking-[-0.03em] sm:text-[30px]">{displayName}</h2>{currentPlus && <PlusBadge key={currentPlus.expiresAt} expiresAt={currentPlus.expiresAt} dark />}</div>
                 <p className="mt-1 break-all text-[13px] text-white/70">{email}</p>
               </div>
               <button ref={editButtonRef} type="button" disabled={isSaving} onClick={startEditing}
@@ -189,6 +194,21 @@ export default function StudentProfileClient({ initialProfile, email, children }
                 <Pencil size={15} /> แก้ไขโปรไฟล์
               </button>
             </div>
+          </section>
+
+          <section aria-label="รายละเอียดสมาชิก Plus" className="mb-5 rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#3157D5]">Interact Edu Plus</p><h3 className="mt-1 text-lg font-extrabold text-[#0F1B3D]">{currentPlus ? "Plus กำลังใช้งาน" : "ยังไม่มี Plus ที่กำลังใช้งาน"}</h3></div>
+              {currentPlus && <PlusBadge key={currentPlus.expiresAt} expiresAt={currentPlus.expiresAt} />}
+            </div>
+            {currentPlus ? (
+              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-xs text-slate-500">แพ็กเกจปัจจุบัน</dt><dd className="mt-1 font-bold text-[#0F1B3D]">Plus {currentPlus.durationMonths === 12 ? "รายปี" : "รายเดือน"}</dd></div>
+                <div className="rounded-xl bg-slate-50 p-3"><dt className="text-xs text-slate-500">ใช้ได้ถึง</dt><dd className="mt-1 font-bold text-[#0F1B3D]">{new Date(currentPlus.expiresAt).toLocaleDateString("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })}</dd></div>
+                <div className="rounded-xl bg-blue-50 p-3"><dt className="text-xs text-[#3157D5]">ระยะเวลาคงเหลือ</dt><dd className="mt-1 font-bold text-[#3157D5]">{formatRemainingAccess(currentPlus.expiresAt)}</dd></div>
+              </dl>
+            ) : <p className="mt-3 text-sm text-slate-500">เมื่อชำระเงินสำเร็จและถึงวันเริ่มแพ็กเกจ สถานะ Plus จะแสดงที่นี่</p>}
+            {upcomingPlus && <p className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-[#1B3267]">แพ็กเกจถัดไป: <strong>Plus {upcomingPlus.durationMonths === 12 ? "รายปี" : "รายเดือน"}</strong> เริ่ม {new Date(upcomingPlus.startsAt).toLocaleDateString("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })} และใช้ได้ถึง {new Date(upcomingPlus.expiresAt).toLocaleDateString("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })}</p>}
           </section>
 
           <section className="mb-7 grid gap-3 sm:grid-cols-2" aria-label="ข้อมูลส่วนตัว">

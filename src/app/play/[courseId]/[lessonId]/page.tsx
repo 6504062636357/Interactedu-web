@@ -893,7 +893,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             {flatItems.length > 0 && (
               <>
                 <div className="mb-2 flex items-center justify-between text-[11.5px] text-slate-400">
-                  <span>ความคืบหน้าบทเรียนนี้</span>
+                  <span>ความคืบหน้าบทเรียนปัจจุบัน</span>
                   <span className="font-bold text-blue-300">{progressPercent}%</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-white/[0.07]">
@@ -989,7 +989,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
                   className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-400 px-2 py-2"
                 >
                   <span>
-                    บทเรียนในคอร์สนี้ ({courseLessonIndex >= 0 ? courseLessonIndex + 1 : '–'}/{courseLessons.length})
+                    บทเรียนที่ {courseLessonIndex >= 0 ? courseLessonIndex + 1 : '–'} จาก {courseLessons.length}
                     {courseTotalDurationLabel && <span className="ml-1 normal-case tracking-normal text-slate-500">· {courseTotalDurationLabel}</span>}
                   </span>
                   <svg
@@ -1133,7 +1133,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             </div>
           </div>
           <div className="ml-3 flex shrink-0 items-center gap-3">
-            {flatItems.length > 0 && <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />{progressPercent}% complete</div>}
+            {flatItems.length > 0 && <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />บทเรียนนี้ {progressPercent}%</div>}
             <span className="rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-bold text-slate-400">{currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length || '–'}</span>
           </div>
         </header>

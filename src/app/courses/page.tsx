@@ -2,25 +2,26 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
+import { getActivePlusExpiry } from "@/lib/payments/active-plus";
 import ProfileDropdown from "@/components/ProfileDropdown";
 import CoursesExplorer, { type ExplorerCourse } from "@/components/CoursesExplorer";
 import AppBrand from "@/components/AppBrand";
 
 const navLinks: { label: string; href: string }[] = [
   { label: "คอร์สทั้งหมด", href: "/courses" },
-  { label: "สมาชิก 1 เดือน", href: "/membership" },
+  { label: "Interact Edu Plus", href: "/membership" },
   { label: "เส้นทางสายอาชีพ", href: "/#career-paths" },
   { label: "คอร์สฟรี", href: "/courses?price=free" },
 ];
 
-function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatarUrl: string | null }): ReactElement {
+function Navbar({ displayName, avatarUrl, plusExpiresAt }: { displayName: string | null; avatarUrl: string | null; plusExpiresAt: string | null }): ReactElement {
   return (
     <header className="app-topbar sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-[74px] items-center justify-between">
           <AppBrand compact />
 
-          <nav className="hidden md:flex items-center gap-2">
+          <nav className="hidden xl:flex items-center gap-2">
             {navLinks.map((link) =>
               link.label === "คอร์สทั้งหมด" ? (
                 <Link
@@ -45,12 +46,12 @@ function Navbar({ displayName, avatarUrl }: { displayName: string | null; avatar
           <div className="flex items-center gap-2">
             <Link
               href="/membership"
-              className="inline-flex rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-bold text-[#3157D5] transition-colors hover:bg-blue-50 md:hidden"
+              className="inline-flex rounded-xl border border-slate-200 px-3 py-2 text-[12px] font-bold text-[#3157D5] transition-colors hover:bg-blue-50 xl:hidden"
             >
-              สมาชิกรายเดือน
+              ✦ Plus
             </Link>
             {displayName ? (
-              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" />
+              <ProfileDropdown displayName={displayName} avatarUrl={avatarUrl} role="student" plusExpiresAt={plusExpiresAt} />
             ) : (
               <>
                 <Link
@@ -98,7 +99,7 @@ function ExplorerHero(): ReactElement {
 function Footer(): ReactElement {
   return (
     <footer className="border-t border-[#0F1B3D]/[0.06] bg-white">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-4 px-4 py-10 sm:flex-row sm:px-6 lg:px-8">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-[#0F1B3D] flex items-center justify-center rotate-[-4deg]">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -136,6 +137,7 @@ export default async function CoursesPage({
   const displayName = user
     ? (user.user_metadata?.full_name as string | undefined) ?? user.email?.split("@")[0] ?? "ผู้ใช้"
     : null;
+  const plusExpiresAt = user ? await getActivePlusExpiry(supabase, user.id) : null;
 
   // ดึงคอร์สที่เผยแพร่แล้วทั้งหมด — กรอง/ค้นหาฝั่ง client ผ่าน CoursesExplorer
   // [แก้บั๊ก: ความยาวคอร์สค้าง 0] เดิมอ่าน courses.total_duration_seconds ตรงๆ แต่คอลัมน์นี้ไม่เคย
@@ -181,7 +183,7 @@ export default async function CoursesPage({
 
   return (
     <div className="min-h-screen w-full bg-white">
-      <Navbar displayName={displayName} avatarUrl={profile?.avatar_url ?? null} />
+      <Navbar displayName={displayName} avatarUrl={profile?.avatar_url ?? null} plusExpiresAt={plusExpiresAt} />
       <ExplorerHero />
       <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} initialFreeOnly={initialFreeOnly} />
       <Footer />

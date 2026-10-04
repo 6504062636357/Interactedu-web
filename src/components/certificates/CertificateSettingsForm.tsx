@@ -251,7 +251,7 @@ export default function CertificateSettingsForm({
         </div>
       </div>
 
-      <div className="grid gap-7 p-5 sm:p-7 xl:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)]">
+      <div className="grid min-w-0 gap-7 p-4 sm:p-7 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="space-y-6">
           <div>
             <div className="mb-3 flex items-center gap-2">

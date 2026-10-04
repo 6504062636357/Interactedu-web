@@ -122,8 +122,8 @@ export default function CoursesExplorer({
     <>
       {/* แถบค้นหา + ตัวกรองหมวดหมู่ — ลอยทับขอบล่างของ Hero เหมือนหน้าแรก */}
       <div className="relative z-20 -mt-10 sm:-mt-14">
-        <div className="max-w-5xl mx-auto px-6 lg:px-8">
-          <div className="bg-white rounded-[28px] shadow-[0_30px_60px_-25px_rgba(15,27,61,0.35)] border border-[#0F1B3D]/[0.06] p-6 sm:p-8">
+        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8">
+          <div className="rounded-[28px] border border-[#0F1B3D]/[0.06] bg-white p-4 shadow-[0_30px_60px_-25px_rgba(15,27,61,0.35)] sm:p-8">
             <label htmlFor="course-search" className="block text-[15px] font-bold text-[#0F1B3D] mb-3">
               อยากเรียนเรื่องอะไรดี?
             </label>
@@ -198,7 +198,7 @@ export default function CoursesExplorer({
       </div>
 
       {/* ผลลัพธ์ */}
-      <section className="max-w-7xl mx-auto px-6 lg:px-8 pt-14 pb-24 lg:pb-28">
+      <section className="mx-auto w-full max-w-7xl px-4 pt-14 pb-24 sm:px-6 lg:px-8 lg:pb-28">
         <div className="mb-10 flex items-end justify-between">
           <h2 className="text-[22px] sm:text-[26px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">
             {query || selectedCategories.length > 0 ? "ผลการค้นหา" : "คอร์สทั้งหมด"}
@@ -207,7 +207,7 @@ export default function CoursesExplorer({
         </div>
 
         {filtered.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-6">
             {filtered.map((course) => (
               <CourseCard key={course.id} course={course} isEnrolled={enrolledSet.has(course.id)} />
             ))}
