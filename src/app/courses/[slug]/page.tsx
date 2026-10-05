@@ -6,6 +6,9 @@ import CourseTabs from "@/components/CourseTabs";
 import AppBrand from "@/components/AppBrand";
 import CourseReviews, { type CourseReviewItem } from "@/components/courses/CourseReviews";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
+import CourseAccessActions, { type CourseAccessActionsProps } from "@/components/courses/CourseAccessActions";
+import { hasStartedLearning, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
 
 interface Course {
   id: string;
@@ -109,23 +112,12 @@ function StatItem({ label, value }: { label: string; value: string }): ReactElem
 
 function EnrollCta({
   course,
-  isEnrolled,
+  access,
 }: {
   course: Course;
-  isEnrolled: boolean;
+  access: CourseAccessActionsProps | null;
 }): ReactElement {
-  if (isEnrolled) {
-    const href = `/dashboard/student/courses/${course.id}`;
-
-    return (
-      <Link
-        href={href}
-        className="inline-flex items-center justify-center gap-2 text-[15px] font-bold text-white bg-[#0F1B3D] hover:bg-[#182852] px-7 py-4 rounded-full transition-colors shadow-[0_12px_28px_-10px_rgba(15,27,61,0.55)] w-full"
-      >
-        เข้าสู่หน้าคอร์สของฉัน
-      </Link>
-    );
-  }
+  if (access) return <CourseAccessActions {...access} />;
 
   return (
     <Link
@@ -182,18 +174,26 @@ export default async function CourseDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  let isEnrolled = false;
+  let access: CourseAccessActionsProps | null = null;
   if (user) {
-    const { data: enrollment } = await supabase
+    const { data: enrollment } = await loadLearningEnrollments((includeStart) => supabase
       .from("enrollments")
-      .select("id, status")
+      .select(`id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
       .eq("student_id", user.id)
       .eq("course_id", typedCourse.id)
       .eq("status", "approved")
       .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-      .maybeSingle();
+      .maybeSingle());
 
-    isEnrolled = Boolean(enrollment);
+    if (enrollment) {
+      const row = enrollment as unknown as LearningEnrollment & { id: string };
+      const library = await loadSavedCourseEnrollments(supabase, user.id);
+      access = {
+        courseId: typedCourse.id, slug: typedCourse.slug, hasAccess: true,
+        membership: Boolean(row.membership_order_id), started: hasStartedLearning(row),
+        saved: library.enrollmentIds.has(row.id), savingAvailable: library.ready,
+      };
+    }
   }
 
   // ★ เพิ่มใหม่: ดึงรีวิวของคอร์สนี้ทั้งหมด — ตาราง course_reviews เปิดให้อ่านสาธารณะสำหรับ
@@ -278,7 +278,7 @@ export default async function CourseDetailPage({
               </p>
 
               <div className="mt-6">
-                <EnrollCta course={typedCourse} isEnrolled={isEnrolled} />
+                <EnrollCta course={typedCourse} access={access} />
               </div>
             </div>
           </div>
@@ -304,7 +304,7 @@ export default async function CourseDetailPage({
                 {formatPrice(typedCourse.price)}
               </p>
 
-              <EnrollCta course={typedCourse} isEnrolled={isEnrolled} />
+              <EnrollCta course={typedCourse} access={access} />
 
               <ul className="mt-7 space-y-3">
                 <li className="flex items-center gap-2.5 text-[13.5px] text-[#0F1B3D]/60 font-medium">
@@ -332,7 +332,7 @@ export default async function CourseDetailPage({
           courseId={typedCourse.id}
           slug={typedCourse.slug}
           reviews={reviews}
-          canReview={isEnrolled}
+          canReview={Boolean(access)}
           currentUserId={user?.id ?? null}
         />
       </section>

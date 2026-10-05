@@ -1,4 +1,5 @@
-import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { hasStartedLearning, isCourseInLibrary, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
 // app/courses/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -162,16 +163,25 @@ export default async function CoursesPage({
   // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
   let enrolledCourseIds: string[] = [];
   let accessibleCourseIds: string[] = [];
+  let startedCourseIds: string[] = [];
+  let membershipCourseIds: string[] = [];
+  let savedCourseIds: string[] = [];
+  let savingAvailable = false;
   if (user) {
     const { data: enrollmentRows } = await loadLearningEnrollments((includeStart) => supabase
       .from("enrollments")
-      .select(`course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
+      .select(`id, course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
       .eq("student_id", user.id)
       .eq("status", "approved")
       .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`));
-    const rows = (enrollmentRows ?? []) as unknown as (LearningEnrollment & { course_id: string })[];
+    const library = await loadSavedCourseEnrollments(supabase, user.id);
+    savingAvailable = library.ready;
+    const rows = (enrollmentRows ?? []) as unknown as (LearningEnrollment & { id: string; course_id: string })[];
     accessibleCourseIds = rows.map((e) => e.course_id);
-    enrolledCourseIds = rows.filter(isLearningEnrollment).map((e) => e.course_id);
+    enrolledCourseIds = rows.filter((row) => isCourseInLibrary(row, library.enrollmentIds)).map((e) => e.course_id);
+    startedCourseIds = rows.filter(hasStartedLearning).map((e) => e.course_id);
+    membershipCourseIds = rows.filter((row) => row.membership_order_id).map((e) => e.course_id);
+    savedCourseIds = rows.filter((row) => library.enrollmentIds.has(row.id)).map((e) => e.course_id);
   }
 
   const explorerCourses: ExplorerCourse[] = (courses ?? []).map((course) => ({
@@ -189,7 +199,7 @@ export default async function CoursesPage({
     <div className="min-h-screen w-full bg-white">
       <Navbar displayName={displayName} avatarUrl={profile?.avatar_url ?? null} plusExpiresAt={plusExpiresAt} />
       <ExplorerHero />
-      <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} accessibleCourseIds={accessibleCourseIds} initialFreeOnly={initialFreeOnly} />
+      <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} accessibleCourseIds={accessibleCourseIds} startedCourseIds={startedCourseIds} membershipCourseIds={membershipCourseIds} savedCourseIds={savedCourseIds} savingAvailable={savingAvailable} initialFreeOnly={initialFreeOnly} />
       <Footer />
     </div>
   );

@@ -11,11 +11,26 @@ export interface LearningEnrollment {
 
 export function isLearningEnrollment(enrollment: LearningEnrollment): boolean {
   return !enrollment.membership_order_id
-    || Boolean(enrollment.learning_started_at)
+    || hasStartedLearning(enrollment);
+}
+
+export function hasStartedLearning(enrollment: LearningEnrollment): boolean {
+  return Boolean(enrollment.learning_started_at)
     || (enrollment.scorm_tracking ?? []).some((row) =>
       Boolean(row.last_accessed) || getResumeSeconds(row) > 0
       || isLessonComplete(row) || (row.completed_scos?.length ?? 0) > 0)
     || (enrollment.student_study_time?.total_seconds ?? 0) > 0;
+}
+
+export function isCourseInLibrary(enrollment: LearningEnrollment & { id: string }, savedEnrollmentIds: ReadonlySet<string>): boolean {
+  return isLearningEnrollment(enrollment) || savedEnrollmentIds.has(enrollment.id);
+}
+
+export type LearningCourseStatus = "not_started" | "in_progress" | "completed";
+
+export function getLearningCourseStatus(enrollment: LearningEnrollment, allComplete: boolean): LearningCourseStatus {
+  if (allComplete) return "completed";
+  return hasStartedLearning(enrollment) ? "in_progress" : "not_started";
 }
 
 // Keep existing libraries available if the app is deployed before the database

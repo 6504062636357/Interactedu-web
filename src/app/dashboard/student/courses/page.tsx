@@ -1,4 +1,5 @@
-import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { getLearningCourseStatus, isCourseInLibrary, loadLearningEnrollments, type LearningEnrollment, type LearningCourseStatus } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
 // app/dashboard/student/courses/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -54,13 +55,14 @@ interface CourseCardData {
   studySeconds: number | null;
   videoSeconds: number;
   accessExpiresAt: string | null;
+  status: LearningCourseStatus;
 }
 
 function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
-  const isDone = course.progress === 100;
+  const isDone = course.status === "completed";
+  const waiting = course.status === "not_started";
   return (
-    <Link
-      href={course.href}
+    <div
       className="group flex h-full flex-col overflow-hidden rounded-2xl border border-[#0F1B3D]/[0.06] bg-white transition-shadow hover:shadow-[0_15px_35px_-15px_rgba(15,27,61,0.2)]"
     >
       <div className="relative h-36 bg-gradient-to-br from-[#0F1B3D] to-[#182852]">
@@ -88,16 +90,16 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
           {course.title}
         </p>
         <p className="text-[12.5px] text-[#0F1B3D]/50 font-medium mb-1.5">
-          {isDone ? "เรียนครบทุกบทแล้ว" : `เรียนไปแล้ว ${course.progress}%`}
+          {waiting ? "ยังไม่เริ่มเรียน" : isDone ? "เรียนครบทุกบทแล้ว" : `เรียนไปแล้ว ${course.progress}%`}
         </p>
-        <div className="h-1.5 w-full bg-[#0F1B3D]/[0.06] rounded-full overflow-hidden">
+        {!waiting && <div className="h-1.5 w-full bg-[#0F1B3D]/[0.06] rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full ${isDone ? "bg-emerald-500" : "bg-[#FF5A3C]"}`}
             style={{ width: `${course.progress}%` }}
           />
-        </div>
+        </div>}
         <div className="mt-3 space-y-1 text-[11.5px] text-slate-500">
-          <p>เรียนแล้ว {course.studySeconds === null ? "—" : formatStudyTime(course.studySeconds)}</p>
+          {!waiting && <p>เรียนแล้ว {course.studySeconds === null ? "—" : formatStudyTime(course.studySeconds)}</p>}
           <p>ความยาวคลิปรวม {formatCourseVideoDuration(course.videoSeconds) ?? "ยังไม่ระบุ"}</p>
         </div>
         {course.accessExpiresAt && (
@@ -105,15 +107,18 @@ function ProgressCard({ course }: { course: CourseCardData }): ReactElement {
             {formatRemainingAccess(course.accessExpiresAt)} · สิทธิ์เรียนถึง {new Date(course.accessExpiresAt).toLocaleDateString("th-TH", { dateStyle: "long", timeZone: "Asia/Bangkok" })}
           </p>
         )}
-        <p className="mt-auto self-end pt-3 text-right text-xs font-bold text-[#3157D5]">
+        <Link href={course.href} className="mt-auto self-end pt-3 text-right text-xs font-bold text-[#3157D5]">
           ดูรายละเอียดและบทเรียน
-        </p>
+        </Link>
+        <Link href={`${course.href}?start=1`} className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-[#0F1B3D] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#3157D5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] focus-visible:ring-offset-2">
+          {waiting ? "เริ่มเรียน" : isDone ? "ทบทวนบทเรียน" : "เรียนต่อ"}
+        </Link>
       </div>
-    </Link>
+    </div>
   );
 }
 
-export default async function MyCoursesPage(): Promise<ReactElement> {
+export default async function MyCoursesPage({ searchParams }: { searchParams?: Promise<{ status?: string }> } = {}): Promise<ReactElement> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -121,15 +126,19 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
 
   if (!user) redirect("/login?redirect=/dashboard/student/courses");
 
-  const { data } = await loadLearningEnrollments((includeStart) => supabase
+  const [{ data, error: enrollmentError }, library, filters] = await Promise.all([
+    loadLearningEnrollments((includeStart) => supabase
     .from("enrollments")
     .select(`membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds), id, course_id, access_expires_at, courses(id, title, cover_image_url)`)
     .eq("student_id", user.id)
     .eq("status", "approved")
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-    .order("created_at", { ascending: false }));
+    .order("created_at", { ascending: false })),
+    loadSavedCourseEnrollments(supabase, user.id),
+    searchParams ?? Promise.resolve({ status: undefined }),
+  ]);
 
-  const enrollments = ((data ?? []) as unknown as EnrollmentRow[]).filter(isLearningEnrollment);
+  const enrollments = ((data ?? []) as unknown as EnrollmentRow[]).filter((row) => isCourseInLibrary(row, library.enrollmentIds));
   const courseIds = enrollments.map((e) => e.course_id);
   const studyTimeResult = enrollments.length
     ? await supabase.from("student_study_time").select("enrollment_id, total_seconds").in("enrollment_id", enrollments.map((e) => e.id))
@@ -184,7 +193,7 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         [...(m.lessons ?? [])].filter((lesson) => lesson.is_published).sort((a, b) => a.order_index - b.order_index)
       );
 
-      const { percent: progress } = summarizeStudentProgress(allLessons, ((trackingData ?? []) as TrackingRow[]).filter((row) => row.enrollment_id === e.id));
+      const { percent: progress, allComplete } = summarizeStudentProgress(allLessons, ((trackingData ?? []) as TrackingRow[]).filter((row) => row.enrollment_id === e.id));
 
       cards.push({
         enrollmentId: e.id,
@@ -197,9 +206,21 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         studySeconds: studyTimeResult.error ? null : studyTimeByEnrollment.get(e.id) ?? 0,
         videoSeconds: allLessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds ?? 0), 0),
         accessExpiresAt: e.access_expires_at,
+        status: getLearningCourseStatus(e, allComplete),
       });
     }
   }
+
+  const tabs: { status: LearningCourseStatus; label: string }[] = [
+    { status: "not_started", label: "ยังไม่เริ่ม" },
+    { status: "in_progress", label: "กำลังเรียน" },
+    { status: "completed", label: "เรียนจบแล้ว" },
+  ];
+  const defaultStatus = cards.some((course) => course.status === "in_progress") ? "in_progress"
+    : cards.some((course) => course.status === "not_started") ? "not_started"
+    : cards.length > 0 ? "completed" : "not_started";
+  const activeStatus = tabs.find((tab) => tab.status === filters.status)?.status ?? defaultStatus;
+  const visibleCards = cards.filter((course) => course.status === activeStatus);
 
   return (
     <div>
@@ -210,15 +231,22 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         <h1 className="text-[22px] font-extrabold text-[#0F1B3D] tracking-[-0.02em]">คอร์สของฉัน</h1>
       </div>
 
-      {cards.length > 0 ? (
+      {(enrollmentError || library.error) && <p role="alert" className="mb-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{enrollmentError ? "โหลดคอร์สของฉันไม่สำเร็จ กรุณาลองใหม่ภายหลัง" : library.error}</p>}
+      <nav aria-label="สถานะคอร์สของฉัน" className="mb-6 grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2">
+        {tabs.map((tab) => <Link key={tab.status} href={`/dashboard/student/courses?status=${tab.status}`} aria-current={activeStatus === tab.status ? "page" : undefined}
+          className={`flex min-h-12 flex-wrap items-center justify-center gap-2 rounded-xl px-2 py-3 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] sm:text-sm ${activeStatus === tab.status ? "bg-[#0F1B3D] text-white" : "text-slate-500 hover:bg-slate-50"}`}>
+          {tab.label}<span className="rounded-full bg-current/10 px-2 py-0.5">{cards.filter((course) => course.status === tab.status).length}</span>
+        </Link>)}
+      </nav>
+      {visibleCards.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {cards.map((course) => (
+          {visibleCards.map((course) => (
             <ProgressCard key={course.enrollmentId} course={course} />
           ))}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
-          <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ยังไม่มีคอร์สที่ลงทะเบียนหรือเริ่มเรียน</p>
+          <p className="text-[14px] text-[#0F1B3D]/40 font-medium">{activeStatus === "not_started" ? "ยังไม่มีคอร์สที่เก็บไว้เพื่อเรียน" : activeStatus === "in_progress" ? "ยังไม่มีคอร์สที่กำลังเรียน" : "ยังไม่มีคอร์สที่เรียนจบแล้ว"}</p>
           <Link href="/courses" className="mt-4 inline-flex rounded-xl bg-[#3157D5] px-4 py-3 text-sm font-bold text-white">เลือกคอร์สเพื่อเริ่มเรียน</Link>
         </div>
       )}

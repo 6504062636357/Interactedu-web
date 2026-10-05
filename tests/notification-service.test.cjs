@@ -61,10 +61,10 @@ test('deduplicated notifications refresh their content and unread state', async 
   assert.ok(!Number.isNaN(Date.parse(writes[0].row.created_at)));
 });
 
-function loadCourseStart(options = {}) {
+function loadCourseStart(options = {}, file = 'src/app/api/student/course-start/route.ts') {
   const calls = [];
   const client = {
-    auth: { getUser: async () => ({ data: { user: options.noUser ? null : { id: 'student' } }, error: null }) },
+    auth: { getUser: async () => ({ data: { user: options.noUser ? null : { id: 'student' } }, error: options.authError ?? null }) },
     from(table) {
       assert.equal(table, 'profiles');
       const query = {
@@ -79,7 +79,7 @@ function loadCourseStart(options = {}) {
     },
   };
   const exports = {};
-  const code = ts.transpileModule(fs.readFileSync('src/app/api/student/course-start/route.ts', 'utf8'), {
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { exports, Response, console: { warn() {} }, require(name) {
@@ -147,4 +147,33 @@ test('course overview and prefetch do not start learning; the ready learning roo
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], '/api/student/course-start');
   assert.deepEqual(JSON.parse(calls[0][1].body), startPayload);
+});
+
+test('saving validates input and login before requesting a scoped library write', async () => {
+  const file = 'src/app/api/student/course-library/route.ts';
+  const invalid = loadCourseStart({}, file);
+  assert.equal((await invalid.post(startRequest({ courseId: 'invalid' }))).status, 400);
+  assert.equal((await invalid.post(new Request('https://example.test', { method: 'POST', body: '{' }))).status, 400);
+  assert.equal(invalid.calls.length, 0);
+  for (const options of [{ noUser: true }, { authError: { message: 'Invalid session' } }]) {
+    const app = loadCourseStart(options, file);
+    assert.equal((await app.post(startRequest())).status, 401);
+    assert.equal(app.calls.length, 0);
+  }
+});
+
+test('saving uses authenticated ownership and never invokes the learning-start RPC', async () => {
+  const file = 'src/app/api/student/course-library/route.ts';
+  for (const started of [true, false]) {
+    const app = loadCourseStart({ started }, file);
+    const response = await app.post(startRequest({ ...startPayload, studentId: 'another-student' }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).saved, true);
+    assert.equal(app.calls.length, 1);
+    assert.equal(app.calls[0].name, 'save_course_to_library');
+    assert.equal(app.calls[0].args.p_course_id, startPayload.courseId);
+    assert.equal(Object.keys(app.calls[0].args).length, 1);
+  }
+  assert.equal((await loadCourseStart({ error: { code: '42501' } }, file).post(startRequest())).status, 403);
+  assert.equal((await loadCourseStart({ error: { code: 'PGRST202' } }, file).post(startRequest())).status, 503);
 });

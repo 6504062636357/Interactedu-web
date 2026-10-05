@@ -2,7 +2,8 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { summarizeStudentProgress } from "@/lib/courses/student-progress";
-import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { hasStartedLearning, isCourseInLibrary, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
 import StudentProfileClient from "@/components/StudentProfileClient";
 import { selectPlusPlans, type PlusPlanDetails } from "@/lib/payments/plus-plan";
 import { ArrowUpRight, Award, BookOpenText, GraduationCap, Play } from "lucide-react";
@@ -84,7 +85,8 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .order("created_at", { ascending: false }));
 
-  const enrollments = ((enrollmentsRaw ?? []) as unknown as EnrollmentWithCourse[]).filter(isLearningEnrollment);
+  const library = await loadSavedCourseEnrollments(supabase, user.id);
+  const enrollments = ((enrollmentsRaw ?? []) as unknown as EnrollmentWithCourse[]).filter((row) => isCourseInLibrary(row, library.enrollmentIds));
   const enrollmentIds = enrollments.map((e) => e.id);
   const courseIds = enrollments.map((e) => e.course_id);
 
@@ -106,10 +108,10 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
       (lessonsRaw ?? []).filter((lesson) => lesson.course_id === enrollment.course_id),
       tracking.filter((row) => row.enrollment_id === enrollment.id)
     );
-    return { ...enrollment, completed: summary.completed, total: summary.total, percent: summary.percent };
+    return { ...enrollment, started: hasStartedLearning(enrollment), completed: summary.completed, total: summary.total, percent: summary.percent };
   });
 
-  const inProgress = coursesWithProgress.filter((c) => c.percent < 100);
+  const inProgress = coursesWithProgress.filter((c) => c.started && c.percent < 100);
   const completedCourses = coursesWithProgress.filter((c) => c.percent >= 100 && c.total > 0);
 
   const { data: certsRaw } = await supabase
@@ -129,6 +131,7 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
         currentPlus={currentPlus}
         upcomingPlus={upcomingPlus}
       >
+      {library.error && <p role="alert" className="mb-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{library.error}</p>}
       <div className="mb-9 grid gap-3 sm:grid-cols-3">
         <div className="flex items-center gap-4 rounded-[20px] border border-blue-100 bg-blue-50/70 p-4">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#3157D5]/10 text-[#3157D5]"><BookOpenText size={21} /></span>

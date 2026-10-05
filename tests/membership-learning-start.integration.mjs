@@ -32,6 +32,7 @@ try {
   await db.exec(`
     create role anon;
     create role authenticated;
+    create role service_role;
     create schema auth;
     create function auth.uid() returns uuid language sql stable as $$
       select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
@@ -39,7 +40,7 @@ try {
     grant usage on schema auth to authenticated;
     grant execute on function auth.uid() to authenticated;
     create table public.profiles (id uuid primary key, full_name text, role text, is_active boolean default true);
-    create table public.courses (id uuid primary key, title text, created_by uuid);
+    create table public.courses (id uuid primary key, title text, created_by uuid, status text default 'published');
     create table public.lessons (id uuid primary key, course_id uuid, is_published boolean default true);
     create table public.enrollments (
       id uuid primary key default gen_random_uuid(), student_id uuid, course_id uuid,
@@ -74,7 +75,7 @@ try {
       ('${student}', 'Alice', 'student'), ('${direct}', 'Alice', 'student'),
       ('${prior}', 'Prior learner', 'student'), ('${fresh}', 'Fresh member', 'student'),
       ('${teacher}', 'Teacher', 'teacher');
-    insert into public.courses values ('${course}', 'Running', '${teacher}');
+    insert into public.courses (id, title, created_by) values ('${course}', 'Running', '${teacher}');
     insert into public.lessons values ('${lesson}', '${course}', true), ('${otherLesson}', gen_random_uuid(), true);
     begin;
     insert into public.enrollments (student_id, course_id, membership_order_id)
@@ -135,6 +136,51 @@ try {
     update public.lessons set is_published = false where id = '${lesson}'`);
   await forbidden(fresh);
   console.log('PASS: RPC rejects anonymous, non-student, mismatched lesson, inactive, expired, pending and unpublished access');
+
+  await db.exec(await fs.readFile('supabase/migrations/20261006100000_student_course_library.sql', 'utf8'));
+  const save = async user => {
+    await db.query("select set_config('request.jwt.claim.sub', $1, false)", [user]);
+    return (await db.query('select public.save_course_to_library($1) as saved', [course])).rows[0].saved;
+  };
+  const enrollmentBefore = (await db.query('select to_jsonb(e) as row from public.enrollments e where student_id = $1', [fresh])).rows[0].row;
+  const noticesBefore = await count('select count(*) from public.notifications');
+  await db.exec('set role authenticated');
+  assert.equal(await save(fresh), true);
+  assert.equal(await save(fresh), false);
+  assert.equal(await count('select count(*) from public.student_course_library'), 1);
+  await db.query("select set_config('request.jwt.claim.sub', $1, false)", [student]);
+  assert.equal(await count('select count(*) from public.student_course_library'), 0);
+  await assert.rejects(db.exec(`insert into public.student_course_library (enrollment_id, student_id) values (gen_random_uuid(), '${student}')`), error => error.code === '42501');
+  await db.exec('reset role');
+  assert.deepEqual((await db.query('select to_jsonb(e) as row from public.enrollments e where student_id = $1', [fresh])).rows[0].row, enrollmentBefore);
+  assert.equal(await count('select count(*) from public.notifications'), noticesBefore);
+  assert.equal(await count('select count(*) from public.student_study_time'), 0);
+  console.log('PASS: saving is idempotent, private and never changes enrollment, learning or notifications');
+
+  await db.exec(`update public.lessons set is_published = true where id = '${lesson}'; set role authenticated`);
+  assert.equal(await start(fresh), true);
+  assert.equal(await start(fresh), false);
+  await db.exec('reset role');
+  assert.equal(await count('select count(*) from public.notifications'), noticesBefore + 1);
+  assert.equal(await count('select count(*) from public.student_course_library'), 1);
+  assert.equal(await count(`select count(*) from public.enrollments where student_id = '${fresh}' and learning_started_at is not null`), 1);
+  console.log('PASS: a saved course starts normally and sends exactly one first-start notification');
+
+  for (const user of ['', teacher, direct]) await assert.rejects(save(user), error => error.code === '42501');
+  await db.exec(`update public.profiles set is_active = false where id = '${fresh}'`);
+  await assert.rejects(save(fresh), error => error.code === '42501');
+  await db.exec(`update public.profiles set is_active = true where id = '${fresh}';
+    update public.enrollments set access_expires_at = now() - interval '1 minute' where student_id = '${fresh}'`);
+  await assert.rejects(save(fresh), error => error.code === '42501');
+  await db.exec(`update public.enrollments set access_expires_at = now() + interval '1 day', status = 'pending' where student_id = '${fresh}'`);
+  await assert.rejects(save(fresh), error => error.code === '42501');
+  await db.exec(`update public.enrollments set status = 'approved' where student_id = '${fresh}';
+    update public.courses set status = 'draft' where id = '${course}'`);
+  await assert.rejects(save(fresh), error => error.code === '42501');
+  await db.exec(`update public.courses set status = 'published' where id = '${course}'; set role anon`);
+  await assert.rejects(save(fresh), error => error.code === '42501');
+  await db.exec('reset role');
+  console.log('PASS: saving rejects anonymous, non-student, inactive, expired, pending, non-Plus and unpublished access');
 } finally {
   await db.close();
 }

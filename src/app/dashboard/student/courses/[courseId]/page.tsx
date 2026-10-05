@@ -6,6 +6,9 @@ import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 import { getResumeSeconds, isLessonComplete, summarizeStudentProgress, type StudentProgressLesson, type StudentTracking } from "@/lib/courses/student-progress";
 import { formatCourseVideoDuration, formatStudyTime } from "@/lib/courses/study-time";
 import ClaimCertificateButton from "@/components/certificates/ClaimCertificateButton";
+import { hasStartedLearning, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
+import SaveCourseButton from "@/components/courses/SaveCourseButton";
 
 interface Lesson extends StudentProgressLesson {
   title: string;
@@ -14,22 +17,27 @@ interface Lesson extends StudentProgressLesson {
   is_published: boolean | null;
 }
 interface Module { id: string; title: string; order_index: number; lessons: Lesson[] }
+interface OverviewEnrollment extends LearningEnrollment {
+  id: string;
+  courses: { id: string; title: string; description: string | null; cover_image_url: string | null; category: string | null } | null;
+}
 
 function formatTime(seconds: number) {
   const value = Math.max(0, Math.floor(seconds));
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-export default async function StudentCourseOverview({ params }: { params: Promise<{ courseId: string }> }) {
+export default async function StudentCourseOverview({ params, searchParams }: { params: Promise<{ courseId: string }>; searchParams?: Promise<{ start?: string }> }) {
   const { courseId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirect=/dashboard/student/courses/${courseId}`);
 
-  const { data: enrollment, error: enrollmentError } = await supabase.from("enrollments")
-    .select("id, courses(id, title, description, cover_image_url, category)")
+  const { data: enrollmentData, error: enrollmentError } = await loadLearningEnrollments((includeStart) => supabase.from("enrollments")
+    .select(`id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}courses(id, title, description, cover_image_url, category)`)
     .eq("student_id", user.id).eq("course_id", courseId).eq("status", "approved")
-    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`).maybeSingle();
+    .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`).maybeSingle());
+  const enrollment = enrollmentData as unknown as OverviewEnrollment | null;
   if (enrollmentError) throw new Error("โหลดข้อมูลการลงทะเบียนไม่สำเร็จ");
   if (!enrollment) notFound();
   const course = Array.isArray(enrollment.courses) ? enrollment.courses[0] : enrollment.courses;
@@ -56,8 +64,13 @@ export default async function StudentCourseOverview({ params }: { params: Promis
   const tracking = (trackingResult.data ?? []) as unknown as StudentTracking[];
   const progress = summarizeStudentProgress(lessons, tracking);
   const trackingAvailable = !trackingResult.error;
+  const started = hasStartedLearning({ ...enrollment, scorm_tracking: tracking, student_study_time: studyTimeResult.data });
   const allLessonsComplete = trackingAvailable && progress.allComplete && unpublishedLessons === 0;
   const resume = progress.resumeLesson;
+  // Loading/prefetching the overview never writes learning state. Only the
+  // mounted player records a first start after this authorized redirect.
+  if ((await searchParams)?.start === "1" && trackingAvailable && resume) redirect(`/play/${courseId}/${resume.id}`);
+  const library = enrollment.membership_order_id ? await loadSavedCourseEnrollments(supabase, user.id) : null;
   const resumeSeconds = resume?.scorm_source === "generated" ? getResumeSeconds(progress.byLesson.get(resume.id)) : 0;
   const videoDuration = formatCourseVideoDuration(lessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds || 0), 0));
   const certificate = certificateResult.data;
@@ -96,9 +109,12 @@ export default async function StudentCourseOverview({ params }: { params: Promis
             <p className="mt-1 text-sm text-slate-600">{trackingAvailable ? `เรียนครบ ${progress.completed} จาก ${progress.total} บท · ${progress.percent}%` : "โหลดความคืบหน้าไม่สำเร็จ กรุณารีเฟรชหน้า"}</p>
             <p className="mt-1 text-sm font-semibold text-[#3157D5]">เวลาเรียนสะสมในคอร์สนี้: {studyTimeResult.error ? "—" : formatStudyTime(Number(studyTimeResult.data?.total_seconds) || 0)}</p>
           </div>
-          {resume && trackingAvailable && <Link href={`/play/${courseId}/${resume.id}`} className="inline-flex items-center gap-2 rounded-xl bg-[#3157D5] px-5 py-3 text-sm font-bold text-white hover:bg-[#0F1B3D]">
-            <Play size={16} /> {progress.allComplete ? "ทบทวนบทเรียน" : progress.started ? "เรียนต่อจากที่ค้าง" : "เริ่มเรียน"}
-          </Link>}
+          <div className="flex w-full flex-col gap-2 sm:w-auto">
+            {resume && trackingAvailable && <Link href={`/play/${courseId}/${resume.id}`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 py-3 text-sm font-bold text-white hover:bg-[#0F1B3D]">
+              <Play size={16} /> {progress.allComplete ? "ทบทวนบทเรียน" : started ? "เรียนต่อจากที่ค้าง" : "เริ่มเรียน"}
+            </Link>}
+            {enrollment.membership_order_id && !started && <SaveCourseButton courseId={courseId} initialSaved={library?.enrollmentIds.has(enrollment.id)} available={library?.ready ?? false} />}
+          </div>
         </div>
         {trackingAvailable && <div role="progressbar" aria-label="ความคืบหน้าบทเรียน" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent} className="mt-4 h-2 overflow-hidden rounded-full bg-blue-100"><div className="h-full rounded-full bg-[#3157D5]" style={{ width: `${progress.percent}%` }} /></div>}
         {resume && trackingAvailable && !progress.allComplete && <p className="mt-3 text-xs text-slate-600">{progress.started ? "เรียนต่อ" : "บทแรก"}: {resume.title}{resumeSeconds > 0 ? ` · ตำแหน่งที่บันทึกไว้ ${formatTime(resumeSeconds)}` : ""}</p>}

@@ -6,12 +6,12 @@ const ts = require('typescript');
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 
-function load(path, dependencies = {}) {
+function load(path, dependencies = {}, runtime = {}) {
   const output = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(output, { exports, require: name => dependencies[name] ?? require(name) });
+  vm.runInNewContext(output, { ...runtime, exports, require: name => dependencies[name] ?? require(name) });
   return exports;
 }
 const progress = load('src/lib/courses/student-progress.ts');
@@ -105,6 +105,7 @@ async function renderOverview(options = {}) {
       course_id: 'course',
       student_id: options.foreign ? 'other-student' : 'student',
       status: options.pending ? 'pending' : 'approved',
+      membership_order_id: options.membership ? 'plus' : null,
       access_expires_at: options.expired ? '2000-01-01T00:00:00.000Z' : options.membership ? '2999-01-01T00:00:00.000Z' : null,
       courses: course,
     }],
@@ -116,6 +117,7 @@ async function renderOverview(options = {}) {
     courses: [course],
     certificates: options.certificate ? [{ id: 'certificate', course_id: 'course', user_id: 'student', status: options.certificate, issued_at: '2026-09-21' }] : [],
     student_study_time: [],
+    student_course_library: [],
     quiz_attempts: options.passed ? [{ id: 'attempt', enrollment_id: 'enrollment', passed: true, score: 90, submitted_at: '2026-09-21' }] : [],
   };
   const client = {
@@ -144,14 +146,17 @@ async function renderOverview(options = {}) {
   };
   const page = load('src/app/dashboard/student/courses/[courseId]/page.tsx', {
     'next/link': { default: props => React.createElement('a', props) },
-    'next/navigation': { notFound() { throw new Error('NOT_FOUND'); }, redirect() { throw new Error('REDIRECT'); } },
+    'next/navigation': { notFound() { throw new Error('NOT_FOUND'); }, redirect(url) { throw new Error('REDIRECT:' + url); } },
     '@/utils/supabase/server': { createClient: async () => client },
     '@/lib/constants/course-cover': { DEFAULT_COURSE_COVER_URL: '/cover.png' },
     '@/lib/courses/student-progress': progress,
+    '@/lib/courses/learning-enrollment': learningEnrollment,
+    '@/lib/courses/course-library': courseLibrary,
+    '@/components/courses/SaveCourseButton': { default: () => React.createElement('button', null, 'Save for later') },
     '@/lib/courses/study-time': load('src/lib/courses/study-time.ts'),
     '@/components/certificates/ClaimCertificateButton': { default: () => React.createElement('button', { 'data-claim': true }, 'Claim') },
   }).default;
-  return renderToStaticMarkup(await page({ params: Promise.resolve({ courseId: 'course' }) }));
+  return renderToStaticMarkup(await page({ params: Promise.resolve({ courseId: 'course' }), searchParams: Promise.resolve({ start: options.start }) }));
 }
 test('overview shows description and saved resume lesson before entering the player', async () => {
   const html = await renderOverview();
@@ -183,6 +188,7 @@ test('overview requires login and the current student approved enrollment', asyn
 });
 
 const learningEnrollment = load('src/lib/courses/learning-enrollment.ts', { './student-progress': progress });
+const courseLibrary = load('src/lib/courses/course-library.ts', { 'server-only': {} });
 
 test('libraries keep legacy enrollment data while the start marker migration is pending', async () => {
   for (const code of ['42703', 'PGRST204']) {
@@ -241,9 +247,12 @@ async function renderStudentProfile(enrollmentRows, options = {}) {
   const tables = {
     profiles: [{ id: 'student', full_name: 'Learner', avatar_url: null }],
     student_membership_orders: [],
+    student_course_library: (options.savedIds ?? []).map(enrollment_id => ({ enrollment_id, student_id: 'student' })),
     enrollments: enrollmentRows,
     scorm_tracking: enrollmentRows.flatMap(enrollment => (enrollment.scorm_tracking ?? []).map(row => ({ ...row, enrollment_id: enrollment.id }))),
     lessons: enrollmentRows.map(enrollment => ({ id: enrollment.course_id + '-lesson', course_id: enrollment.course_id, is_published: true })),
+    modules: enrollmentRows.map(enrollment => ({ id: enrollment.course_id + '-module', course_id: enrollment.course_id, order_index: 0, lessons: [{ id: enrollment.course_id + '-lesson', is_published: true, order_index: 0 }] })),
+    student_study_time: [],
     certificates: [],
   };
   const client = {
@@ -274,15 +283,20 @@ async function renderStudentProfile(enrollmentRows, options = {}) {
       return query;
     },
   };
-  const page = load('src/app/dashboard/student/profile/page.tsx', {
+  const page = load(options.myCourses ? 'src/app/dashboard/student/courses/page.tsx' : 'src/app/dashboard/student/profile/page.tsx', {
     '@/utils/supabase/server': { createClient: async () => client },
     '@/lib/courses/student-progress': progress,
     '@/lib/courses/learning-enrollment': learningEnrollment,
+    '@/lib/courses/course-library': courseLibrary,
     '@/lib/payments/plus-plan': load('src/lib/payments/plus-plan.ts'),
+    '@/lib/constants/course-cover': { DEFAULT_COURSE_COVER_URL: '/cover.png' },
+    '@/lib/courses/access-expiry': load('src/lib/courses/access-expiry.ts'),
+    '@/lib/courses/study-time': load('src/lib/courses/study-time.ts'),
+    'next/navigation': { redirect() { throw new Error('REDIRECT'); } },
     '@/components/StudentProfileClient': { default: ({ children }) => React.createElement('div', null, children) },
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
   }).default;
-  return { html: renderToStaticMarkup(await page()), enrollmentSelections };
+  return { html: renderToStaticMarkup(await page({ searchParams: Promise.resolve({ status: options.status }) })), enrollmentSelections };
 }
 
 function profileEnrollment(id, activity = {}) {
@@ -302,7 +316,7 @@ test('student profile shows zero learning courses for 31 untouched Plus entitlem
   assert.doesNotMatch(html, /UNSTARTED_PLUS_/);
 });
 
-test('profile counts only chosen Plus courses and preserves direct registrations and completed courses', async () => {
+test('profile counts only started courses and separates unstarted direct registrations', async () => {
   const rows = [
     profileEnrollment('UNSTARTED_PLUS'),
     profileEnrollment('STARTED_MARKER', { learning_started_at: '2026-10-06T09:00:00Z' }),
@@ -314,10 +328,10 @@ test('profile counts only chosen Plus courses and preserves direct registrations
     profileEnrollment('FOREIGN_STUDENT', { learning_started_at: '2026-10-05', student_id: 'another-student' }),
   ];
   const { html } = await renderStudentProfile(rows);
-  assert.match(html, /คอร์สที่เรียนอยู่<\/p><p[^>]*>3<\/p>/);
+  assert.match(html, /คอร์สที่เรียนอยู่<\/p><p[^>]*>2<\/p>/);
   assert.match(html, /เรียนจบแล้ว<\/p><p[^>]*>1<\/p>/);
-  for (const title of ['STARTED_MARKER', 'STARTED_LEGACY', 'DIRECT_REGISTRATION']) assert.ok(html.includes(title));
-  assert.doesNotMatch(html, /UNSTARTED_PLUS|COMPLETED_PLUS|EXPIRED_ACCESS|PENDING_ACCESS|FOREIGN_STUDENT/);
+  for (const title of ['STARTED_MARKER', 'STARTED_LEGACY']) assert.ok(html.includes(title));
+  assert.doesNotMatch(html, /UNSTARTED_PLUS|COMPLETED_PLUS|EXPIRED_ACCESS|PENDING_ACCESS|FOREIGN_STUDENT|DIRECT_REGISTRATION/);
 });
 
 test('profile keeps legacy learning activity while the marker migration is pending', async () => {
@@ -332,4 +346,119 @@ test('profile keeps legacy learning activity while the marker migration is pendi
   assert.match(html, /คอร์สที่เรียนอยู่<\/p><p[^>]*>1<\/p>/);
   assert.match(html, /STARTED_LEGACY/);
   assert.doesNotMatch(html, /UNSTARTED_PLUS/);
+});
+
+test('saving two Plus courses does not increment the profile learning count', async () => {
+  const rows = Array.from({ length: 31 }, (_, index) => profileEnrollment('UNSTARTED_PLUS_' + index));
+  const { html } = await renderStudentProfile(rows, { savedIds: [rows[0].id, rows[1].id] });
+  assert.match(html, /คอร์สที่เรียนอยู่<\/p><p[^>]*>0<\/p>/);
+  assert.doesNotMatch(html, /UNSTARTED_PLUS_/);
+});
+
+test('start action enters the saved resume lesson without marking an overview visit as learning', async () => {
+  await assert.rejects(renderOverview({ membership: true, start: '1' }), /REDIRECT:\/play\/course\/second/);
+  assert.ok((await renderOverview({ membership: true })).includes('Learn the course objectives'));
+  assert.match(await renderOverview({ failTable: 'scorm_tracking', start: '1' }), /โหลดความคืบหน้าไม่สำเร็จ/);
+});
+
+test('saved Plus courses and direct registrations are in the library without counting as started', () => {
+  const saved = new Set(['chosen']);
+  const unstarted = profileEnrollment('chosen');
+  assert.equal(learningEnrollment.isCourseInLibrary(unstarted, saved), true);
+  assert.equal(learningEnrollment.hasStartedLearning(unstarted), false);
+  assert.equal(learningEnrollment.getLearningCourseStatus(unstarted, false), 'not_started');
+  assert.equal(learningEnrollment.isCourseInLibrary(profileEnrollment('unselected'), saved), false);
+  const direct = profileEnrollment('direct', { membership_order_id: null });
+  assert.equal(learningEnrollment.isCourseInLibrary(direct, saved), true);
+  assert.equal(learningEnrollment.getLearningCourseStatus(direct, false), 'not_started');
+  assert.equal(learningEnrollment.getLearningCourseStatus({ ...unstarted, learning_started_at: '2026-10-06' }, false), 'in_progress');
+  assert.equal(learningEnrollment.getLearningCourseStatus(unstarted, true), 'completed');
+});
+
+test('my courses separates saved, started and completed courses with consistent tab counts', async () => {
+  const rows = [
+    ...Array.from({ length: 31 }, (_, index) => profileEnrollment('UNSELECTED_' + index)),
+    profileEnrollment('SAVED_ONE'), profileEnrollment('SAVED_TWO'),
+    profileEnrollment('STARTED_NOW', { learning_started_at: '2026-10-06' }),
+    profileEnrollment('FINISHED', { scorm_tracking: [record('FINISHED-lesson', true, '2026-10-06')] }),
+  ];
+  for (const [status, titles] of [
+    ['not_started', ['SAVED_ONE', 'SAVED_TWO']], ['in_progress', ['STARTED_NOW']], ['completed', ['FINISHED']],
+  ]) {
+    const { html } = await renderStudentProfile(rows, { myCourses: true, savedIds: ['SAVED_ONE', 'SAVED_TWO'], status });
+    assert.match(html, /ยังไม่เริ่ม<span[^>]*>2<\/span>/);
+    assert.match(html, /กำลังเรียน<span[^>]*>1<\/span>/);
+    assert.match(html, /เรียนจบแล้ว<span[^>]*>1<\/span>/);
+    assert.match(html, new RegExp(`href="/dashboard/student/courses\\?status=${status}" aria-current="page"`));
+    for (const title of ['SAVED_ONE', 'SAVED_TWO', 'STARTED_NOW', 'FINISHED']) assert.equal(html.includes(title), titles.includes(title));
+    assert.doesNotMatch(html, /UNSELECTED_/);
+    if (status === 'not_started') assert.doesNotMatch(html, /เรียนไปแล้ว 0%/);
+  }
+});
+
+test('course actions offer saving only for unstarted Plus access and allow immediate learning', () => {
+  const Actions = load('src/components/courses/CourseAccessActions.tsx', {
+    'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
+    './SaveCourseButton': { default: ({ initialSaved }) => React.createElement('button', { disabled: initialSaved }, 'SAVE_COURSE') },
+  }).default;
+  const render = props => renderToStaticMarkup(React.createElement(Actions, { courseId: 'course', slug: 'course-slug', ...props }));
+  const unstarted = render({ hasAccess: true, membership: true });
+  assert.match(unstarted, /SAVE_COURSE/);
+  assert.match(unstarted, /href="\/dashboard\/student\/courses\/course\?start=1"/);
+  assert.match(unstarted, /เริ่มเรียน/);
+  assert.match(render({ hasAccess: true, membership: true, saved: true }), /disabled=""/);
+  assert.doesNotMatch(render({ hasAccess: true, membership: true, started: true }), /SAVE_COURSE/);
+  assert.doesNotMatch(render({ hasAccess: true, membership: false }), /SAVE_COURSE/);
+  const visitor = render({ hasAccess: false });
+  assert.match(visitor, /href="\/courses\/course-slug\/enroll"/);
+  assert.doesNotMatch(visitor, /SAVE_COURSE/);
+});
+
+test('save button prevents duplicate clicks and only confirms successful saves', async () => {
+  const states = [], inFlight = { current: false }, calls = [];
+  let cursor = 0, reply, refreshes = 0;
+  const Button = load('src/components/courses/SaveCourseButton.tsx', {
+    'react': {
+      useRef: () => inFlight,
+      useState(initial) {
+        const index = cursor++;
+        if (!(index in states)) states[index] = initial;
+        return [states[index], value => { states[index] = value; }];
+      },
+    },
+    'next/navigation': { useRouter: () => ({ refresh() { refreshes++; } }) },
+  }, { fetch: (...args) => { calls.push(args); return new Promise(resolve => { reply = resolve; }); } }).default;
+  const render = props => { cursor = 0; return Button({ courseId: 'course', ...props }); };
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const first = render().props.children[0];
+  first.props.onClick(); first.props.onClick();
+  assert.equal(calls.length, 1);
+  assert.equal(render().props.children[0].props.disabled, true);
+  assert.equal(calls[0][0], '/api/student/course-library');
+  assert.deepEqual(JSON.parse(calls[0][1].body), { courseId: 'course' });
+  reply({ ok: false, json: async () => ({ error: 'Try again' }) });
+  await flush();
+  assert.equal(refreshes, 0);
+  assert.equal(render().props.children[0].props.disabled, false);
+  assert.match(renderToStaticMarkup(render()), /Try again/);
+  render().props.children[0].props.onClick();
+  reply({ ok: true, json: async () => ({ saved: true }) });
+  await flush();
+  assert.equal(refreshes, 1);
+  assert.equal(render().props.children[0].props.disabled, true);
+  assert.match(renderToStaticMarkup(render()), /เก็บคอร์สไว้แล้ว ยังไม่ได้เริ่มเรียน/);
+  assert.equal(render({ available: false }).props.children[0].props.disabled, true);
+});
+
+test('saved-course reads are scoped to the current student and failures disable saving', async () => {
+  for (const error of [null, { code: 'PGRST205', message: 'student_course_library not found' }, { code: '42501', message: 'Permission denied' }, { code: '', message: 'Timed out' }]) {
+    const query = { select() { return query; }, eq(key, id) {
+      assert.equal(key, 'student_id'); assert.equal(id, 'student');
+      return Promise.resolve({ data: error ? null : [{ enrollment_id: 'saved' }], error });
+    } };
+    const result = await courseLibrary.loadSavedCourseEnrollments({ from(table) { assert.equal(table, 'student_course_library'); return query; } }, 'student');
+    assert.equal(result.ready, !error);
+    assert.equal(result.enrollmentIds.has('saved'), !error);
+    assert.equal(Boolean(result.error), Boolean(error));
+  }
 });
