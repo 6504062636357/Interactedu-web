@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
+import { CheckCircle2, X } from "lucide-react";
 import { approveCourse, rejectCourse } from "@/app/dashboard/admin/courses/[courseId]/review/actions";
 
 export default function CourseApproveActions({
@@ -16,7 +17,14 @@ export default function CourseApproveActions({
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [rejectionNotice, setRejectionNotice] = useState(0);
   const router = useRouter();
+
+  useEffect(() => {
+    if (rejectionNotice === 0) return;
+    const timer = window.setTimeout(() => setRejectionNotice(0), 5000);
+    return () => window.clearTimeout(timer);
+  }, [rejectionNotice]);
 
   const handleApprove = async (): Promise<void> => {
     setError(null);
@@ -45,6 +53,7 @@ export default function CourseApproveActions({
     }
     setShowRejectForm(false);
     setReason("");
+    setRejectionNotice((notice) => notice + 1);
     router.refresh();
   };
 
@@ -58,9 +67,25 @@ export default function CourseApproveActions({
 
   return (
     <div className="mb-6 rounded-2xl border border-[#0F1B3D]/[0.08] bg-white p-5">
+      {rejectionNotice > 0 && (
+        <div className="fixed right-4 top-24 z-50 flex w-[calc(100vw-2rem)] max-w-sm items-center gap-3 rounded-2xl border border-emerald-200 bg-white p-4 shadow-lg sm:right-6">
+          <CheckCircle2 size={22} className="shrink-0 text-emerald-600" aria-hidden="true" />
+          <p role="status" aria-live="polite" aria-atomic="true" className="min-w-0 flex-1 text-sm font-bold text-[#0F1B3D]">
+            ตีกลับแล้ว
+          </p>
+          <button
+            type="button"
+            onClick={() => setRejectionNotice(0)}
+            aria-label="ปิดการแจ้งเตือน"
+            className="-mr-2 -my-2 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5]"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       <h2 className="mb-1 text-[15px] font-bold text-[#0F1B3D]">อนุมัติคอร์สทั้งหมด</h2>
       <p className="mb-4 text-[12.5px] text-[#0F1B3D]/50">
-        ต้องมีบทเรียนทุกบทส่งฉบับร่างและตรวจผ่านสถานะ "รอตรวจ" แล้ว จึงอนุมัติทั้งคอร์สได้ อนุมัติแล้วนักเรียนเข้าเรียนได้ทันที
+        ต้องมีบทเรียนทุกบทส่งฉบับร่างและตรวจผ่านสถานะ &quot;รอตรวจ&quot; แล้ว จึงอนุมัติทั้งคอร์สได้ อนุมัติแล้วนักเรียนเข้าเรียนได้ทันที
       </p>
 
       {error && (
