@@ -71,11 +71,14 @@ function CourseCard({ course, started, hasAccess, membership, saved, savingAvail
           {course.lesson_count} บทเรียน · {formatDuration(course.total_duration_seconds)}
         </p>
 
-        <div className={`mt-auto border-t border-[#0F1B3D]/[0.06] pt-4 ${hasAccess ? "space-y-3" : "flex items-center justify-between gap-3"}`}>
-          <span className={`text-[17px] font-extrabold ${course.price === 0 ? "text-[#3157D5]" : "text-[#0F1B3D]"}`}>
-            {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
-          </span>
-          <CourseAccessActions courseId={course.id} slug={course.slug} hasAccess={hasAccess} membership={membership} started={started} saved={saved} savingAvailable={savingAvailable} variant="card" />
+        <div className="mt-auto border-t border-[#0F1B3D]/[0.06] pt-4">
+          <CourseAccessActions
+            courseId={course.id} slug={course.slug} hasAccess={hasAccess} membership={membership}
+            started={started} saved={saved} savingAvailable={savingAvailable} variant="card"
+            price={<span className={`min-w-0 text-[17px] font-extrabold ${course.price === 0 ? "text-[#3157D5]" : "text-[#0F1B3D]"}`}>
+              {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
+            </span>}
+          />
         </div>
       </div>
     </div>

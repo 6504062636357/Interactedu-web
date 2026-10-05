@@ -590,11 +590,14 @@ function CourseCard({ course }: { course: Course }): ReactElement {
           {course.lessons.length} บทเรียน · {formatDuration(courseTotalDurationSeconds(course.lessons))}
         </p>
 
-        <div className={`mt-auto border-t border-[#0F1B3D]/[0.06] pt-4 ${course.hasAccess ? "space-y-3" : "flex items-center justify-between gap-3"}`}>
-          <span className={`text-[17px] font-extrabold ${course.price === 0 ? "text-[#3157D5]" : "text-[#0F1B3D]"}`}>
-            {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
-          </span>
-          <CourseAccessActions courseId={course.id} slug={course.slug} hasAccess={course.hasAccess} membership={course.membership} started={course.started} saved={course.saved} savingAvailable={course.savingAvailable} variant="card" />
+        <div className="mt-auto border-t border-[#0F1B3D]/[0.06] pt-4">
+          <CourseAccessActions
+            courseId={course.id} slug={course.slug} hasAccess={course.hasAccess} membership={course.membership}
+            started={course.started} saved={course.saved} savingAvailable={course.savingAvailable} variant="card"
+            price={<span className={`min-w-0 text-[17px] font-extrabold ${course.price === 0 ? "text-[#3157D5]" : "text-[#0F1B3D]"}`}>
+              {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
+            </span>}
+          />
         </div>
       </div>
     </div>

@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Plus } from "lucide-react";
 
-export default function SaveCourseButton({ courseId, initialSaved = false, available = true }: {
-  courseId: string; initialSaved?: boolean; available?: boolean;
+export default function SaveCourseButton({ courseId, initialSaved = false, available = true, variant = "default" }: {
+  courseId: string; initialSaved?: boolean; available?: boolean; variant?: "default" | "card";
 }) {
   const router = useRouter();
   const inFlight = useRef(false);
@@ -36,7 +36,7 @@ export default function SaveCourseButton({ courseId, initialSaved = false, avail
   }
   return <div className="min-w-0">
     <button type="button" onClick={() => void save()} disabled={pending || saved || !available}
-      className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-[#3157D5] transition hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] disabled:cursor-default disabled:opacity-60">
+      className={`inline-flex min-h-11 w-full items-center justify-center gap-2 border px-3 py-2.5 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157D5] disabled:cursor-default ${variant === "card" ? `rounded-full ${saved ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-[#3157D5]/15 bg-[#3157D5]/[0.04] text-[#3157D5] hover:bg-blue-50 disabled:opacity-60"}` : "rounded-xl border-slate-200 bg-white text-[#3157D5] hover:bg-blue-50 disabled:opacity-60"}`}>
       {pending ? <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" /> : saved ? <Check size={15} className="shrink-0" aria-hidden="true" /> : <Plus size={15} className="shrink-0" aria-hidden="true" />}
       {pending ? "กำลังเพิ่ม..." : saved ? "เพิ่มเข้าคอร์สของฉันแล้ว" : "เพิ่มเข้าคอร์สของฉัน"}
     </button>
