@@ -2,16 +2,16 @@
 
 import {
   Award,
-  ChevronRight,
   Banknote,
   Gauge,
   GraduationCap,
   Heart,
   Settings,
+  Sparkles,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
-import Link from "next/link";
+import DashboardNavLink from "@/components/DashboardNavLink";
 import { usePathname } from "next/navigation";
 import type { ReactElement } from "react";
 
@@ -19,7 +19,7 @@ const NAV_ITEMS: Array<{ label: string; href: string; icon: LucideIcon; exact?: 
   { label: "ภาพรวม", href: "/dashboard/student", icon: Gauge, exact: true },
   { label: "โปรไฟล์", href: "/dashboard/student/profile", icon: UserRound },
   { label: "คอร์สของฉัน", href: "/dashboard/student/courses", icon: GraduationCap },
-  { label: "Interact Edu Plus", href: "/membership", icon: Banknote },
+  { label: "Interact Edu Plus", href: "/membership", icon: Sparkles },
   { label: "ใบประกาศฯ", href: "/dashboard/student/certificates", icon: Award },
   { label: "คอร์สโปรด", href: "/dashboard/student/favorites", icon: Heart },
   { label: "การชำระเงิน", href: "/dashboard/student/billing", icon: Banknote },
@@ -30,31 +30,20 @@ export default function DashboardSidebar(): ReactElement {
   const pathname = usePathname();
 
   return (
-    <nav className="app-nav-surface flex min-w-0 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain p-2 xl:sticky xl:top-[102px] xl:flex-col xl:overflow-visible xl:p-3" aria-label="เมนูผู้เรียน">
-      <div className="hidden px-3 pb-2 pt-1 xl:block">
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Student menu</p>
-      </div>
+    <nav className="space-y-1" aria-label="เมนูผู้เรียน">
       {NAV_ITEMS.map((item) => {
         const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
         const Icon = item.icon;
 
         return (
-          <Link
+          <DashboardNavLink
             key={item.href}
             href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`group flex shrink-0 items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-[12px] font-bold transition-all duration-200 xl:w-full xl:py-3 ${
-              active
-                ? "bg-[linear-gradient(135deg,#0F1B3D,#1D3268)] text-white shadow-[0_8px_20px_rgba(15,27,61,0.16)]"
-                : "text-slate-500 hover:bg-slate-100/80 hover:text-[#0F1B3D]"
-            }`}
-          >
-            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition ${active ? "bg-white/10 text-[#FF8B73]" : "bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-[#3157D5]"}`}>
-              <Icon size={16} strokeWidth={2} />
-            </span>
-            <span className="whitespace-nowrap xl:flex-1">{item.label}</span>
-            <ChevronRight className={`hidden transition xl:block ${active ? "text-white/50" : "text-slate-300 opacity-0 group-hover:opacity-100"}`} size={14} />
-          </Link>
+            label={item.label}
+            active={active}
+            icon={<Icon size={18} strokeWidth={1.8} aria-hidden="true" />}
+            showChevron
+          />
         );
       })}
     </nav>
