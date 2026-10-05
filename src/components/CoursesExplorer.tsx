@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CATEGORIES, CATEGORY_COLORS, type Category } from "@/lib/constants/categories";
 import { DEFAULT_COURSE_COVER_URL } from "@/lib/constants/course-cover";
 import FavoriteHeartButton from "@/components/FavoriteHeartButton";
+import CourseAccessActions from "@/components/courses/CourseAccessActions";
 
 export interface ExplorerCourse {
   id: string;
@@ -36,7 +37,7 @@ function formatPrice(price: number): string {
   return `฿${price.toLocaleString("th-TH")}`;
 }
 
-function CourseCard({ course, isEnrolled, hasAccess }: { course: ExplorerCourse; isEnrolled: boolean; hasAccess: boolean }): ReactElement {
+function CourseCard({ course, started, hasAccess, membership, saved, savingAvailable }: { course: ExplorerCourse; started: boolean; hasAccess: boolean; membership: boolean; saved: boolean; savingAvailable: boolean }): ReactElement {
   const tagColor =
     (course.category && CATEGORY_COLORS[course.category as Category]) ?? "bg-[#0F1B3D] text-white";
 
@@ -70,16 +71,11 @@ function CourseCard({ course, isEnrolled, hasAccess }: { course: ExplorerCourse;
           {course.lesson_count} บทเรียน · {formatDuration(course.total_duration_seconds)}
         </p>
 
-        <div className="mt-auto pt-4 border-t border-[#0F1B3D]/[0.06] flex items-center justify-between">
+        <div className="mt-auto space-y-3 border-t border-[#0F1B3D]/[0.06] pt-4">
           <span className={`text-[17px] font-extrabold ${course.price === 0 ? "text-[#00B37E]" : "text-[#0F1B3D]"}`}>
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
-          <Link
-            href={hasAccess ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
-            className="relative z-20 text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
-          >
-            {isEnrolled ? "เข้าคอร์สเรียน" : hasAccess ? "เริ่มเรียน" : "ลงทะเบียน"}
-          </Link>
+          <CourseAccessActions courseId={course.id} slug={course.slug} hasAccess={hasAccess} membership={membership} started={started} saved={saved} savingAvailable={savingAvailable} />
         </div>
       </div>
     </div>
@@ -90,18 +86,28 @@ export default function CoursesExplorer({
   courses,
   enrolledCourseIds = [],
   accessibleCourseIds = enrolledCourseIds,
+  startedCourseIds = enrolledCourseIds,
+  membershipCourseIds = [],
+  savedCourseIds = [],
+  savingAvailable = true,
   initialFreeOnly = false,
 }: {
   courses: ExplorerCourse[];
   enrolledCourseIds?: string[];
   accessibleCourseIds?: string[];
+  startedCourseIds?: string[];
+  membershipCourseIds?: string[];
+  savedCourseIds?: string[];
+  savingAvailable?: boolean;
   initialFreeOnly?: boolean;
 }): ReactElement {
   const [query, setQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Category[]>([]);
   const [freeOnly, setFreeOnly] = useState(initialFreeOnly);
   const accessibleSet = new Set(accessibleCourseIds);
-  const enrolledSet = useMemo(() => new Set(enrolledCourseIds), [enrolledCourseIds]);
+  const startedSet = new Set(startedCourseIds);
+  const membershipSet = new Set(membershipCourseIds);
+  const savedSet = new Set(savedCourseIds);
 
   function toggleCategory(category: Category) {
     setSelectedCategories((prev) =>
@@ -212,7 +218,7 @@ export default function CoursesExplorer({
         {filtered.length > 0 ? (
           <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-6">
             {filtered.map((course) => (
-              <CourseCard key={course.id} course={course} isEnrolled={enrolledSet.has(course.id)} hasAccess={accessibleSet.has(course.id)} />
+              <CourseCard key={course.id} course={course} started={startedSet.has(course.id)} hasAccess={accessibleSet.has(course.id)} membership={membershipSet.has(course.id)} saved={savedSet.has(course.id)} savingAvailable={savingAvailable} />
             ))}
           </div>
         ) : (

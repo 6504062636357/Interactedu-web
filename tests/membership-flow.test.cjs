@@ -20,6 +20,7 @@ const plusPlan = load('src/lib/payments/plus-plan.ts');
 const learningEnrollment = load('src/lib/courses/learning-enrollment.ts', {
   './student-progress': load('src/lib/courses/student-progress.ts'),
 });
+const courseLibrary = load('src/lib/courses/course-library.ts', { 'server-only': {} });
 const missing = { code: 'PGRST205', message: "Could not find the table 'public.membership_settings' in the schema cache" };
 
 function setup(options = {}) {
@@ -43,6 +44,8 @@ function setup(options = {}) {
                   : { data: options.billingRows ?? [], error: null }
                 : table === 'certificates'
                   ? { data: [], count: 0, error: null }
+                  : table === 'student_course_library'
+                    ? { data: [], error: null }
                   : { data: options.membershipExpiresAt ? { expires_at: options.membershipExpiresAt } : null, error: options.membershipError ?? null };
           return Promise.resolve(response).then(resolve, reject);
         },
@@ -55,6 +58,7 @@ function setup(options = {}) {
     '@/lib/payments/membership-errors': errors,
     '@/lib/courses/access-expiry': accessExpiry,
     '@/lib/courses/learning-enrollment': learningEnrollment,
+    '@/lib/courses/course-library': courseLibrary,
     '@/components/MembershipPayment': { default: () => React.createElement('button', null, 'PAYMENT') },
     '@/components/PlusBadge': { default: () => React.createElement('span', null, '✦ Plus') },
     '@/components/AppBrand': { default: ({ href }) => React.createElement('a', { href }, 'Interact Edu') },

@@ -1,4 +1,5 @@
-import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { hasStartedLearning, isCourseInLibrary, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
 // app/dashboard/student/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -84,7 +85,8 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
     .order("created_at", { ascending: false }));
 
-  const enrollments = ((enrollmentData ?? []) as unknown as EnrollmentRow[]).filter(isLearningEnrollment);
+  const library = await loadSavedCourseEnrollments(supabase, user.id);
+  const enrollments = ((enrollmentData ?? []) as unknown as EnrollmentRow[]).filter((row) => isCourseInLibrary(row, library.enrollmentIds));
   const courseIds = enrollments.map((e) => e.course_id);
   const studyTimeResult = enrollments.length
     ? await supabase.from("student_study_time").select("enrollment_id, total_seconds").in("enrollment_id", enrollments.map((e) => e.id))
@@ -149,7 +151,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
         studySeconds: studyTimeResult.error ? null : studyTimeByEnrollment.get(e.id) ?? 0,
         videoSeconds: allLessons.reduce((sum, lesson) => sum + (lesson.video_duration_seconds ?? 0), 0),
         coverImageUrl: e.courses.cover_image_url,
-        started: summary.started,
+        started: hasStartedLearning(e),
       });
     }
   }
@@ -237,7 +239,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       </section>
 
       <div className="mb-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="คอร์สที่ลงทะเบียน" value={enrollments.length} icon={GraduationCap} tone="bg-blue-50 text-[#3157D5]" />
+        <StatCard label="คอร์สของฉัน" value={enrollments.length} icon={GraduationCap} tone="bg-blue-50 text-[#3157D5]" />
         <StatCard label="คอร์สที่เรียนจบ" value={completedCourseCount} icon={CheckCircle} tone="bg-emerald-50 text-emerald-600" />
         <StatCard label="ใบรับรองที่ได้รับ" value={certificateCount ?? 0} icon={Award} tone="bg-orange-50 text-[#FF5A3C]" />
         <StatCard label="เวลาเรียนสะสมทั้งหมด" value={studyTimeResult.error ? "—" : formatStudyTime(totalStudySeconds)} icon={Clock3} tone="bg-violet-50 text-violet-600" />
@@ -245,6 +247,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       <p className="-mt-4 mb-7 text-[11px] text-slate-400">เวลาเรียนสะสมเริ่มนับจากการใช้งานบทเรียนหลังเปิดใช้ระบบบันทึกเวลา</p>
 
       <section>
+        {library.error && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">{library.error}</p>}
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#3157D5]">Learning journey</p>
@@ -291,7 +294,7 @@ function CourseProgressRow({ course }: { course: CourseCardData }): ReactElement
           {isDone ? "เรียนจบแล้ว" : course.started ? "กำลังเรียน" : "ยังไม่เริ่ม"}
         </span>
         <p className="mt-1.5 truncate text-[13px] font-extrabold text-[#0F1B3D]">{course.title}</p>
-        <p className="mt-0.5 truncate text-[11px] text-slate-400">{isDone ? "เรียนครบทุกบทแล้ว" : `เรียนต่อ: ${course.nextLessonLabel}`}</p>
+        <p className="mt-0.5 truncate text-[11px] text-slate-400">{isDone ? "เรียนครบทุกบทแล้ว" : course.started ? `เรียนต่อ: ${course.nextLessonLabel}` : "เก็บไว้เพื่อเริ่มเรียนภายหลัง"}</p>
         <div className="mt-2.5 flex items-center gap-2.5">
           <div role="progressbar" aria-label={`ความคืบหน้าคอร์ส ${course.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={course.progress} className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${isDone ? "bg-emerald-500" : "bg-[#FF5A3C]"}`} style={{ width: `${course.progress}%` }} />

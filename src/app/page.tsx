@@ -1,4 +1,6 @@
-import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { hasStartedLearning, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
+import { loadSavedCourseEnrollments } from "@/lib/courses/course-library";
+import CourseAccessActions from "@/components/courses/CourseAccessActions";
 // app/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -24,9 +26,11 @@ interface Course {
   // คะแนนรีวิวเฉลี่ย/จำนวนรีวิว — คอร์สที่ยังไม่มีรีวิวจะเป็น 0 ทั้งคู่
   avgRating: number;
   reviewCount: number;
-  // ลงทะเบียนแล้วหรือยัง (approved) — ใช้สลับปุ่ม "ลงทะเบียน" เป็น "เข้าเรียนต่อ"
-  isEnrolled: boolean;
+  started: boolean;
   hasAccess: boolean;
+  membership: boolean;
+  saved: boolean;
+  savingAvailable: boolean;
 }
 
 // จำกัดสีให้เหลือแค่ 4 สีหลักของแบรนด์ (นำ/น้ำเงิน/ส้ม/ทอง)
@@ -586,16 +590,11 @@ function CourseCard({ course }: { course: Course }): ReactElement {
           {course.lessons.length} บทเรียน · {formatDuration(courseTotalDurationSeconds(course.lessons))}
         </p>
 
-        <div className="mt-auto pt-4 border-t border-[#0F1B3D]/[0.06] flex items-center justify-between">
+        <div className="mt-auto space-y-3 border-t border-[#0F1B3D]/[0.06] pt-4">
           <span className={`text-[17px] font-extrabold ${course.price === 0 ? "text-[#3157D5]" : "text-[#0F1B3D]"}`}>
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
-          <Link
-            href={course.hasAccess ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
-            className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
-          >
-            {course.isEnrolled ? "เข้าคอร์สเรียน" : course.hasAccess ? "เริ่มเรียน" : "ลงทะเบียน"}
-          </Link>
+          <CourseAccessActions courseId={course.id} slug={course.slug} hasAccess={course.hasAccess} membership={course.membership} started={course.started} saved={course.saved} savingAvailable={course.savingAvailable} />
         </div>
       </div>
     </div>
@@ -811,19 +810,26 @@ export default async function Page(): Promise<ReactElement> {
 
   // เช็คว่าคอร์สไหนที่ user คนนี้ลงทะเบียนอนุมัติแล้วบ้าง เอาไว้สลับปุ่ม "ลงทะเบียน" เป็น
   // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
-  const enrolledCourseIds = new Set<string>();
+  const startedCourseIds = new Set<string>();
   const accessibleCourseIds = new Set<string>();
+  const membershipCourseIds = new Set<string>();
+  const savedCourseIds = new Set<string>();
+  let savingAvailable = false;
   if (user && courseIds.length > 0) {
     const { data: enrollmentRows } = await loadLearningEnrollments((includeStart) => supabase
       .from("enrollments")
-      .select(`course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
+      .select(`id, course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
       .eq("student_id", user.id)
       .eq("status", "approved")
       .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
       .in("course_id", courseIds));
-    for (const row of (enrollmentRows ?? []) as unknown as (LearningEnrollment & { course_id: string })[]) {
+    const library = await loadSavedCourseEnrollments(supabase, user.id);
+    savingAvailable = library.ready;
+    for (const row of (enrollmentRows ?? []) as unknown as (LearningEnrollment & { id: string; course_id: string })[]) {
       accessibleCourseIds.add(row.course_id);
-      if (isLearningEnrollment(row)) enrolledCourseIds.add(row.course_id);
+      if (hasStartedLearning(row)) startedCourseIds.add(row.course_id);
+      if (row.membership_order_id) membershipCourseIds.add(row.course_id);
+      if (library.enrollmentIds.has(row.id)) savedCourseIds.add(row.course_id);
     }
   }
 
@@ -833,8 +839,11 @@ export default async function Page(): Promise<ReactElement> {
       ...c,
       avgRating: stats ? stats.sum / stats.count : 0,
       reviewCount: stats?.count ?? 0,
-      isEnrolled: enrolledCourseIds.has(c.id),
+      started: startedCourseIds.has(c.id),
       hasAccess: accessibleCourseIds.has(c.id),
+      membership: membershipCourseIds.has(c.id),
+      saved: savedCourseIds.has(c.id),
+      savingAvailable,
     };
   });
 
