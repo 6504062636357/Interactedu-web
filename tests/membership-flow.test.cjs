@@ -17,6 +17,9 @@ function load(file, dependencies = {}, env = { OMISE_SECRET_KEY: 'test', SUPABAS
 const errors = load('src/lib/payments/membership-errors.ts');
 const accessExpiry = load('src/lib/courses/access-expiry.ts');
 const plusPlan = load('src/lib/payments/plus-plan.ts');
+const learningEnrollment = load('src/lib/courses/learning-enrollment.ts', {
+  './student-progress': load('src/lib/courses/student-progress.ts'),
+});
 const missing = { code: 'PGRST205', message: "Could not find the table 'public.membership_settings' in the schema cache" };
 
 function setup(options = {}) {
@@ -51,6 +54,7 @@ function setup(options = {}) {
     '@/utils/supabase/server': { createClient: async () => client },
     '@/lib/payments/membership-errors': errors,
     '@/lib/courses/access-expiry': accessExpiry,
+    '@/lib/courses/learning-enrollment': learningEnrollment,
     '@/components/MembershipPayment': { default: () => React.createElement('button', null, 'PAYMENT') },
     '@/components/PlusBadge': { default: () => React.createElement('span', null, '✦ Plus') },
     '@/components/AppBrand': { default: ({ href }) => React.createElement('a', { href }, 'Interact Edu') },
@@ -307,4 +311,17 @@ test('student dashboard shows active membership and no unavailable-payment notic
   assert.match(html, /สิทธิ์เรียนทุกคอร์สของคุณ/);
   assert.doesNotMatch(html, /ไปคอร์สของฉัน|ประวัติการชำระเงิน/);
   assert.doesNotMatch(html, /ยังไม่เปิดรับชำระเงิน/);
+});
+
+test('dashboard and my courses exclude untouched Plus entitlements', async () => {
+  const { dependencies } = setup({ role: 'student', billingRows: [
+    { id: 'access-one', course_id: 'one', membership_order_id: 'plus', scorm_tracking: [], student_study_time: null, courses: { id: 'one', title: 'UNSTARTED_PLUS_COURSE' } },
+    { id: 'access-two', course_id: 'two', membership_order_id: 'plus', scorm_tracking: [], student_study_time: { total_seconds: 0 }, courses: { id: 'two', title: 'UNSTARTED_PLUS_COURSE' } },
+  ] });
+  for (const file of ['src/app/dashboard/student/page.tsx', 'src/app/dashboard/student/courses/page.tsx']) {
+    const page = load(file, dependencies).default;
+    const html = renderToStaticMarkup(await page());
+    assert.doesNotMatch(html, /UNSTARTED_PLUS_COURSE/);
+    assert.match(html, /href="\/courses"/);
+  }
 });

@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { deleteDraftCourse, setCourseArchived } from "@/app/dashboard/teacher/courses/actions";
+import { useCourseWorkspaceSaving } from "./CourseWorkspaceSave";
 
 type Mode = "archive" | "restore" | "delete";
 
@@ -40,6 +41,7 @@ export default function CourseLifecycleButton({
   onDeleted,
   redirectTo,
   size = "compact",
+  appearance = "button",
 }: {
   courseId: string;
   courseTitle: string;
@@ -48,8 +50,10 @@ export default function CourseLifecycleButton({
   redirectTo?: string;
   // "large" = ขนาดเท่าปุ่มหลักในแถบหัวคอร์ส (px-5 py-2.5 text-[13px]); "compact" = ขนาดเดิมสำหรับในรายการ
   size?: "compact" | "large";
+  appearance?: "button" | "menu";
 }) {
   const router = useRouter();
+  const workspaceSaving = useCourseWorkspaceSaving();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -111,7 +115,10 @@ export default function CourseLifecycleButton({
       <button
         type="button"
         onClick={openDialog}
-        className={`shrink-0 rounded-full border font-bold transition-colors ${sizeClass} ${triggerClass}`}
+        disabled={workspaceSaving}
+        className={appearance === "menu"
+          ? `flex min-h-11 w-full items-center rounded-lg px-3 text-left text-[13px] font-semibold transition-colors ${mode === "delete" ? "text-red-600 hover:bg-red-50" : "text-slate-600 hover:bg-slate-50"}`
+          : `shrink-0 rounded-full border font-bold transition-colors ${sizeClass} ${triggerClass}`}
       >
         {copy.label}
       </button>

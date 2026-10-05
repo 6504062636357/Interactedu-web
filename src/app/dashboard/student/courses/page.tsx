@@ -1,3 +1,4 @@
+import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
 // app/dashboard/student/courses/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -14,7 +15,7 @@ interface EnrolledCourse {
   cover_image_url: string | null;
 }
 
-interface EnrollmentRow {
+interface EnrollmentRow extends LearningEnrollment {
   id: string;
   course_id: string;
   access_expires_at: string | null;
@@ -120,15 +121,15 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
 
   if (!user) redirect("/login?redirect=/dashboard/student/courses");
 
-  const { data } = await supabase
+  const { data } = await loadLearningEnrollments((includeStart) => supabase
     .from("enrollments")
-    .select("id, course_id, access_expires_at, courses(id, title, cover_image_url)")
+    .select(`membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds), id, course_id, access_expires_at, courses(id, title, cover_image_url)`)
     .eq("student_id", user.id)
     .eq("status", "approved")
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }));
 
-  const enrollments = (data ?? []) as unknown as EnrollmentRow[];
+  const enrollments = ((data ?? []) as unknown as EnrollmentRow[]).filter(isLearningEnrollment);
   const courseIds = enrollments.map((e) => e.course_id);
   const studyTimeResult = enrollments.length
     ? await supabase.from("student_study_time").select("enrollment_id, total_seconds").in("enrollment_id", enrollments.map((e) => e.id))
@@ -217,7 +218,8 @@ export default async function MyCoursesPage(): Promise<ReactElement> {
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-[#0F1B3D]/15 py-16 text-center">
-          <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ยังไม่มีคอร์สที่ลงทะเบียน</p>
+          <p className="text-[14px] text-[#0F1B3D]/40 font-medium">ยังไม่มีคอร์สที่ลงทะเบียนหรือเริ่มเรียน</p>
+          <Link href="/courses" className="mt-4 inline-flex rounded-xl bg-[#3157D5] px-4 py-3 text-sm font-bold text-white">เลือกคอร์สเพื่อเริ่มเรียน</Link>
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import AdminUserDirectoryTable, { type UserDirectoryRow } from "@/components/admin/AdminUserDirectoryTable";
 import AdminUserFilters from "@/components/admin/AdminUserFilters";
+import AdminUserArchiveToast from "@/components/admin/AdminUserArchiveToast";
 
 type ProfileRole = "student" | "teacher" | "admin";
 type AccountStatus = "all" | "active" | "inactive";
@@ -76,7 +77,7 @@ export default async function ManageUsersPage({ searchParams }: { searchParams: 
     <div>
       <div className="mb-7"><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#FF5A3C]">User management</p><h1 className="mt-1 text-[28px] font-extrabold tracking-[-0.03em] text-[#0F1B3D]">ข้อมูลผู้ใช้</h1><p className="mt-1.5 text-[13.5px] text-slate-500">ค้นหาและเปิดดูโปรไฟล์ ประวัติการเรียน และใบรับรองของผู้ใช้</p></div>
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["บัญชีทั้งหมด", allUsers.length, ""], ["นักเรียน", countRole("student"), "text-blue-700"], ["ครูผู้สอน", countRole("teacher"), "text-violet-700"], ["แอดมิน", countRole("admin"), "text-slate-700"]].map(([label, count, color]) => <div key={String(label)} className="rounded-2xl border border-slate-200/70 bg-white px-5 py-4"><p className="text-[11.5px] text-slate-400">{label}</p><p className={`mt-1 text-[22px] font-extrabold ${color || "text-[#0F1B3D]"}`}>{count}</p></div>)}</div>
-      {archived === "1" && <p role="status" className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">ลบบัญชีออกจากรายชื่อแล้ว ประวัติเรียน การชำระเงิน และใบรับรองยังคงเก็บไว้</p>}
+      {archived === "1" && <AdminUserArchiveToast />}
       {(!statusReady || !statusesComplete) && <div role="alert" className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">{directoryRes.error ? "โหลดข้อมูลจัดการบัญชีไม่สำเร็จ กรุณาลองใหม่ หากยังไม่พร้อมให้ตรวจ migration สถานะบัญชี" : statusLoadFailed ? "โหลดสถานะบางบัญชีไม่สำเร็จ กรุณาลองใหม่" : "ยังแสดงสถานะบางบัญชีได้ไม่ครบ กรุณาลองใหม่"}{loadError ? ` (${loadError})` : ""}</div>}
       <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
         <div className="border-b border-slate-100 p-4 sm:p-5">

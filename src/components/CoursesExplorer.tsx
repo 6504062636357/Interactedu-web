@@ -36,7 +36,7 @@ function formatPrice(price: number): string {
   return `฿${price.toLocaleString("th-TH")}`;
 }
 
-function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled: boolean }): ReactElement {
+function CourseCard({ course, isEnrolled, hasAccess }: { course: ExplorerCourse; isEnrolled: boolean; hasAccess: boolean }): ReactElement {
   const tagColor =
     (course.category && CATEGORY_COLORS[course.category as Category]) ?? "bg-[#0F1B3D] text-white";
 
@@ -75,10 +75,10 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
           <Link
-            href={isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
+            href={hasAccess ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
             className="relative z-20 text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
-            {isEnrolled ? "เข้าคอร์สเรียน" : "ลงทะเบียน"}
+            {isEnrolled ? "เข้าคอร์สเรียน" : hasAccess ? "เริ่มเรียน" : "ลงทะเบียน"}
           </Link>
         </div>
       </div>
@@ -89,15 +89,18 @@ function CourseCard({ course, isEnrolled }: { course: ExplorerCourse; isEnrolled
 export default function CoursesExplorer({
   courses,
   enrolledCourseIds = [],
+  accessibleCourseIds = enrolledCourseIds,
   initialFreeOnly = false,
 }: {
   courses: ExplorerCourse[];
   enrolledCourseIds?: string[];
+  accessibleCourseIds?: string[];
   initialFreeOnly?: boolean;
 }): ReactElement {
   const [query, setQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Category[]>([]);
   const [freeOnly, setFreeOnly] = useState(initialFreeOnly);
+  const accessibleSet = new Set(accessibleCourseIds);
   const enrolledSet = useMemo(() => new Set(enrolledCourseIds), [enrolledCourseIds]);
 
   function toggleCategory(category: Category) {
@@ -209,7 +212,7 @@ export default function CoursesExplorer({
         {filtered.length > 0 ? (
           <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-6">
             {filtered.map((course) => (
-              <CourseCard key={course.id} course={course} isEnrolled={enrolledSet.has(course.id)} />
+              <CourseCard key={course.id} course={course} isEnrolled={enrolledSet.has(course.id)} hasAccess={accessibleSet.has(course.id)} />
             ))}
           </div>
         ) : (

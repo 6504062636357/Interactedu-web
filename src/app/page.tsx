@@ -1,3 +1,4 @@
+import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
 // app/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -25,6 +26,7 @@ interface Course {
   reviewCount: number;
   // ลงทะเบียนแล้วหรือยัง (approved) — ใช้สลับปุ่ม "ลงทะเบียน" เป็น "เข้าเรียนต่อ"
   isEnrolled: boolean;
+  hasAccess: boolean;
 }
 
 // จำกัดสีให้เหลือแค่ 4 สีหลักของแบรนด์ (นำ/น้ำเงิน/ส้ม/ทอง)
@@ -589,10 +591,10 @@ function CourseCard({ course }: { course: Course }): ReactElement {
             {course.price === 0 ? "ฟรี" : formatPrice(course.price)}
           </span>
           <Link
-            href={course.isEnrolled ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
+            href={course.hasAccess ? `/dashboard/student/courses/${course.id}` : `/courses/${course.slug}`}
             className="text-[13px] font-bold text-white bg-[#0F1B3D] group-hover:bg-[#FF5A3C] px-4 py-2.5 rounded-full transition-colors"
           >
-            {course.isEnrolled ? "เข้าเรียนต่อ" : "ลงทะเบียน"}
+            {course.isEnrolled ? "เข้าคอร์สเรียน" : course.hasAccess ? "เริ่มเรียน" : "ลงทะเบียน"}
           </Link>
         </div>
       </div>
@@ -810,15 +812,19 @@ export default async function Page(): Promise<ReactElement> {
   // เช็คว่าคอร์สไหนที่ user คนนี้ลงทะเบียนอนุมัติแล้วบ้าง เอาไว้สลับปุ่ม "ลงทะเบียน" เป็น
   // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
   const enrolledCourseIds = new Set<string>();
+  const accessibleCourseIds = new Set<string>();
   if (user && courseIds.length > 0) {
-    const { data: enrollmentRows } = await supabase
+    const { data: enrollmentRows } = await loadLearningEnrollments((includeStart) => supabase
       .from("enrollments")
-      .select("course_id")
+      .select(`course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
       .eq("student_id", user.id)
       .eq("status", "approved")
       .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-      .in("course_id", courseIds);
-    for (const row of enrollmentRows ?? []) enrolledCourseIds.add(row.course_id as string);
+      .in("course_id", courseIds));
+    for (const row of (enrollmentRows ?? []) as unknown as (LearningEnrollment & { course_id: string })[]) {
+      accessibleCourseIds.add(row.course_id);
+      if (isLearningEnrollment(row)) enrolledCourseIds.add(row.course_id);
+    }
   }
 
   const coursesWithRatings: Course[] = (courses ?? []).map((c) => {
@@ -828,6 +834,7 @@ export default async function Page(): Promise<ReactElement> {
       avgRating: stats ? stats.sum / stats.count : 0,
       reviewCount: stats?.count ?? 0,
       isEnrolled: enrolledCourseIds.has(c.id),
+      hasAccess: accessibleCourseIds.has(c.id),
     };
   });
 

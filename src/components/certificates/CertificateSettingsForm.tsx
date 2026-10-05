@@ -3,6 +3,7 @@
 import { Award, Download, ImagePlus, Loader2, Maximize2, Save, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { useCourseWorkspaceSave } from "@/components/courses/CourseWorkspaceSave";
 
 interface CertificateSettingsFormProps {
   courseId: string;
@@ -74,7 +75,8 @@ export default function CertificateSettingsForm({
     setMessage(null);
   }
 
-  async function saveSettings(): Promise<void> {
+  async function saveSettings(showFeedback = true): Promise<boolean> {
+    if (saving || uploading || removingLogo) return false;
     const numericPassPercentage = Number(passPercentage);
     resetFeedback();
     if (
@@ -83,7 +85,7 @@ export default function CertificateSettingsForm({
       numericPassPercentage > 100
     ) {
       setError("คะแนนผ่านต้องอยู่ระหว่าง 0 ถึง 100");
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -103,13 +105,17 @@ export default function CertificateSettingsForm({
       });
       const data = (await response.json()) as ApiResponse;
       if (!response.ok) throw new Error(data.error || "บันทึกการตั้งค่าไม่สำเร็จ");
-      setMessage("บันทึกการปรับแต่งใบประกาศแล้ว");
+      if (showFeedback) setMessage("บันทึกการปรับแต่งใบประกาศแล้ว");
+      return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "บันทึกการตั้งค่าไม่สำเร็จ");
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  const workspaceSaving = useCourseWorkspaceSave("certificate", () => saveSettings(false));
 
   async function uploadLogo(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
@@ -217,6 +223,7 @@ export default function CertificateSettingsForm({
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-slate-200/70 bg-white shadow-[0_18px_60px_rgba(15,27,61,0.07)]">
+      <fieldset disabled={workspaceSaving} className="min-w-0">
       <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-orange-50/60 px-5 py-5 sm:px-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3.5">
@@ -389,7 +396,7 @@ export default function CertificateSettingsForm({
             <button
               type="button"
               disabled={saving || uploading || removingLogo}
-              onClick={saveSettings}
+              onClick={() => void saveSettings()}
               className="inline-flex items-center gap-2 rounded-full bg-[#FF5A3C] px-5 py-3 text-[12px] font-black text-white shadow-lg shadow-orange-500/15 transition hover:bg-[#EB4A2D] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
@@ -521,6 +528,7 @@ export default function CertificateSettingsForm({
           {previewUrl && <iframe src={previewUrl} title="ตัวอย่างใบประกาศ PDF" className="min-h-0 w-full flex-1 rounded-lg bg-white" />}
         </div>
       </dialog>
+      </fieldset>
     </section>
   );
 }
