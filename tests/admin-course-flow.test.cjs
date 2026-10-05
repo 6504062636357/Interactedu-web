@@ -189,3 +189,101 @@ test('an RLS-filtered draft update is reported as failure instead of success', a
   const app = setup({ zeroUpdate: 'lesson_drafts' });
   assert.ok((await app.editor.updateLessonDraft(editInput)).error);
 });
+
+// Exercise draft saving with current client form values, without network calls.
+function loadClient(file, dependencies = {}, stateValues = {}, runtime = {}) {
+  let stateIndex = 0;
+  const updates = [];
+  const react = {
+    createContext: () => ({ Provider: 'provider' }),
+    useCallback: callback => callback,
+    useEffect() {},
+    useRef: current => ({ current }),
+    useState(initial) {
+      const index = stateIndex++;
+      const value = index in stateValues ? stateValues[index] : typeof initial === 'function' ? initial() : initial;
+      return [value, next => updates.push(next)];
+    },
+  };
+  const jsx = (type, props) => ({ type, props });
+  const modules = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': {}, ...dependencies };
+  const exports = {};
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  vm.runInNewContext(code, { exports, ...runtime, require: name => {
+    if (!(name in modules)) throw new Error('Unexpected dependency: ' + name);
+    return modules[name];
+  } });
+  return { exports, updates };
+}
+
+function draftWorkspace() {
+  const app = loadClient('src/components/courses/CourseWorkspaceSave.tsx');
+  const tree = app.exports.CourseWorkspaceSaveProvider({ enabled: true, children: null });
+  return { ...app, ...tree.props.value };
+}
+
+test('draft save waits for all sections and ignores repeated clicks', async () => {
+  const app = draftWorkspace();
+  const calls = [];
+  let finish;
+  app.register('details', () => { calls.push('details'); return new Promise(resolve => { finish = resolve; }); });
+  app.register('certificate', async () => { calls.push('certificate'); return true; });
+  const saving = app.saveDraft();
+  await app.saveDraft();
+  assert.equal(calls.join(','), 'details');
+  assert.equal(app.updates.some(value => value?.success === true), false);
+  finish(true);
+  await saving;
+  assert.equal(calls.join(','), 'details,certificate');
+  assert.equal(app.updates.some(value => value?.success === true), true);
+});
+
+test('a failed section never reports the whole draft saved and can be retried', async () => {
+  const app = draftWorkspace();
+  app.register('details', async () => true);
+  app.register('certificate', async () => false);
+  await app.saveDraft();
+  assert.equal(app.updates.some(value => value?.success === true), false);
+  assert.equal(app.updates.some(value => value?.success === false), true);
+  app.register('certificate', async () => true);
+  await app.saveDraft();
+  assert.equal(app.updates.some(value => value?.success === true), true);
+});
+
+test('workspace draft button saves current course edits without publishing', async () => {
+  let save, body;
+  const app = loadClient('src/components/admin/AdminCourseDetailsForm.tsx', {
+    'next/navigation': { useRouter: () => ({ refresh() {} }) },
+    '@/utils/supabase/client': { createClient() { throw new Error('No upload expected'); } },
+    './CourseOverview': { default() {} },
+    '@/components/courses/CourseWorkspaceSave': { useCourseWorkspaceSave: (_section, callback) => { save = callback; return false; } },
+  }, { 2: 'Current unsaved title', 5: 'Current description', 7: '950' }, {
+    fetch: async (_url, request) => {
+      body = JSON.parse(request.body);
+      return { ok: true, json: async () => ({ course: { title: body.title, course_code: body.courseCode, category: body.category, description: body.description, price: body.price, cover_image_url: body.coverImageUrl } }) };
+    },
+  });
+  app.exports.default({ courseId: 'course', draft: true, initialTitle: 'Old title', initialCourseCode: 'RUN01', initialCategory: 'Health', initialDescription: '', initialPrice: 500, initialCoverImageUrl: null });
+  assert.equal(await save(), true);
+  assert.equal(body.title, 'Current unsaved title');
+  assert.equal(body.description, 'Current description');
+  assert.equal(body.price, 950);
+  assert.equal('status' in body, false);
+});
+
+test('workspace draft button saves current certificate settings', async () => {
+  let save, body;
+  const app = loadClient('src/components/certificates/CertificateSettingsForm.tsx', {
+    'next/image': { default() {} },
+    '@/components/courses/CourseWorkspaceSave': { useCourseWorkspaceSave: (_section, callback) => { save = callback; return false; } },
+  }, { 1: '85', 2: 'Running certificate' }, {
+    fetch: async (_url, request) => { body = JSON.parse(request.body); return { ok: true, json: async () => ({}) }; },
+  });
+  app.exports.default({ courseId: 'course', initialEnabled: true, initialPassPercentage: 70, initialTitle: 'Old certificate' });
+  assert.equal(await save(), true);
+  assert.equal(body.title, 'Running certificate');
+  assert.equal(body.passPercentage, 85);
+  assert.equal('status' in body, false);
+});

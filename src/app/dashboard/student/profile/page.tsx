@@ -2,6 +2,7 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
 import { summarizeStudentProgress } from "@/lib/courses/student-progress";
+import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
 import StudentProfileClient from "@/components/StudentProfileClient";
 import { selectPlusPlans, type PlusPlanDetails } from "@/lib/payments/plus-plan";
 import { ArrowUpRight, Award, BookOpenText, GraduationCap, Play } from "lucide-react";
@@ -15,7 +16,7 @@ interface CourseInfo {
   category: string | null;
 }
 
-interface EnrollmentWithCourse {
+interface EnrollmentWithCourse extends LearningEnrollment {
   id: string;
   created_at: string;
   course_id: string;
@@ -75,15 +76,15 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
   }
   const { current: currentPlus, upcoming: upcomingPlus } = selectPlusPlans(plusRows, new Date(now));
 
-  const { data: enrollmentsRaw } = await supabase
+  const { data: enrollmentsRaw } = await loadLearningEnrollments((includeStart) => supabase
     .from("enrollments")
-    .select("id, created_at, course_id, courses(id, title, slug, cover_image_url, category)")
+    .select(`id, created_at, course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds), courses(id, title, slug, cover_image_url, category)`)
     .eq("student_id", user.id)
     .eq("status", "approved")
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }));
 
-  const enrollments = (enrollmentsRaw ?? []) as unknown as EnrollmentWithCourse[];
+  const enrollments = ((enrollmentsRaw ?? []) as unknown as EnrollmentWithCourse[]).filter(isLearningEnrollment);
   const enrollmentIds = enrollments.map((e) => e.id);
   const courseIds = enrollments.map((e) => e.course_id);
 
@@ -158,6 +159,7 @@ export default async function StudentProfilePage(): Promise<ReactElement> {
           <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/60 px-5 py-10 text-center">
             <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-[#3157D5]"><BookOpenText size={23} /></span>
             <p className="mt-3 text-[13.5px] font-semibold text-slate-600">ยังไม่มีคอร์สที่กำลังเรียน</p>
+            <Link href="/courses" className="mt-4 inline-flex rounded-xl bg-[#3157D5] px-4 py-3 text-sm font-bold text-white">เลือกคอร์สเพื่อเริ่มเรียน</Link>
           </div>
         ) : (
           <div className="space-y-3">

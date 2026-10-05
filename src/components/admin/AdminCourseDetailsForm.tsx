@@ -4,6 +4,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactElemen
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import CourseOverview, { type CourseOverviewDetails } from "./CourseOverview";
+import { useCourseWorkspaceSave } from "@/components/courses/CourseWorkspaceSave";
 
 interface AdminCourseDetailsFormProps {
   courseId: string;
@@ -13,6 +14,7 @@ interface AdminCourseDetailsFormProps {
   initialDescription: string | null;
   initialPrice: number;
   initialCoverImageUrl: string | null;
+  draft?: boolean;
 }
 
 const inputClass =
@@ -27,6 +29,7 @@ export default function AdminCourseDetailsForm({
   initialDescription,
   initialPrice,
   initialCoverImageUrl,
+  draft = false,
 }: AdminCourseDetailsFormProps): ReactElement {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -96,15 +99,15 @@ export default function AdminCourseDetailsForm({
     setCoverPreview(null);
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveDetails(showFeedback = true): Promise<boolean> {
+    if (saving) return false;
     setError(null);
     setSuccess(null);
 
     // ราคาขั้นต่ำ 20 บาท เช็คก่อนยิง request เหมือนฟิลด์อื่นๆ ในฟอร์มนี้ (ยกเว้นติ๊กคอร์สเรียนฟรี)
     if (!isFree && Number(price) < 20) {
       setError("ราคาคอร์สขั้นต่ำ 20 บาท");
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -165,14 +168,23 @@ export default function AdminCourseDetailsForm({
       setCoverImageUrl(updated.cover_image_url);
       setCoverFile(null);
       setCoverPreview(updated.cover_image_url);
-      setSuccess("บันทึกข้อมูลคอร์สแล้ว");
+      if (showFeedback) setSuccess(draft ? "บันทึกฉบับร่างแล้ว" : "บันทึกข้อมูลคอร์สแล้ว");
       setEditing(false);
       router.refresh();
+      return true;
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ");
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  const workspaceSaving = useCourseWorkspaceSave("details", () => saveDetails(false));
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspaceSaving) void saveDetails();
   }
 
   return (
@@ -185,7 +197,8 @@ export default function AdminCourseDetailsForm({
         <button
           type="button"
           onClick={toggleEditing}
-          className="shrink-0 rounded-full border border-slate-200 px-4 py-2 text-xs font-bold text-[#3157D5] hover:bg-slate-50"
+          disabled={saving || workspaceSaving}
+          className="min-h-11 shrink-0 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-[#3157D5] hover:bg-slate-50 disabled:opacity-60"
         >
           {editing ? "ยกเลิก" : "แก้ไขข้อมูล"}
         </button>
@@ -202,6 +215,7 @@ export default function AdminCourseDetailsForm({
 
       {editing && (
         <form onSubmit={handleSubmit} className="mt-5 space-y-4 border-t border-slate-100 pt-5">
+          <fieldset disabled={saving || workspaceSaving} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <label>
               <span className={labelClass}>ชื่อคอร์ส</span>
@@ -254,9 +268,10 @@ export default function AdminCourseDetailsForm({
             </div>
           </div>
 
-          <button type="submit" disabled={saving} className="rounded-full bg-[#0F1B3D] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-            {saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+          <button type="submit" disabled={saving || workspaceSaving} className="min-h-11 rounded-xl bg-[#0F1B3D] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+            {saving || workspaceSaving ? "กำลังบันทึก..." : draft ? "บันทึกฉบับร่าง" : "บันทึกการแก้ไข"}
           </button>
+          </fieldset>
         </form>
       )}
     </section>

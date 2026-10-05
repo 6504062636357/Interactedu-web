@@ -614,12 +614,12 @@ export default function LessonDraftForm({
     [randomMarkers]
   );
   const currentVideoSegment = useMemo(
-    () => findVideoSegmentAtTime(videoSegments, videoCurrentTime),
-    [videoSegments, videoCurrentTime]
+    () => isAdmin ? undefined : findVideoSegmentAtTime(videoSegments, videoCurrentTime),
+    [isAdmin, videoSegments, videoCurrentTime]
   );
   const pinModalVideoSegment = useMemo(
-    () => findVideoSegmentAtTime(videoSegments, pinModalTimestamp),
-    [videoSegments, pinModalTimestamp]
+    () => isAdmin ? undefined : findVideoSegmentAtTime(videoSegments, pinModalTimestamp),
+    [isAdmin, videoSegments, pinModalTimestamp]
   );
 
   // ---------- Save / submit ----------
@@ -865,7 +865,7 @@ export default function LessonDraftForm({
 
   const tabs: { key: TabKey; label: string; badge?: number }[] = [
     { key: "info", label: "รายละเอียดบทเรียน" },
-    { key: "segments", label: "แบ่งช่วงวิดีโอ", badge: videoSegments.length || undefined },
+    ...(!isAdmin ? [{ key: "segments" as const, label: "แบ่งช่วงวิดีโอ", badge: videoSegments.length || undefined }] : []),
     { key: "video-quiz", label: "In-Video Quiz", badge: videoQuizQuestions.length || undefined },
   ];
 
@@ -957,13 +957,15 @@ export default function LessonDraftForm({
                   <p className="text-[13px] font-semibold text-[#00B37E]">
                     {isEditMode && !videoFile ? "มีวิดีโอเดิมอยู่แล้ว" : "อัปโหลดวิดีโอสำเร็จแล้ว"}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("segments")}
-                    className="text-left text-[12px] font-bold text-[#FF5A3C] hover:text-[#EB4A2D] sm:text-right"
-                  >
-                    ไปแบ่งช่วงวิดีโอ →
-                  </button>
+                  {!isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("segments")}
+                      className="text-left text-[12px] font-bold text-[#FF5A3C] hover:text-[#EB4A2D] sm:text-right"
+                    >
+                      ไปแบ่งช่วงวิดีโอ →
+                    </button>
+                  )}
                 </div>
                 <video
                   src={videoPreviewUrl ?? videoUrl ?? undefined}
@@ -994,17 +996,8 @@ export default function LessonDraftForm({
       )}
 
       {/* ===================== TAB 2: แบ่งช่วงวิดีโอ ===================== */}
-      {activeTab === "segments" && (
+      {!isAdmin && activeTab === "segments" && (
         <div>
-          {isAdmin && (
-            <div className="mb-4 rounded-2xl border border-[#FF5A3C]/15 bg-[#FF5A3C]/[0.04] px-4 py-3">
-              <p className="text-[12.5px] font-bold text-[#EB4A2D]">โหมดแก้ไขเต็มสำหรับแอดมิน</p>
-              <p className="mt-1 text-[11.5px] text-[#0F1B3D]/55">
-                แอดมินสามารถเพิ่ม/ตัด/แก้ช่วงวิดีโอได้เต็มแบบเดียวกับครูฝึกสอน
-              </p>
-            </div>
-          )}
-
           {!videoPreviewUrl && !videoUrl ? (
             <div className="mb-6 rounded-2xl border border-dashed border-[#0F1B3D]/15 bg-white px-6 py-12 text-center">
               <p className="text-[13.5px] font-bold text-[#0F1B3D]/55">อัปโหลดวิดีโอก่อนเริ่มแบ่งช่วง</p>
@@ -1060,7 +1053,7 @@ export default function LessonDraftForm({
                 />
               </div>
 
-              {videoSegments.length > 0 ? (
+              {!isAdmin && (videoSegments.length > 0 ? (
                 <div className="mb-4 rounded-2xl border border-[#0F1B3D]/15 bg-[#EEF2FF] p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -1100,12 +1093,12 @@ export default function LessonDraftForm({
                 <div className="mb-4 rounded-xl border border-dashed border-[#0F1B3D]/12 bg-[#F7F8FA] px-4 py-3 text-[11.5px] text-[#0F1B3D]/45">
                   ยังไม่ได้แบ่งบท ควิซจะอ้างอิงเวลาของวิดีโอเต็มตามปกติ
                 </div>
-              )}
+              ))}
 
               {/* Timeline พร้อม marker ตำแหน่งควิซ */}
               {videoDuration > 0 && (
                 <div className="relative mb-2 h-8 overflow-hidden rounded-lg bg-[#0F1B3D]/[0.04]">
-                  {videoSegments.map((segment, index) => {
+                  {!isAdmin && videoSegments.map((segment, index) => {
                     const left = Math.max(0, Math.min(100, (segment.start / videoDuration) * 100));
                     const width = Math.max(0, Math.min(100 - left, ((segment.end - segment.start) / videoDuration) * 100));
                     return (
@@ -1175,7 +1168,7 @@ export default function LessonDraftForm({
           ) : (
             <div className="space-y-6">
               {sortedVideoQuizzes.map((q) => {
-                const segment = findVideoSegmentAtTime(videoSegments, q.timestampSeconds ?? 0);
+                const segment = isAdmin ? undefined : findVideoSegmentAtTime(videoSegments, q.timestampSeconds ?? 0);
                 return (
                 <div key={q.key} className="rounded-2xl border border-[#0F1B3D]/[0.08] p-5">
                   <div className="flex items-center gap-2 mb-4">
@@ -1572,7 +1565,7 @@ export default function LessonDraftForm({
             <div className="mt-6 space-y-3">
               <p className="text-[12px] font-bold uppercase tracking-wide text-[#0F1B3D]/35">สุ่มจากคลังข้อสอบ</p>
               {sortedRandomMarkers.map((m) => {
-                const segment = findVideoSegmentAtTime(videoSegments, m.timestampSeconds);
+                const segment = isAdmin ? undefined : findVideoSegmentAtTime(videoSegments, m.timestampSeconds);
                 return (
                 <div key={m.key} className="flex items-center gap-3 rounded-2xl border border-[#0F1B3D]/20 bg-[#0F1B3D]/[0.04] p-4">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-bold text-[#0F1B3D] bg-[#0F1B3D]/10 px-2.5 py-1 rounded-full shrink-0">

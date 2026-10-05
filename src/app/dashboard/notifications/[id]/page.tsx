@@ -32,6 +32,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   lesson_rejected: "บทเรียนต้องแก้ไข",
   course_rejected: "คอร์สต้องแก้ไข",
   student_completed_course: "ผู้เรียนจบคอร์ส",
+  student_started_course: "ผู้เรียนเริ่มเรียนคอร์ส",
 };
 
 function internalActionUrl(value: string | null): string | null {

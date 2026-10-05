@@ -60,3 +60,26 @@ test("middleware can keep its hard deadline non-retryable", async () => {
     (error) => error.name === "AbortError" && error.message.includes("timed out")
   );
 });
+
+test("server clients retain the default deadline and allow a scoped longer read deadline", async () => {
+  const deadlines = [];
+  const output = ts.transpileModule(fs.readFileSync('src/utils/supabase/server.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const exports = {};
+  const modules = {
+    '@supabase/ssr': { createServerClient: (_url, _key, options) => options },
+    'next/headers': { cookies: async () => ({ getAll: () => [], set() {} }) },
+    '@/utils/supabase/fetch-with-timeout': { createFetchWithTimeout: timeout => {
+      deadlines.push(timeout);
+      return rejectWhenAborted;
+    } },
+  };
+  vm.runInNewContext(output, {
+    exports, process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://example.test', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'fake-key' } },
+    require: name => modules[name],
+  });
+  await exports.createClient();
+  await exports.createClient({ timeoutMs: 30000 });
+  assert.deepEqual(deadlines, [10000, 30000]);
+});

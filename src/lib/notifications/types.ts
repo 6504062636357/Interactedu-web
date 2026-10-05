@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES = [
   "lesson_rejected",
   "course_rejected",
   "student_completed_course",
+  "student_started_course",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

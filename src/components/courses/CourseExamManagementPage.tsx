@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import CourseExamEditor from "@/components/courses/CourseExamEditor";
+import CourseExamLoadError from "@/components/courses/CourseExamLoadError";
 
 import { createClient } from "@/utils/supabase/server";
 import CourseExamReviewActions from "@/components/CourseExamReviewActions";
@@ -12,6 +13,7 @@ interface StoredImagePin { id: string; x: number; y: number }
 
 interface StoredChoice { choice_text: string; is_correct: boolean; order_index: number }
 interface StoredQuestion {
+  lesson_draft_id: string;
   question_text: string;
   explanation: string | null;
   order_index: number;
@@ -25,7 +27,7 @@ interface StoredQuestion {
   image_pins: StoredImagePin[] | null;
   quiz_choices: StoredChoice[];
 }
-interface StoredDraft { id: string; created_at: string; quiz_questions: StoredQuestion[] }
+interface StoredDraft { id: string; created_at: string }
 interface StoredLesson { id: string; order_index: number; lesson_drafts: StoredDraft[] }
 
 interface StoredExamConfig {
@@ -35,93 +37,84 @@ interface StoredExamConfig {
 }
 
 export default async function CourseExamManagementPage({ courseId, workspace }: { courseId: string; workspace: "teacher" | "admin" }): Promise<ReactElement> {
-  const supabase = await createClient();
+  // Give this read-only screen room for slower database responses. Disable SDK
+  // retries below so each read has one bounded attempt before offering retry.
+  const supabase = await createClient({ timeoutMs: 30000 });
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirect=/dashboard/${workspace}/courses/${courseId}/exam`);
 
-  const [
-    { data: profile },
-    { data: course, error: courseError },
-    { data: certificateSettings },
-    { data: lessonsData, error: lessonsError },
-    { data: examConfigData },
-  ] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+  const loadError = (message: string, error: { message: string }) => {
+    console.warn("[course/exam] load failed:", courseId, error.message);
+    return <CourseExamLoadError message={message} backHref={`/dashboard/${workspace}/courses/${courseId}`} />;
+  };
+
+  const [{ data: profile, error: profileError }, { data: course, error: courseError }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle().retry(false),
     // Keep the existence/ownership query limited to the original course columns.
     // Optional feature columns may not exist yet while a migration is rolling out;
     // bundling them here used to turn that schema error into a misleading 404.
-    supabase.from("courses").select("id, title, created_by").eq("id", courseId).maybeSingle(),
-    supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle(),
-    supabase.from("lessons").select(`id, order_index, lesson_drafts(id, created_at, quiz_questions(question_text, explanation, order_index, video_timestamp_seconds, interaction_type, answer_data, image_url, image_caption, image_pins, quiz_choices(choice_text, is_correct, order_index)))`).eq("course_id", courseId).order("order_index", { ascending: true }),
-    supabase.from("course_exam_configs").select("custom_constraints").eq("course_id", courseId).maybeSingle(),
+    supabase.from("courses").select("id, title, created_by").eq("id", courseId).maybeSingle().retry(false),
   ]);
 
-  if (courseError) {
-    console.error("[course/exam] failed to load course:", courseId, courseError.message);
-    return (
-      <div className="mx-auto max-w-3xl py-20 text-center">
-        <p className="mb-2 text-[15px] font-bold text-red-500">โหลดข้อมูลคอร์สไม่สำเร็จ</p>
-        <p className="mb-6 text-[13.5px] text-[#0F1B3D]/50">อาจเกิดจากปัญหาการเชื่อมต่อชั่วคราว กรุณาลองใหม่อีกครั้ง</p>
-        <Link
-          href={`/dashboard/${workspace}/courses/${courseId}/exam`}
-          className="inline-block rounded-xl bg-[#0F1B3D] px-5 py-2.5 text-[13.5px] font-bold text-white transition-colors hover:bg-[#0F1B3D]/90"
-        >
-          ลองใหม่
-        </Link>
-      </div>
-    );
-  }
+  if (profileError) return loadError("โหลดข้อมูลสิทธิ์ผู้ใช้ไม่สำเร็จ", profileError);
+  if (courseError) return loadError("โหลดข้อมูลคอร์สไม่สำเร็จ", courseError);
   if (!course) notFound();
   const allowed = profile?.role === "admin" || (profile?.role === "teacher" && course.created_by === user.id);
   if (!allowed) redirect(`/dashboard/${workspace}`);
 
-  // `exam_status` was introduced after the exam screen. It is only needed by
-  // the admin review controls, so a missing column must not block teachers.
-  const { data: examReview } = workspace === "admin"
-    ? await supabase.from("courses").select("exam_status").eq("id", courseId).maybeSingle()
-    : { data: null };
+  const [
+    { data: certificateSettings, error: certificateError },
+    { data: lessonsData, error: lessonsError },
+    { data: examConfigData, error: examConfigError },
+    { data: examReview, error: examReviewError },
+  ] = await Promise.all([
+    supabase.from("courses").select("certificate_enabled, certificate_pass_percentage").eq("id", courseId).maybeSingle().retry(false),
+    // Only load the newest draft ID per lesson, not every draft and its quizzes.
+    supabase.from("lessons").select("id, order_index, lesson_drafts(id, created_at)").eq("course_id", courseId)
+      .order("order_index", { ascending: true })
+      .order("created_at", { referencedTable: "lesson_drafts", ascending: false })
+      .limit(1, { referencedTable: "lesson_drafts" }).retry(false),
+    supabase.from("course_exam_configs").select("custom_constraints").eq("course_id", courseId).maybeSingle().retry(false),
+    workspace === "admin"
+      ? supabase.from("courses").select("exam_status").eq("id", courseId).maybeSingle().retry(false)
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  // Preserve compatibility with databases where optional course columns have
+  // not been migrated yet, but never treat a failed read as an empty exam.
+  const missingColumn = (error: { code: string }) => error.code === "42703" || error.code === "PGRST204";
+  if (certificateError && !missingColumn(certificateError)) return loadError("โหลดการตั้งค่าใบรับรองไม่สำเร็จ", certificateError);
+  if (lessonsError) return loadError("โหลดข้อมูลบทเรียนไม่สำเร็จ", lessonsError);
+  if (examConfigError) return loadError("โหลดการตั้งค่าบททดสอบไม่สำเร็จ", examConfigError);
+  if (examReviewError && !missingColumn(examReviewError)) return loadError("โหลดสถานะบททดสอบไม่สำเร็จ", examReviewError);
 
   const certificateEnabled = certificateSettings?.certificate_enabled ?? false;
   const certificatePassPercentage = Number(certificateSettings?.certificate_pass_percentage ?? 70);
 
   const lessons = (lessonsData ?? []) as unknown as StoredLesson[];
-  const questions = lessons.flatMap((lesson) => {
-    const latestDraft = [...(lesson.lesson_drafts ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-    return (latestDraft?.quiz_questions ?? [])
-      .filter((question) => question.video_timestamp_seconds == null)
-      .sort((a, b) => a.order_index - b.order_index);
-  }).map((question) => ({
-    questionText: question.question_text,
-    explanation: question.explanation,
-    imageUrl: question.image_url ?? null,
-    // ===== เพิ่มใหม่: ส่งคำบรรยายใต้ภาพ + หมุดต่อให้ CourseExamEditor ไป pre-fill ตอนแก้ไข
-    imageCaption: question.image_caption ?? null,
-    imagePins: question.image_pins ?? null,
-     interactionType: question.interaction_type ?? "multiple_choice",
-    // ===== เพิ่มใหม่: ส่งเฉลย matching/sequencing ต่อให้ CourseExamEditor ไป pre-fill ตอนแก้ไข
-    answerData: question.answer_data ?? null,
-    choices: [...question.quiz_choices].sort((a, b) => a.order_index - b.order_index).map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
-  }));
+  const draftIds = lessons.flatMap((lesson) => (lesson.lesson_drafts ?? []).map((draft) => draft.id));
+  const { data: questionsData, error: questionsError } = draftIds.length > 0
+    ? await supabase.from("quiz_questions")
+      .select("lesson_draft_id, question_text, explanation, order_index, video_timestamp_seconds, interaction_type, answer_data, image_url, image_caption, image_pins, quiz_choices(choice_text, is_correct, order_index)")
+      .in("lesson_draft_id", draftIds).is("video_timestamp_seconds", null)
+      .order("order_index", { ascending: true }).retry(false)
+    : { data: [], error: null };
+  if (questionsError) return loadError("โหลดคำถามบททดสอบไม่สำเร็จ", questionsError);
+
+  const storedQuestions = (questionsData ?? []) as unknown as StoredQuestion[];
+  const questions = draftIds.flatMap((draftId) => storedQuestions.filter((question) => question.lesson_draft_id === draftId))
+    .map((question) => ({
+      questionText: question.question_text,
+      explanation: question.explanation,
+      imageUrl: question.image_url ?? null,
+      imageCaption: question.image_caption ?? null,
+      imagePins: question.image_pins ?? null,
+      interactionType: question.interaction_type ?? "multiple_choice",
+      answerData: question.answer_data ?? null,
+      choices: [...question.quiz_choices].sort((a, b) => a.order_index - b.order_index).map((choice) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
+    }));
   
   const examConfig = examConfigData as StoredExamConfig | null;
-
-  if (lessonsError) {
-    console.error("[course/exam] failed to load lessons:", courseId, lessonsError.message);
-    return (
-      <div className="mx-auto max-w-3xl py-20 text-center">
-        <p className="mb-2 text-[15px] font-bold text-red-500">โหลดข้อมูลบทเรียนและคำถามไม่สำเร็จ</p>
-        <p className="mb-6 text-[13.5px] text-[#0F1B3D]/50">
-          การเชื่อมต่อฐานข้อมูลขัดข้องชั่วคราว ข้อมูลบทเรียนของคุณยังไม่หาย กรุณาลองเปิดหน้านี้อีกครั้ง
-        </p>
-        <Link
-          href={`/dashboard/${workspace}/courses/${courseId}/exam`}
-          className="inline-block rounded-xl bg-[#0F1B3D] px-5 py-2.5 text-[13.5px] font-bold text-white transition-colors hover:bg-[#0F1B3D]/90"
-        >
-          ลองใหม่
-        </Link>
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto max-w-3xl">

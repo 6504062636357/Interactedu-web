@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Scorm12API, Scorm2004API } from 'scorm-again';
 import { selectResumeScoPath } from '@/lib/courses/scorm-resume';
 import { useStudentStudyTime } from '@/lib/courses/use-student-study-time';
+import { useCourseLearningStart } from '@/lib/courses/use-course-learning-start';
 import { useVideoSeekGuard } from '@/lib/courses/use-video-seek-guard';
 
 interface PlayProps {
@@ -163,6 +164,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
   const [currentItemFraction, setCurrentItemFraction] = useState(0);
 
   const stopStudyTime = useStudentStudyTime({ courseId, lessonId, scormSource, currentPath, apiReady, iframeRef });
+  useCourseLearningStart(courseId, lessonId, apiReady && currentPath !== null);
   const seekGuardItem = flattenPlayableItems(manifest?.items ?? []).find((item) => item.href === currentPath);
   const canReplayFreely = videoCompleted || (currentPath !== null && completedScos.includes(currentPath));
   useVideoSeekGuard({
@@ -738,12 +740,6 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     courseLessons.reduce((sum, l) => sum + (l.videoDurationSeconds ?? 0), 0)
   );
 
-  // ระยะเวลาของบทเรียนปัจจุบัน — โชว์ใต้ชื่อบทเรียนเสมอ ไม่ว่าคอร์สจะมีกี่บทก็ตาม (ต่างจาก
-  // courseTotalDurationLabel ที่โชว์เฉพาะตอนมี >1 บทเรียนในรายการ "บทเรียนในคอร์สนี้")
-  const currentLessonDurationLabel = formatLessonDuration(
-    courseLessons[courseLessonIndex]?.videoDurationSeconds
-  );
-
   function canSelectItem(href: string | null): boolean {
     if (!href || scormSource !== 'generated') return true;
     const targetIndex = flatItems.findIndex((item) => item.href === href);
@@ -878,32 +874,9 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
               </button>
             </div>
 
-            <p className="mb-1 text-[16px] font-extrabold leading-snug text-white">
+            <p className="text-[16px] font-extrabold leading-snug text-white">
               {displayCourseTitle}
             </p>
-            {displayLessonTitle && (
-              <p className="text-[12px] text-slate-400 break-words mb-3">
-                {displayLessonTitle}
-                {currentLessonDurationLabel && (
-                  <span className="text-slate-500"> · {currentLessonDurationLabel}</span>
-                )}
-              </p>
-            )}
-
-            {flatItems.length > 0 && (
-              <>
-                <div className="mb-2 flex items-center justify-between text-[11.5px] text-slate-400">
-                  <span>ความคืบหน้าบทเรียนปัจจุบัน</span>
-                  <span className="font-bold text-blue-300">{progressPercent}%</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-white/[0.07]">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#FF6B50] via-[#FF8B5E] to-[#FBBF24] transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              </>
-            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
@@ -1100,17 +1073,6 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             )}
           </div>
 
-          <div className="border-t border-white/[0.07] p-4">
-            <button
-              onClick={handleExit}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.05] px-4 py-3 text-[13px] font-semibold text-slate-200 transition-colors hover:bg-white/[0.11]"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
-              </svg>
-              กลับหน้าคอร์ส
-            </button>
-          </div>
         </aside>
       )}
 
@@ -1118,23 +1080,23 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-white/[0.07] bg-[#0B1528]/95 px-3 backdrop-blur sm:px-5">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <button type="button" onClick={handleExit} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3 py-2.5 text-[12px] font-bold text-slate-200 transition hover:bg-white/[0.11] hover:text-white sm:px-4" title="กลับหน้ารายละเอียดคอร์ส">
+            <button type="button" onClick={handleExit} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3 py-2.5 text-[12px] font-bold text-slate-200 transition hover:bg-white/[0.11] hover:text-white sm:px-4" aria-label="กลับหน้าคอร์ส" title="กลับหน้ารายละเอียดคอร์ส">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
               <span className="hidden sm:inline">กลับหน้าคอร์ส</span>
             </button>
             {!sidebarOpen && (
-              <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-white/[0.09] bg-white/[0.05] p-2.5 text-slate-300 transition-colors hover:bg-white/[0.11] hover:text-white" title="เปิดเมนูบทเรียน">
+              <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl border border-white/[0.09] bg-white/[0.05] p-2.5 text-slate-300 transition-colors hover:bg-white/[0.11] hover:text-white" aria-label="เปิดเมนูบทเรียน" title="เปิดเมนูบทเรียน">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
               </button>
             )}
             <div className="min-w-0">
-              <p className="truncate text-[10.5px] font-bold uppercase tracking-[0.13em] text-[#FF846D]">{displayCourseTitle}</p>
+              {!sidebarOpen && <p className="truncate text-[10.5px] font-bold uppercase tracking-[0.13em] text-[#FF846D]">{displayCourseTitle}</p>}
               <h1 className="truncate text-[13px] font-bold text-white sm:text-[15px]">{currentItem?.title ?? displayLessonTitle ?? 'กำลังโหลดเนื้อหา'}</h1>
             </div>
           </div>
-          <div className="ml-3 flex shrink-0 items-center gap-3">
-            {flatItems.length > 0 && <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />บทเรียนนี้ {progressPercent}%</div>}
-            <span className="rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-bold text-slate-400">{currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length || '–'}</span>
+          <div className="ml-3 flex shrink-0 items-center gap-2 sm:gap-3">
+            {flatItems.length > 0 && <div role="progressbar" aria-label="ความคืบหน้าบทเรียนปัจจุบัน" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300"><span className="hidden sm:inline">บทเรียนนี้ </span>{progressPercent}%</div>}
+            {flatItems.length > 1 && <span className="hidden rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-bold text-slate-400 sm:inline" aria-label="ลำดับเนื้อหา">{currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length}</span>}
           </div>
         </header>
 
@@ -1152,10 +1114,10 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
         {(flatItems.length > 0 || courseLessons.length > 0) && (
           <footer className="flex h-[76px] shrink-0 items-center justify-between border-t border-white/[0.07] bg-[#0B1528] px-3 sm:px-5">
-            <button onClick={handlePrevious} disabled={!prevItem && !previousCourseLesson} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12.5px] font-bold text-slate-300 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:px-4">
+            <button onClick={handlePrevious} disabled={!prevItem && !previousCourseLesson} aria-label="ก่อนหน้า" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12.5px] font-bold text-slate-300 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-30 sm:px-4">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg><span className="hidden sm:inline">ก่อนหน้า</span>
             </button>
-            <div className="min-w-0 px-3 text-center"><p className="truncate text-[11.5px] font-semibold text-slate-400">{displayLessonTitle ?? currentItem?.title}</p><p className="mt-0.5 text-[10.5px] text-slate-500">{scormSource === 'generated' && !canReplayFreely ? 'เลื่อนได้ถึงช่วงที่ดูแล้ว · บันทึกอัตโนมัติ' : 'บันทึกความคืบหน้าอัตโนมัติ'}</p></div>
+            <p className="min-w-0 px-3 text-center text-[10.5px] text-slate-500">{scormSource === 'generated' && !canReplayFreely ? 'เลื่อนได้ถึงช่วงที่ดูแล้ว · บันทึกอัตโนมัติ' : 'บันทึกความคืบหน้าอัตโนมัติ'}</p>
             <button onClick={handleNext} disabled={nextLocked} title={nextLocked ? 'ดูช่วงนี้ให้จบก่อน' : undefined} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-[#FF684D] to-[#FF8066] px-4 py-2.5 text-[12.5px] font-extrabold text-white shadow-lg shadow-orange-950/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5">
               {nextItem ? 'ถัดไป' : nextCourseLesson ? 'บทเรียนถัดไป' : 'ดูสรุปการเรียน'}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>

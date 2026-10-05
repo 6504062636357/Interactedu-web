@@ -1,3 +1,4 @@
+import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
 // app/dashboard/student/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -16,7 +17,7 @@ interface EnrolledCourse {
   cover_image_url: string | null;
 }
 
-interface EnrollmentRow {
+interface EnrollmentRow extends LearningEnrollment {
   id: string;
   course_id: string;
   courses: EnrolledCourse;
@@ -75,15 +76,15 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
       " "
     )[0];
 
-  const { data: enrollmentData } = await supabase
+  const { data: enrollmentData } = await loadLearningEnrollments((includeStart) => supabase
     .from("enrollments")
-    .select("id, course_id, courses(id, title, cover_image_url)")
+    .select(`membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds), id, course_id, courses(id, title, cover_image_url)`)
     .eq("student_id", user.id)
     .eq("status", "approved")
     .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }));
 
-  const enrollments = (enrollmentData ?? []) as unknown as EnrollmentRow[];
+  const enrollments = ((enrollmentData ?? []) as unknown as EnrollmentRow[]).filter(isLearningEnrollment);
   const courseIds = enrollments.map((e) => e.course_id);
   const studyTimeResult = enrollments.length
     ? await supabase.from("student_study_time").select("enrollment_id, total_seconds").in("enrollment_id", enrollments.map((e) => e.id))
@@ -247,7 +248,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#3157D5]">Learning journey</p>
-            <h2 className="mt-1 text-[17px] font-extrabold text-[#0F1B3D]">คอร์สที่กำลังเรียนอยู่</h2>
+            <h2 className="mt-1 text-[17px] font-extrabold text-[#0F1B3D]">คอร์สของฉัน</h2>
           </div>
           <Link href="/dashboard/student/courses" className="shrink-0 text-[11px] font-bold text-[#3157D5] hover:underline">
             ดูคอร์สทั้งหมด ↗
@@ -255,7 +256,7 @@ export default async function StudentDashboardPage(): Promise<ReactElement> {
         </div>
 
         {cards.length === 0 ? (
-          <div className="rounded-[22px] border border-slate-200/70 bg-white px-5 py-14 text-center"><BookOpen className="mx-auto text-slate-300" size={25} /><p className="mt-3 text-[13px] text-slate-400">ยังไม่มีคอร์สที่ลงทะเบียน</p></div>
+          <div className="rounded-[22px] border border-slate-200/70 bg-white px-5 py-14 text-center"><BookOpen className="mx-auto text-slate-300" size={25} /><p className="mt-3 text-[13px] text-slate-400">ยังไม่มีคอร์สที่ลงทะเบียนหรือเริ่มเรียน</p><Link href="/courses" className="mt-4 inline-flex rounded-xl bg-[#3157D5] px-4 py-3 text-sm font-bold text-white">เลือกคอร์สเพื่อเริ่มเรียน</Link></div>
         ) : (
           <div className="space-y-3">
             {cards.map((course) => (

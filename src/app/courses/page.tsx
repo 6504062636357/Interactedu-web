@@ -1,3 +1,4 @@
+import { isLearningEnrollment, loadLearningEnrollments, type LearningEnrollment } from "@/lib/courses/learning-enrollment";
 // app/courses/page.tsx
 import type { ReactElement } from "react";
 import Link from "next/link";
@@ -160,14 +161,17 @@ export default async function CoursesPage({
   // เช็คว่าคอร์สไหนที่ user คนนี้ลงทะเบียนอนุมัติแล้วบ้าง เอาไว้สลับปุ่ม "ลงทะเบียน" เป็น
   // "เข้าเรียนต่อ" ในการ์ดคอร์ส — ไม่ต้องล็อกอินก็ยังดูรายการคอร์สได้ตามปกติ แค่ enrolledCourseIds ว่าง
   let enrolledCourseIds: string[] = [];
+  let accessibleCourseIds: string[] = [];
   if (user) {
-    const { data: enrollmentRows } = await supabase
+    const { data: enrollmentRows } = await loadLearningEnrollments((includeStart) => supabase
       .from("enrollments")
-      .select("course_id")
+      .select(`course_id, membership_order_id, ${includeStart ? "learning_started_at, " : ""}scorm_tracking(lesson_id, last_accessed, video_completed, lesson_status, completed_scos, cmi_data), student_study_time(total_seconds)`)
       .eq("student_id", user.id)
       .eq("status", "approved")
-      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`);
-    enrolledCourseIds = (enrollmentRows ?? []).map((e) => e.course_id as string);
+      .or(`access_expires_at.is.null,access_expires_at.gt.${new Date().toISOString()}`));
+    const rows = (enrollmentRows ?? []) as unknown as (LearningEnrollment & { course_id: string })[];
+    accessibleCourseIds = rows.map((e) => e.course_id);
+    enrolledCourseIds = rows.filter(isLearningEnrollment).map((e) => e.course_id);
   }
 
   const explorerCourses: ExplorerCourse[] = (courses ?? []).map((course) => ({
@@ -185,7 +189,7 @@ export default async function CoursesPage({
     <div className="min-h-screen w-full bg-white">
       <Navbar displayName={displayName} avatarUrl={profile?.avatar_url ?? null} plusExpiresAt={plusExpiresAt} />
       <ExplorerHero />
-      <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} initialFreeOnly={initialFreeOnly} />
+      <CoursesExplorer courses={explorerCourses} enrolledCourseIds={enrolledCourseIds} accessibleCourseIds={accessibleCourseIds} initialFreeOnly={initialFreeOnly} />
       <Footer />
     </div>
   );
