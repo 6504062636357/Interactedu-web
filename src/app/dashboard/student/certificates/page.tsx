@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import CertificatePreviewButton from "@/components/certificates/CertificatePreviewButton";
 
 interface CertificateListRow {
   id: string;
@@ -86,12 +87,19 @@ export default async function CertificatesPage(): Promise<ReactElement> {
                   </div>
                 </div>
                 {issued ? (
-                  <a
-                    href={`/api/me/certificates/${certificate.id}/download`}
-                    className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-[#0F1B3D] px-4 py-2.5 text-[12.5px] font-bold text-white hover:opacity-90"
-                  >
-                    ดาวน์โหลด PDF
-                  </a>
+                  <div className="mt-4 flex gap-3">
+                    <CertificatePreviewButton
+                      certificateId={certificate.id}
+                      title={certificate.courses?.title ?? "หลักสูตร"}
+                      certificateNo={certificate.certificate_no}
+                    />
+                    <a
+                      href={`/api/me/certificates/${certificate.id}/download`}
+                      className="inline-flex flex-[2] items-center justify-center rounded-full bg-[#0F1B3D] px-4 py-2.5 text-[12.5px] font-bold text-white hover:opacity-90"
+                    >
+                      ดาวน์โหลด PDF
+                    </a>
+                  </div>
                 ) : (
                   <button disabled className="mt-4 w-full rounded-full bg-[#0F1B3D]/10 px-4 py-2.5 text-[12.5px] font-bold text-[#0F1B3D]/35">
                     ใบรับรองถูกยกเลิก
