@@ -6,10 +6,11 @@ function safeFileName(value: string): string {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ certificateId: string }> }
 ) {
   const { certificateId } = await params;
+  const inline = request.nextUrl.searchParams.get("inline") === "1";
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,7 +39,7 @@ export async function GET(
   return new NextResponse(await pdf.arrayBuffer(), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${safeFileName(certificate.certificate_no)}.pdf"`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${safeFileName(certificate.certificate_no)}.pdf"`,
       "Cache-Control": "private, no-store",
     },
   });

@@ -740,6 +740,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
     courseLessons.reduce((sum, l) => sum + (l.videoDurationSeconds ?? 0), 0)
   );
 
+
   function canSelectItem(href: string | null): boolean {
     if (!href || scormSource !== 'generated') return true;
     const targetIndex = flatItems.findIndex((item) => item.href === href);
@@ -877,6 +878,28 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             <p className="text-[16px] font-extrabold leading-snug text-white">
               {displayCourseTitle}
             </p>
+
+            {flatItems.length > 0 && (
+              <>
+                <div className="mb-2 mt-3 flex items-center justify-between text-[11.5px] text-slate-400">
+                  <span className="flex items-center gap-1.5">
+                    {currentLessonCompleted && (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 12l5 5L20 7" />
+                      </svg>
+                    )}
+                    ความคืบหน้าบทเรียนนี้
+                  </span>
+                  <span className="font-bold text-blue-300">{progressPercent}%</span>
+                </div>
+                <div role="progressbar" aria-label="ความคืบหน้าบทเรียนนี้" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} className="h-2 w-full overflow-hidden rounded-full bg-white/[0.07]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#FF6B50] via-[#FF8B5E] to-[#FBBF24] transition-all duration-500"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
@@ -1078,7 +1101,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
       {/* Main Player View Area */}
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-white/[0.07] bg-[#0B1528]/95 px-3 backdrop-blur sm:px-5">
+        <header className="relative flex h-[72px] shrink-0 items-center justify-between border-b border-white/[0.07] bg-[#0B1528]/95 px-3 backdrop-blur sm:px-5">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button type="button" onClick={handleExit} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3 py-2.5 text-[12px] font-bold text-slate-200 transition hover:bg-white/[0.11] hover:text-white sm:px-4" aria-label="กลับหน้าคอร์ส" title="กลับหน้ารายละเอียดคอร์ส">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
@@ -1095,7 +1118,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
             </div>
           </div>
           <div className="ml-3 flex shrink-0 items-center gap-2 sm:gap-3">
-            {flatItems.length > 0 && <div role="progressbar" aria-label="ความคืบหน้าบทเรียนปัจจุบัน" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11.5px] font-semibold text-slate-300"><span className="hidden sm:inline">บทเรียนนี้ </span>{progressPercent}%</div>}
+            {/* ===== แก้: เอาแถบ/ตัวเลข % ความคืบหน้าของหัวหน้า (ตำแหน่งผิด) ออกตามที่ผู้ใช้แจ้ง — ย้ายไปแสดงเป็นแถบสถานะสีส้มในไซด์บาร์แทน ===== */}
             {flatItems.length > 1 && <span className="hidden rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-bold text-slate-400 sm:inline" aria-label="ลำดับเนื้อหา">{currentIndex >= 0 ? currentIndex + 1 : '–'} / {flatItems.length}</span>}
           </div>
         </header>
