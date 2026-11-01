@@ -30,7 +30,6 @@ export default async function NotificationsPage(): Promise<ReactElement> {
             href={homeHref}
             className="mb-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-[#3157D5] shadow-sm transition-colors hover:bg-blue-50"
           >
-            <span aria-hidden="true">←</span>
             กลับหน้าหลัก
           </Link>
           <div className="app-surface p-5 sm:p-7 lg:p-9"><NotificationList /></div>

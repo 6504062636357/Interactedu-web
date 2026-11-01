@@ -138,7 +138,6 @@ export default function NotificationList(): ReactElement {
                 <span className="mt-1 block break-words text-[13px] leading-5 text-slate-500">{notification.message}</span>
                 <span className="mt-2 block text-[11px] text-slate-400">{formattedDate(notification.created_at)}</span>
               </span>
-              <span className="mt-1 text-slate-300" aria-hidden="true">→</span>
             </button>
           ))
         )}
