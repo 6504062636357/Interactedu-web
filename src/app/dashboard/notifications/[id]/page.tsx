@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import Link from "next/link";
+import { Bell, CircleCheck, FilePenLine, Clock3 } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { NotificationRecord, NotificationType } from "@/lib/notifications/types";
 import { createClient } from "@/utils/supabase/server";
@@ -132,51 +133,54 @@ export default async function NotificationDetailPage({
       ? "เปิดหน้าคอร์ส"
       : "ไปยังรายการที่เกี่ยวข้อง";
 
+  const needsAttention = ["course_rejected", "lesson_rejected", "payment_rejected", "exercise_failed", "certificate_generation_failed"].includes(notification.type);
+  const isSuccess = ["course_approved", "lesson_approved", "payment_approved", "course_access_granted", "lesson_completed", "exercise_passed", "certificate_issued", "student_completed_course"].includes(notification.type);
+  const Icon = needsAttention ? FilePenLine : isSuccess ? CircleCheck : Bell;
+  const theme = needsAttention
+    ? { header: "from-orange-50 via-orange-50/40 to-white", icon: "bg-orange-100 text-orange-600 ring-orange-200/60", badge: "bg-orange-100/80 text-orange-800", line: "bg-orange-400" }
+    : isSuccess
+      ? { header: "from-emerald-50 via-emerald-50/40 to-white", icon: "bg-emerald-100 text-emerald-600 ring-emerald-200/60", badge: "bg-emerald-100/80 text-emerald-800", line: "bg-emerald-400" }
+      : { header: "from-indigo-50 via-indigo-50/40 to-white", icon: "bg-indigo-100 text-indigo-600 ring-indigo-200/60", badge: "bg-indigo-100/80 text-indigo-800", line: "bg-indigo-400" };
+
   return (
     <div className="app-canvas min-h-screen">
-      <header className="app-topbar sticky top-0 z-40"><div className="mx-auto flex h-[74px] max-w-5xl items-center px-5 sm:px-7"><AppBrand compact /></div></header>
-      <main className="px-5 py-7 sm:px-7 lg:py-10">
-      <div className="mx-auto max-w-3xl">
-        <Link
-          href="/dashboard/notifications"
-          className="inline-flex items-center gap-2 text-sm font-bold text-[#3157D5] hover:underline"
-        >
-          <span aria-hidden="true">←</span>
-          การแจ้งเตือนทั้งหมด
-        </Link>
+      <header className="app-topbar sticky top-0 z-40">
+        <div className="mx-auto flex h-[74px] max-w-5xl items-center justify-between px-5 sm:px-7">
+          <AppBrand compact />
+          <span className="hidden items-center gap-2 text-sm text-slate-500 sm:inline-flex"><Bell size={16} aria-hidden="true" /> การแจ้งเตือน</span>
+        </div>
+      </header>
+      <main className="px-4 py-8 sm:px-7 sm:py-12">
+        <div className="mx-auto max-w-2xl">
+          <Link href="/dashboard/notifications" className="inline-flex items-center gap-2 rounded-lg text-sm font-medium text-slate-600 transition-colors hover:text-[#3157D5] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">
+            การแจ้งเตือนทั้งหมด
+          </Link>
 
-        <article className="mt-5 overflow-hidden rounded-[28px] border border-slate-200/70 bg-white shadow-[0_16px_48px_rgba(15,27,61,0.08)]">
-          <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-[#3157D5]">
-                {TYPE_LABELS[notification.type] ?? "การแจ้งเตือน"}
-              </span>
-              <time className="text-xs text-slate-400" dateTime={notification.created_at}>
-                {formattedDate(notification.created_at)}
-              </time>
+          <article className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-[0_12px_40px_rgba(15,27,61,0.06)]">
+            <div className={`h-1 ${theme.line}`} />
+            <div className={`bg-gradient-to-br ${theme.header} px-6 pb-7 pt-8 sm:px-8`}>
+              <div className="flex items-start gap-4">
+                <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-1 ${theme.icon}`}><Icon size={27} strokeWidth={1.7} aria-hidden="true" /></span>
+                <div className="min-w-0">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${theme.badge}`}>{TYPE_LABELS[notification.type] ?? "การแจ้งเตือน"}</span>
+                  <h1 className="mt-3 break-words text-xl font-bold leading-snug tracking-tight text-[#0F1B3D] sm:text-2xl">{notification.title}</h1>
+                  <div className="mt-3 flex items-start gap-1.5 text-xs leading-5 text-slate-500">
+                    <Clock3 size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <time dateTime={notification.created_at}>{formattedDate(notification.created_at)}</time>
+                  </div>
+                </div>
+              </div>
             </div>
-            <h1 className="mt-4 text-2xl font-extrabold tracking-[-0.02em] text-[#0F1B3D] sm:text-3xl">
-              {notification.title}
-            </h1>
-          </div>
 
-          <div className="px-6 py-7 sm:px-8 sm:py-9">
-            <p className="whitespace-pre-wrap break-words text-[15px] leading-7 text-slate-600">
-              {notification.message || "ไม่มีรายละเอียดเพิ่มเติม"}
-            </p>
-
-            {actionUrl && (
-              <Link
-                href={actionUrl}
-                className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#3157D5]/15 transition-all hover:-translate-y-0.5 hover:bg-[#2748B8]"
-              >
-                {actionLabel}
-                <span aria-hidden="true">→</span>
-              </Link>
-            )}
-          </div>
-        </article>
-      </div>
+            <div className="px-6 pb-8 pt-6 sm:px-8">
+              <h2 className="text-xs font-semibold text-slate-500">รายละเอียดการแจ้งเตือน</h2>
+              <p className="mt-3 whitespace-pre-wrap break-words text-[15px] leading-7 text-slate-700">{notification.message || "ไม่มีรายละเอียดเพิ่มเติม"}</p>
+              {actionUrl && <div className="mt-7 border-t border-slate-100 pt-6">
+                {actionUrl && <Link href={actionUrl} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#3157D5] px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-[#2748B8] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600">{actionLabel}</Link>}
+              </div>}
+            </div>
+          </article>
+        </div>
       </main>
     </div>
   );
