@@ -15,7 +15,7 @@ export interface DraftChoiceInput {
 export interface DraftQuestionInput {
   // ★ เพิ่มใหม่: id ของคำถามเดิมใน DB — null/undefined = คำถามที่เพิ่งเพิ่มใหม่ในฟอร์ม
   // มีค่า = คำถามเดิมที่ต้องอัปเดตทับ ไม่ใช่ลบทิ้งแล้วสร้างใหม่ (ดูเหตุผลที่ updateLessonDraft)
-  questionId?: string | null;
+  questionId?: string | null;//ถ้ามีค่าเดิม หรือ คำถามใหม่
   questionText: string;
   choices: DraftChoiceInput[];
   timestampSeconds: number | null; // หน้านี้บันทึกเฉพาะควิซแทรกกลางวิดีโอ
@@ -221,7 +221,7 @@ function prepareVideoSegments(input: DraftVideoSegmentInput[]): {
 
 // ความยาววิดีโอทั้งบทเรียนหาได้จาก end เวลาที่มากที่สุดในบรรดา segment ที่ส่งมา
 // เพราะ segment สุดท้ายมักจะจบที่ความยาวเต็มของวิดีโอเสมอ (ทั้งจากโหมด AI/manual/timed)
-// ใช้เป็น fallback กรณีไม่มีค่าความยาวจริงจาก client ส่งมา
+// ใช้เป็น fallback กรณีไม่มีค่าความยาวจริงจาก client ส่งมา ช่วงย่อยๆ
 function computeVideoDurationSeconds(segments: DraftVideoSegmentInput[]): number {
   if (segments.length === 0) return 0;
   const maxEnd = Math.max(...segments.map((segment) => segment.end));
@@ -338,7 +338,7 @@ function buildChoiceRows(q: DraftQuestionInput, questionId: string) {
 async function updateExistingQuestions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   draftId: string,
-  entries: { question: DraftQuestionInput; orderIndex: number; questionId: string }[]
+  entries: { question: DraftQuestionInput; orderIndex: number; questionId: string }[]//entries คือรายการคำถามเดิมที่ต้องอัปเดต แต่ละอันมี 3 อย่าง: ตัวคำถามจากฟอร์ม (question), ลำดับข้อใหม่ (orderIndex), และ id เดิมใน DB (questionId)
 ): Promise<string | null> {
   // ตรวจให้ครบทุกข้อก่อน ค่อยเริ่มเขียน DB — จะได้ไม่เขียนไปครึ่งทางแล้วเจอข้อเสียทีหลัง
   for (const { question, orderIndex } of entries) {
@@ -346,12 +346,12 @@ async function updateExistingQuestions(
     if (invalid) return invalid;
   }
 
-  for (const { question, orderIndex, questionId } of entries) {
+  for (const { question, orderIndex, questionId } of entries) { //วนfor จนครบทุดตัวใน entries
     const { error: updateError } = await supabase
       .from("quiz_questions")
-      .update(buildQuestionColumns(question, orderIndex))
+      .update(buildQuestionColumns(question, orderIndex))//ทุกคอลัมน์ถูก เขียนทับด้วยค่าจากฟอร์มทุกครั้ง
       .eq("id", questionId)
-      .eq("lesson_draft_id", draftId);
+      .eq("lesson_draft_id", draftId);//แก้เฉพาะแถวที่ id ตรง และอยู่ใน draft นี้ พร้อมกัน
     if (updateError) {
       console.error("updateExistingQuestions (question):", updateError.message);
       return "อัปเดตคำถามไม่สำเร็จ กรุณาลองใหม่";
@@ -362,9 +362,9 @@ async function updateExistingQuestions(
     );
     if (deleteChoicesError) return "อัปเดตตัวเลือกคำตอบไม่สำเร็จ กรุณาลองใหม่";
 
-    const choiceRows = buildChoiceRows(question, questionId);
+    const choiceRows = buildChoiceRows(question, questionId);//แก้โดยลบของเก่าหมดก่อนแล้ว insert ของใหม่ทั้งหมด (ไม่ต้องเช็คว่ามีตัวเลือกเดิมอยู่แล้วหรือไม่) — กันปัญหาลำดับข้อผิดเพี้ยน
     if (choiceRows.length > 0) {
-      const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);
+      const { error: choicesError } = await supabase.from("quiz_choices").insert(choiceRows);//ตารางคือ quiz_choices
       if (choicesError) {
         console.error("updateExistingQuestions (choices):", choicesError.message);
         return "บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่";
@@ -382,7 +382,7 @@ async function batchInsertQuestions(
   // ของ array ที่ส่งเข้ามา (ไม่งั้น order_index จะชนกับข้อเดิมที่ยังอยู่)
   entries: { question: DraftQuestionInput; orderIndex: number }[]
 ): Promise<string | null> {
-  const validQuestions = entries
+  const validQuestions = entries //validQuestions รายการคำถามที่ตรวจแ้วว่าใช้ได้จริง 
     .map(({ question, orderIndex }) => ({ q: question, originalIndex: orderIndex }))
     .filter(({ q }) => q.questionText.trim());
 
@@ -404,7 +404,7 @@ async function batchInsertQuestions(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const { data, error } = await supabase
       .from("quiz_questions")
-      .insert(questionRows)
+      .insert(questionRows)//insert คำถามทั้งหมดพร้อมกัน
       .select("id, order_index");
 
     if (!error && data && data.length === questionRows.length) {
@@ -498,7 +498,7 @@ export async function saveLessonDraft(input: SaveLessonDraftInput): Promise<Save
     .update({ status: "draft" }).eq("id", input.courseId).select("id").maybeSingle();
   if (courseStatusError || !editingCourse) return { error: "เตรียมคอร์สสำหรับเพิ่มบทเรียนไม่สำเร็จ" };
 
-  // 1. หา order_index ถัดไปใน module
+  // 1. หา order_index ถัดไปใน module ขอลำดับของบทสุดท้ายในหมวดนี้
   const { data: lastLesson } = await supabase
     .from("lessons")
     .select("order_index")
@@ -960,7 +960,7 @@ export async function submitDraftForReview(draftId: string, courseId: string): P
     .maybeSingle();
 
   if (course?.status === "published") {
-    await supabase.from("courses").update({ status: "pending" }).eq("id", courseId);
+    await supabase.from("courses").update({ status: "pending" }).eq("id", courseId);// ดึงคอร์สที่เคยถูก approved กลับเข้าคิว pending
   }
 
   revalidatePath(`/dashboard/teacher/courses/${courseId}`);

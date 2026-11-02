@@ -85,7 +85,7 @@ function formatGeneratedSubchapterTitle(title: string, index: number): string {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-function buildLessonPlayerJs(//helper function อยู่บนสุดได้ ฟังชันนี้รับมา 5 พารา
+function buildLessonPlayerJs(//helper function อยู่บนสุดได้ ฟังชันนี้รับมา 5 พารา รวบรวมข้อมูลทุกอย่างของบทเรียนนี้ ให้อยู่ในรูปที่ JavaScript ฝั่งเบราว์เซอร์ (ในแพ็กเกจ SCORM) เอาไปใช้ได้ทันที
   draft: LessonDraftRow,
   lessonId: string,
   videoQuizQuestions: QuizQuestionRow[],//arrayของคำถามที่มี video_timestamp_seconds (คำถามที่ถูกตรึงไว้ตายตัวแล้วว่าจะถามอะไร ตอนไหน)
@@ -123,8 +123,8 @@ function buildLessonPlayerJs(//helper function อยู่บนสุดได
       // ปกติ) — เฉลยจะเห็นได้จาก F12 เหมือน SCORM ทั่วไปทุกตัว แต่ควิซกลางวิดีโอนี้เป็นแค่ตัวช่วย
       // ทบทวน (formative) ไม่ใช่คะแนนตัดสินใบรับรอง จึงยอมรับความเสี่ยงนี้ได้ (ห้ามทำแบบนี้กับ
       // final exam เด็ดขาด เพราะนั่นตัดสินใบรับรองจริง ต้องตรวจฝั่ง server เท่านั้น)
-      correctIndex: isMatchingOrSequencing || interactionType === "multi_select" ? -1 : sortedChoices.findIndex((c) => c.is_correct),
-      correctIndexes: interactionType === "multi_select"
+      correctIndex: isMatchingOrSequencing || interactionType === "multi_select" ? -1 : sortedChoices.findIndex((c) => c.is_correct),//multiple_choice / true_false
+      correctIndexes: interactionType === "multi_select"//multi_select
         ? sortedChoices.flatMap((c, index) => (c.is_correct ? [index] : []))
         : null,
       explanation: q.explanation ?? null,
@@ -133,7 +133,7 @@ function buildLessonPlayerJs(//helper function อยู่บนสุดได
       matching: matchingDisplay,
       sequencing: sequencingDisplay,
       dragDrop: dragDropDisplay,
-      answerData: isMatchingOrSequencing ? q.answer_data ?? null : null,
+      answerData: isMatchingOrSequencing ? q.answer_data ?? null : null,//matching / sequencing / drag_drop
     };
   });
 
@@ -198,12 +198,12 @@ function fetchJson(url, options) {
   return fetch(apiUrl(url), Object.assign({ credentials: "include" }, options || {}))
     .then(function (res) { if (!res.ok) throw new Error("Request failed: " + url); return res.json(); });
 }
-
+//ถามระบบว่านักเรียนคนนี้เคยตอบควิซในวิดีโอไปแล้วกี่ข้อ ถูกกี่ข้อ แล้วจดไว้ในตัวเล่น เพื่อให้เรียนต่อจากรอบก่อนได้โดยตัวเลขไม่เริ่มจากศูนย์
 function loadInitialAttempts() {
-  return fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts")
+  return fetchJson("/api/lessons/" + LESSON_DATA.lessonId + "/video-quiz-attempts")//เรียก API ขอรายการคำตอบที่นักเรียนเคยส่งไว้ของบทเรียนนี้
     .then(function (data) {
       (data.attempts || []).forEach(function (a) {
-        answeredQuestionIds[a.questionId] = true;
+        answeredQuestionIds[a.questionId] = true;//ทำเครื่องหมายว่าข้อนี้ตอบแล้ว (เอาไว้ไม่ถามซ้ำ)
         // [งานข้อ 11] นับสถิติที่เคยตอบไปแล้ว (รอบก่อนหน้า/session อื่น) มารวมด้วย ไม่ใช่แค่ที่
         // ตอบใน session นี้ — ตัวเลขนี้มาจาก DB ตรงๆ (แหล่งความจริงเดียวกับที่ผู้เรียน/ครูเห็น)
         quizSummary.total++;
@@ -235,7 +235,7 @@ function reportQuizSummaryToCmi() {
   if (!LESSON_DATA.quizzes.length) return;
   var percent = quizSummary.total > 0 ? Math.round((quizSummary.correct / quizSummary.total) * 100) : 0;
   ScormAPI.setValue("cmi.objectives.0.id", "video-quiz-summary");
-  ScormAPI.setValue("cmi.objectives.0.score.raw", String(percent));
+  ScormAPI.setValue("cmi.objectives.0.score.raw", String(percent));//"คะแนนดิบ" คือตัวเลขคะแนนที่ได้จริง
   ScormAPI.setValue("cmi.objectives.0.score.min", "0");
   ScormAPI.setValue("cmi.objectives.0.score.max", "100");
 }
@@ -248,8 +248,8 @@ function reportQuizSummaryToCmi() {
 // SCORM ทั่วไปที่ LMS ภายนอกอ่านค่านี้ได้อยู่แล้วโดยไม่ต้องรู้จัก endpoint ของเราเลย
 // ค่านี้ถูกใส่กลับเข้า API ผ่าน loadFromJSON ฝั่ง page.tsx ไปแล้วตั้งแต่ก่อน SCO นี้ initialize
 // ด้วยซ้ำ (ดู Effect ที่ 2 ใน play/[courseId]/[lessonId]/page.tsx) อ่านค่าแบบ sync ได้เลย
-// ไม่ต้อง fetch แยกอีกเส้นทางเหมือนเดิม
-function loadResumePosition() {
+// ไม่ต้อง fetch แยกอีกเส้นทางเหมือนเดิม ระบบว่านักเรียนดูวิดีโอค้างไว้ที่วินาทีที่เท่าไหร่
+function loadResumePosition() {//เปิดสมุด อ่านช่อง "ตำแหน่งที่ค้างไว้" ได้เป็นข้อความ
   var raw = ScormAPI.getValue("cmi.core.lesson_location");
   var seconds = raw ? Number(raw) : 0;
   return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
@@ -258,7 +258,7 @@ function loadResumePosition() {
 // เก็บแค่ setValue ไม่ commit ในนี้ — ผู้เรียกแต่ละจุด (interval ระหว่างเล่น, pause, ended,
 // beforeunload) เป็นคนตัดสินเองว่าควร commit ตอนไหน กันยิง commit ถี่เกินจำเป็นตอน setValue
 // ล้วนๆ หลายค่าติดกัน (เช่น ตอน ended ที่ setValue ทั้ง location และ lesson_status ก่อน commit
-// รวบครั้งเดียว)
+// รวบครั้งเดียว) บันทึกค่าลง lesson_location
 function savePosition(seconds) {
   ScormAPI.setValue("cmi.core.lesson_location", String(Math.floor(seconds)));
 }
@@ -291,14 +291,15 @@ function formatSessionTime() {
 // ("completed"/"passed") ต้องตั้งเป็น "suspend" เพื่อให้ LMS รู้ว่าต้อง resume (cmi.core.entry =
 // "resume") ตอนกลับเข้ามาเรียนต่อรอบหน้า ตรงกับ flow ที่งานข้อ 01/02 วางไว้อยู่แล้ว — ถ้าจบแล้วจริง
 // ตั้งเป็น "" (ค่าว่าง = จบ session ตามปกติ ตามสเปก SCORM 1.2 ไม่ใช่ "logout"/"time-out")
+//suspend แปลว่า "พักไว้" คือบอกระบบว่านักเรียนจะกลับมาเรียนต่อ ให้เก็บตำแหน่งที่ค้างไว้
 function determineExitValue() {
-  var status = ScormAPI.getValue("cmi.core.lesson_status");
+  var status = ScormAPI.getValue("cmi.core.lesson_status");//อ่านสถานะการเรียน
   return status === "completed" || status === "passed" ? "" : "suspend";
 }
 
 var quizIndexById = null;
 
-function getQuizIndexMap() {
+function getQuizIndexMap() {//บอกลำดับควิซแต่ละข้อ
   if (!quizIndexById) {
     quizIndexById = {};
     LESSON_DATA.quizzes.forEach(function (q, i) { quizIndexById[q.id] = i; });
@@ -322,7 +323,7 @@ function getQuizIndexMap() {
 // เพิ่ม/ลบ/สลับลำดับคำถามแล้ว regenerate แพ็กเกจใหม่ ข้อมูล suspend_data เก่าที่ค้างใน LMS (ของ
 // ผู้เรียนที่เคยเริ่มเรียนด้วยแพ็กเกจรุ่นก่อน) จะอ้างอิง index ผิดข้อไปทันที — ยอมรับความเสี่ยงนี้ตาม
 // ที่ระบุไว้ใน task card เพราะเป็นทางเดียวที่จะพอเก็บได้ในเพดาน 4096 ตัวอักษร
-function encodeAnsweredBitmask() {
+function encodeAnsweredBitmask() {//แปลงข้อมูล "ควิซข้อไหนตอบแล้วบ้าง"
   var indexMap = getQuizIndexMap();
   var total = LESSON_DATA.quizzes.length;
   var bits = [];
@@ -359,7 +360,7 @@ function loadAnsweredFromSuspendData() {
   }
 }
 
-function findNextUnansweredAt(currentTime) {
+function findNextUnansweredAt(currentTime) {//หาว่ามีควิซที่ต้องเด้งตอนนี้ไหม
   for (var i = 0; i < LESSON_DATA.quizzes.length; i++) {
     var q = LESSON_DATA.quizzes[i];
     if (!isTimeInRequestedChapter(q.timestampSeconds)) continue;
@@ -464,7 +465,7 @@ function sanitizeLessonHtml(html) {
   }
 }
 
-function renderLesson() {
+function renderLesson() {//ส่ชื่อบทและเนื้อหาบทเรียนลงหน้าเว็บ
   var requestedChapter = getRequestedChapter();
   document.getElementById("lesson-title").textContent = requestedChapter ? requestedChapter.title : LESSON_DATA.title;
   var lessonContentEl = document.getElementById("lesson-content");
@@ -527,7 +528,7 @@ function openQuizModal(question) { //เปิดคำถามใน modal
 }
 
 function renderQuizModalContent(question) {
-  // เคลียร์ listener ของ drag-and-drop จากคำถาม sequencing ข้อก่อนหน้า (ถ้ามีค้างอยู่) ก่อน render
+  // วาดหน้าต่างคำถามขึ้นจอ เคลียร์ listener ของ drag-and-drop จากคำถาม sequencing ข้อก่อนหน้า (ถ้ามีค้างอยู่) ก่อน render
   // เนื้อหาใหม่ทับ ไม่งั้น listener ระดับ document จะค้างสะสมทุกครั้งที่เปิดคำถามใหม่
   if (typeof activeDragCleanup === "function") { activeDragCleanup(); }
 
@@ -618,7 +619,7 @@ function renderQuizModalContent(question) {
 }
 
 // เดิมโค้ดนี้ inline อยู่ใน renderQuizModalContent ตรงๆ — แยกออกมาเป็นฟังก์ชันเดียว เพื่อให้สลับ
-// ไปเรียก renderMatchingBody/renderSequencingBody ตาม interactionType ได้ ไม่กระทบพฤติกรรมเดิมเลย
+// สร้างปุ่มตัวเลือกคำตอบของข้อปรนัย/ถูก-ผิด ไปเรียก renderMatchingBody/renderSequencingBody ตาม interactionType ได้ ไม่กระทบพฤติกรรมเดิมเลย
 function renderChoicesBody(question, body) {
   var choicesWrap = document.createElement("div");
   choicesWrap.className = "quiz-modal-choices";
@@ -661,7 +662,7 @@ function renderMatchingBody(question, body, feedback) {
   progressWrap.appendChild(progressLabel);
   progressWrap.appendChild(progressBar);
 
-  function updateProgress() {
+  function updateProgress() {//เรียก updateProgress() หนึ่งรอบเพื่อให้ป้ายเริ่มที่ "จับคู่แล้ว 0/N"
     var answeredCount = Object.keys(answers).length;
     progressLabel.textContent = "จับคู่แล้ว " + answeredCount + "/" + matching.left.length;
     progressSegs.forEach(function (seg, i) { seg.classList.toggle("is-filled", i < answeredCount); });
@@ -830,22 +831,22 @@ function renderMatchingBody(question, body, feedback) {
 // ก็สลับตำแหน่งกับแถวนั้นทันที (swap-based reorder เหมือน SortableJS) ไม่มี @dnd-kit ให้ใช้ในแพ็กเกจ
 // SCORM (ปลอด framework ทั้งหมด) เลยต้องเขียนเองด้วย vanilla JS
 function renderSequencingBody(question, body, feedback) {
-  var order = question.sequencing.map(function (item) { return item.id; });
+  var order = question.sequencing.map(function (item) { return item.id; });//รายการข้อความที่ต้องเรียง
   var textById = {};
   question.sequencing.forEach(function (item) { textById[item.id] = item.text; });
 
   var list = document.createElement("div");
   list.className = "quiz-modal-sequencing-list";
-  var dragState = null; // { id, pointerId }
+  var dragState = null; //"บันทึกการลาก" ตอนไม่ได้ลากเป็น null พอเริ่มลากจะเก็บว่าลากแถวไหน (id) ด้วยนิ้ว/เมาส์ตัวไหน (pointerId) { id, pointerId }
 
-  function renderRows() {
+  function renderRows() {//ล้างรายการเก่า แล้ววนตาม order (รายการ id ที่เตรียมไว้ในข้อความก่อนหน้า) สร้างแถวใหม่ทุกครั้งที่ลำดับเปลี่ยน
     list.innerHTML = "";
     order.forEach(function (id, index) {
-      var row = document.createElement("div");
+      var row = document.createElement("div");//สร้างแถว ติดป้าย data-id
       row.className = "quiz-modal-sequencing-row";
       row.setAttribute("data-id", id);
 
-      var badge = document.createElement("span");
+      var badge = document.createElement("span");//เลขลำดับ (badge)
       badge.className = "quiz-modal-sequencing-badge";
       badge.textContent = String(index + 1);
       row.appendChild(badge);
@@ -855,7 +856,7 @@ function renderSequencingBody(question, body, feedback) {
       text.textContent = textById[id];
       row.appendChild(text);
 
-      var handle = document.createElement("button");
+      var handle = document.createElement("button");//ปุ่มจับ + ไอคอนจุด 6 จุด
       handle.type = "button";
       handle.className = "quiz-modal-sequencing-handle";
       handle.setAttribute("aria-label", "ลากเพื่อสลับลำดับ");
@@ -890,11 +891,11 @@ function renderSequencingBody(question, body, feedback) {
         try { handle.setPointerCapture(e.pointerId); } catch (captureErr) { void captureErr; }
       });
 
-      list.appendChild(row);
+      list.appendChild(row);//ใส่แถวลงรายการ
     });
   }
 
-  function onPointerMove(e) {
+  function onPointerMove(e) {//ถ้าตัวชี้เลื่อนมาอยู่เหนือแถวอื่น จะสลับตำแหน่งของแถวที่ลากกับแถวนั้นทันที แล้ววาดรายการใหม่
     if (!dragState || e.pointerId !== dragState.pointerId) return;
     e.preventDefault();
     var hoveredEl = document.elementFromPoint(e.clientX, e.clientY);
@@ -958,7 +959,7 @@ function renderSequencingBody(question, body, feedback) {
         icon.textContent = isRowCorrect ? "✓" : "✕";
         rowEl.appendChild(icon);
       });
-    }
+    }//สร้างปุ่ม "ส่งคำตอบ" พอกดปุ่ม จะหยุดการลาก ไฮไลต์แถวที่เรียงถูก (เขียว ✓) และผิด (แดง ✕) โดยเทียบกับลำดับเฉลย แล้วส่งลำดับที่นักเรียนเรียงไปตรวจต่อ
 
     submitStructuredAnswer(question, { order: order.slice() }, [list], submitBtn);
   };
@@ -969,12 +970,12 @@ function renderSequencingBody(question, body, feedback) {
 // แล้วกด "ส่งคำตอบ" (ต่างจาก MC ที่กดตัวเลือกแล้วส่งทันที) ถูกก็ต่อเมื่อติ๊กครบและไม่เกินเฉลยเป๊ะ
 // คำตอบที่ส่งคือ { selectedChoiceIndexes: [...] } (index ตามลำดับตัวเลือกที่แสดง) =====
 function renderMultiSelectBody(question, body, feedback) {
-  var selected = {};
-  var wrap = document.createElement("div");
+  var selected = {};//สมุดจดข้อที่ติ๊กอยู่ เก็บเป็น { เลขข้อ: true }
+  var wrap = document.createElement("div");//กล่องรวมปุ่มตัวเลือก
   wrap.className = "quiz-modal-choices";
-  var btns = [];
+  var btns = [];//รายการปุ่มทั้งหมด
 
-  var countEl = document.createElement("p");
+  var countEl = document.createElement("p");//ป้ายบอกจำนวนข้อที่ติ๊กแล้ว
   countEl.className = "quiz-modal-multi-count";
 
   function pickedIndexes() {
@@ -984,7 +985,7 @@ function renderMultiSelectBody(question, body, feedback) {
   }
   function updateCount() { countEl.textContent = "เลือกแล้ว " + pickedIndexes().length + " ข้อ"; }
 
-  question.choices.forEach(function (choiceText, idx) {
+  question.choices.forEach(function (choiceText, idx) {//สร้างปุ่มตัวเลือกทีละข้อ
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "quiz-modal-choice-btn quiz-modal-multi-btn";
@@ -1000,7 +1001,7 @@ function renderMultiSelectBody(question, body, feedback) {
     label.textContent = choiceText;
     btn.appendChild(label);
 
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", function () {//เมื่อกดปุ่มตัวเลือก
       if (selected[idx]) { delete selected[idx]; } else { selected[idx] = true; }
       var on = Boolean(selected[idx]);
       btn.classList.toggle("is-selected", on);
@@ -1018,7 +1019,7 @@ function renderMultiSelectBody(question, body, feedback) {
   body.appendChild(countEl);
   body.appendChild(feedback);
 
-  var submitBtn = document.createElement("button");
+  var submitBtn = document.createElement("button");//สร้างปุ่ม "ส่งคำตอบ" พอกดปุ่ม จะตรวจว่าติ๊กครบหรือยัง ถ้ายังไม่ครบขึ้นข้อความเตือนสีแดง ถ้าติ๊กครบแล้วจะไฮไลต์ถูก/ผิด (ถ้ามีเฉลยฝังมา) แล้วส่งคำตอบไปตรวจต่อ
   submitBtn.type = "button";
   submitBtn.className = "quiz-modal-continue-btn quiz-modal-submit-btn";
   submitBtn.textContent = "ส่งคำตอบ";
@@ -1433,12 +1434,12 @@ function scormStudentResponse(question, studentAnswer) {
     text = question.dragDrop.blankIds.map(function (id) { return (studentAnswer.placements || {})[id] || ""; }).join(",");
   } else {
     return JSON.stringify(studentAnswer);
-  }
+  }//แปลงคำตอบของนักเรียนให้เป็นข้อความสั้นๆ หนึ่งบรรทัด เพื่อเอาไปเก็บในช่อง student_response
   return text.length > 250 ? text.slice(0, 250) : text;
 }
 
 // multi_select ส่งเป็น selectedChoiceIndexes ระดับบนสุด (ตรงกับ API) ส่วนชนิดอื่นส่งเป็น studentAnswer
-function buildStructuredAttemptBody(question, studentAnswer) {
+function buildStructuredAttemptBody(question, studentAnswer) {//ประกอบ "ใบส่งคำตอบ" (request body)
   if (question.interactionType === "multi_select") {
     return { questionId: question.id, selectedChoiceIndexes: studentAnswer.selectedChoiceIndexes };
   }
@@ -1449,7 +1450,7 @@ function recordAnswerLocally(question, responseValue, isCorrect, interactionKind
   // [งานข้อ 11] นับ/เขียน CMI เฉพาะครั้งแรกที่ตอบข้อนี้จริงๆ — กันนับซ้ำถ้าเผลอกดตอบซ้ำ
   var isNewAnswer = !answeredQuestionIds[question.id];
 
-  answeredQuestionIds[question.id] = true;
+  answeredQuestionIds[question.id] = true;//ติ๊กว่าตอบแล้ว (ทำทุกครั้ง)
   updateMarkerAnswered(question.id);
 
   if (isNewAnswer) {
@@ -1564,7 +1565,7 @@ function renderStructuredFeedback(question, answerEls, submitBtn, result) {
 
   if (result.explanation) {
     var explanation = document.createElement("p");
-    explanation.className = "quiz-modal-explanation";
+    explanation.className = "quiz-modal-explanation";//quiz-modal-explanation ชื่อคลาสเฉยๆ
     explanation.textContent = result.explanation;
     feedback.appendChild(explanation);
   }
@@ -1591,7 +1592,7 @@ function submitStructuredAnswer(question, studentAnswer, answerEls, submitBtn, a
   var feedback = document.getElementById("quiz-modal-feedback");
 
   var localStructuredResult = computeLocalStructuredResult(question, studentAnswer);
-  if (localStructuredResult) {
+  if (localStructuredResult) {// [ให้พกพา] ถ้าฝังเฉลยมาในเครื่อง (static quiz) ตรวจในเครื่องได้เลย ไม่ต้องรอ server — ส่วน POST
     recordAnswerLocally(question, scormStudentResponse(question, studentAnswer), localStructuredResult.isCorrect, scormInteractionKind(question));
     renderStructuredFeedback(question, answerEls, submitBtn, localStructuredResult);
 
@@ -1644,7 +1645,7 @@ function submitStructuredAnswer(question, studentAnswer, answerEls, submitBtn, a
 // สั้นพอไม่ทำให้รอนาน และไม่ยิง request รัวจนหนักเซิร์ฟเวอร์) ถ้ายังไม่สำเร็จอีกถึงค่อยโชว์ error ให้กดเอง
 // [ให้พกพา] ถ้าคำถามนี้ฝัง correctIndex มาด้วย (static quiz) ตัดจบด้วยการตรวจในเครื่องทันที ไม่ต้องรอ
 // API เลย ส่วน POST ไป server ยังยิงอยู่เหมือนเดิมแต่เปลี่ยนเป็น "เก็บสถิติเฉยๆ แบบไม่รอผล" (fire-and-
-// forget) — พังก็ไม่กระทบผู้เรียน ต่างจากเดิมที่ทุกคำตอบต้องรอ server ตัดสินก่อนเห็นผล
+// ตัวส่งคำตอบของข้อปรนัยและถูก-ผิด forget) — พังก็ไม่กระทบผู้เรียน ต่างจากเดิมที่ทุกคำตอบต้องรอ server ตัดสินก่อนเห็นผล
 function submitAnswer(question, choiceIndex, choicesWrap, attempt) {
   attempt = attempt || 0;
   Array.prototype.forEach.call(choicesWrap.children, function (btn) { btn.disabled = true; });
@@ -1751,7 +1752,7 @@ function getPlaybackBounds(video) {
   };
 }
 
-function renderProgressMarkers(video) {
+function renderProgressMarkers(video) {//วาดจุดเล็กๆ บนแถบความคืบหน้าของวิดีโอ แทนตำแหน่งที่มีควิซ จุดสีเหลืองคือยังไม่ตอบ จุดสีเขียวคือตอบแล้ว
   var container = document.getElementById("progress-markers");
   container.innerHTML = "";
   if (!video.duration || !isFinite(video.duration)) return;
@@ -2026,7 +2027,7 @@ window.addEventListener("load", function () {
   if (quizModalCloseBtn) quizModalCloseBtn.addEventListener("click", closeQuizModal);
 
   var video = document.getElementById("lesson-video");
-  video.src = LESSON_DATA.videoUrl;
+  video.src = LESSON_DATA.videoUrl;//ตรงนี้ เบราว์เซอร์เริ่มดึงวิดีโอ
   setupCustomControls(video);
 
   // [งานข้อ 20] resumeSeconds อ่านจาก CMI แบบ sync ได้เลยตอนนี้ (ไม่ต้อง fetch แยก) เพราะ
@@ -2086,7 +2087,7 @@ window.addEventListener("load", function () {
   });
 });
 `;
-}
+}//สร้าง HTML ของบทเรียน SCORM ขึ้นมาเป็น template string เพื่อใช้ในการแสดงผลในหน้าเว็บ
 const LESSON_HTML = `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -2220,31 +2221,31 @@ const SCORM_API_JS = `var ScormAPI = (function () {
     return apiHandle;
   }
 
-  function initialize() {
+  function initialize() {//เริ่มต้น session SCORM
     var api = getAPI();
     if (!api) { console.warn("SCORM API not found."); return false; }
     return api.LMSInitialize("") === "true";
   }
 
-  function setValue(key, value) {
+  function setValue(key, value) {//เขียนค่าลง cmi.core
     var api = getAPI();
     if (!api) return false;
     return api.LMSSetValue(key, value) === "true";
   }
 
-  function getValue(key) {
+  function getValue(key) {//อ่านค่าจาก cmi.core
     var api = getAPI();
     if (!api) return "";
     return api.LMSGetValue(key);
   }
 
-  function commit() {
+  function commit() {//บันทึกค่าที่ setValue ไว้ลงเซิร์ฟเวอร์ LMS
     var api = getAPI();
     if (!api) return false;
     return api.LMSCommit("") === "true";
   }
 
-  function terminate() {
+  function terminate() {//จบ session SCORM
     var api = getAPI();
     if (!api) return false;
     return api.LMSFinish("") === "true";
@@ -2740,7 +2741,7 @@ disable ปุ่มเฉยๆ ===== */
 // ============================================================
 // Manifest: ช่วงวิดีโอแต่ละช่วงเป็น SCO แยกกัน; ถ้าไม่แบ่งช่วงให้คง lesson SCO เดียวแบบเดิม
 // ============================================================
-//สร้างไฟล์ imsmanifest.xml
+//สร้างไฟล์ imsmanifest.xml อ็อบเจกต์ JSON 
 function buildManifestXml(
   draft: LessonDraftRow,
   hasQuiz: boolean,
@@ -2835,7 +2836,7 @@ function buildManifestXml(
 }
 
 // ============================================================
-// Manifest JSON ที่จะเก็บลง lessons.scorm_manifest ให้ player อ่าน
+// Manifest JSON ที่จะเก็บลง lessons.scorm_manifest ตาราง lessons ให้ player อ่าน
 // โครงสร้างต้องตรงกับ ScormMenuItem ใน src/app/play/[courseId]/[lessonId]/page.tsx
 // เพิ่ม field "type" เพื่อให้ player แยก render ควิซเป็นบล็อกต่างหากได้
 // ============================================================
@@ -2974,7 +2975,7 @@ export async function generateScormPackage(
     return { error: "Failed to fetch video quiz markers" };
   }
 
-  const typedMarkers = (markers ?? []) as unknown as VideoQuizMarkerRow[];
+  const typedMarkers = (markers ?? []) as unknown as VideoQuizMarkerRow[];//เป็นการบังคับแปลงชนิดข้อมูล (Type Casting) ให้ตัวแปรกลายเป็นประเภท อาร์เรย์ของ VideoQuizMarkerRow (VideoQuizMarkerRow[])
 
   const { data: segments, error: segmentsError } = await supabase
     .from("lesson_video_segments")
@@ -3008,7 +3009,7 @@ export async function generateScormPackage(
   const masteryScore = Number.isFinite(configuredMasteryScore) ? configuredMasteryScore : 70;
 
   const manifestXml = buildManifestXml(typedDraft, hasQuiz, masteryScore, typedSegments);
-  const lessonPlayerJs = buildLessonPlayerJs(
+  const lessonPlayerJs = buildLessonPlayerJs(//สั่งให้สร้างไฟล์ lesson-player.js โดยส่งข้อมูล draft, lessonId, videoQuizQuestions, typedMarkers, typedSegments
     typedDraft,
     lessonId,
     videoQuizQuestions,

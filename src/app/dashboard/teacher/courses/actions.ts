@@ -23,7 +23,7 @@ interface CreateCourseResult {
   moduleId?: string;
   error?: string;
 }
-
+//admin เก็บ/เอาคอร์สออกจากคลัง (ผ่าน RPC)
 export async function setCourseArchived(courseId: string, archived: boolean): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -54,7 +54,7 @@ export async function setCourseArchived(courseId: string, archived: boolean): Pr
   revalidatePath("/dashboard/student/courses");
   return {};
 }
-
+//ลบคอร์สฉบับร่าง (ผ่าน RPC, ห้ามลบถ้ามีประวัติ)
 export async function deleteDraftCourse(courseId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -84,7 +84,7 @@ export async function deleteDraftCourse(courseId: string): Promise<{ error?: str
   return {};
 }
 
-function slugify(input: string): string {
+function slugify(input: string): string { //helper: แปลง string เป็น URL-friendly
   return input
     .toString()
     .trim()
@@ -159,7 +159,7 @@ export async function createCourse(input: CreateCourseInput): Promise<CreateCour
     }
     return { error: "ระบบขัดข้องชั่วคราว ไม่สามารถบันทึกข้อมูลคอร์สได้ กรุณาลองใหม่อีกครั้งในภายหลัง" };
   }
-
+//บล็อกนี้เอา course.id ที่เพิ่งได้จากการสร้างคอร์ส ไปสร้าง module เริ่มต้นชื่อ "บทเรียนทั่วไป" ผูกเข้ากับคอร์สนั้น เพื่อให้ครูมีที่ใส่บทเรียนได้ทันทีหลังสร้างคอร์สเสร็จ
   const { data: courseModule, error: moduleError } = await supabase
     .from("modules")
     .insert({ course_id: course.id, title: "บทเรียนทั่วไป", order_index: 0 })
@@ -208,7 +208,7 @@ export interface CourseReadiness {
   examIssue: string | null;
 }
 
-export async function checkCourseReadiness(courseId: string): Promise<CourseReadiness> {
+export async function checkCourseReadiness(courseId: string): Promise<CourseReadiness> { // ได้ค่ากลับมาเป็น object ตาม shape ของ interface CourseReadiness ที่ประกาศไว้ด้านบน
   const supabase = await createClient();
 
   // ดึง lessons + exam config พร้อมกัน ไม่ต้องรอทีละอย่าง
@@ -240,19 +240,19 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
   // เช็คทุก lesson พร้อมกัน (แต่ละ lesson เช็ค marker ของตัวเองพร้อมกันด้วย) แทนการรอทีละตัว
   const lessonIssueResults = await Promise.all(
     lessons.map(async (lesson): Promise<LessonReadinessIssue | null> => {
-      const drafts = lesson.lesson_drafts ?? [];
+      const drafts = lesson.lesson_drafts ?? []; //ถ้า lesson_drafts เป็น null (lesson นี้ยังไม่มี draft เลย) ใช้ array ว่างแทน
       const latest = [...drafts].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )[0];
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() 
+      )[0]; //การหา draft ล่าสุด ของ lesson นี้
 
-      const missingVideo = !latest || !latest.video_url;
-      const markers = latest?.video_quiz_markers ?? [];
+      const missingVideo = !latest || !latest.video_url;//check ว่ามี draft ล่าสุดหรือไม่ และ draft ล่าสุดมี video_url หรือไม่ ถ้าไม่มีถือว่า missingVideo = true
+      const markers = latest?.video_quiz_markers ?? [];//ถ้า draft ล่าสุดมี video_quiz_markers ให้ใช้ array นั้น ถ้าไม่มี ให้ใช้ array ว่างแทน
 
       const markerResults = await Promise.all(
         markers.map(async (marker): Promise<LessonReadinessIssue["insufficientMarkers"][number] | null> => {
           try {
-            await loadSampledPopupQuestion(supabase, {
-              lessonId: lesson.id,
+            await loadSampledPopupQuestion(supabase, {//เรียกฟังชัน loadSampledPopupQuestion เพื่อตรวจสอบว่ามีคำถามเพียงพอสำหรับ marker นี้หรือไม่
+              lessonId: lesson.id, 
               difficulty: marker.random_difficulty,
               seed: `readiness-check-${marker.id}`,
             });
@@ -302,7 +302,7 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
       const { data: questions, error: questionsError } = await supabase
         .from("quiz_questions")
         .select("id, question_text, interaction_type, answer_data, quiz_choices(choice_text, is_correct)")
-        .in("lesson_draft_id", latestDraftIds)
+        .in("lesson_draft_id", latestDraftIds)//ดึงคำถามท้ายคอร์สที่ lesson_draft_id อยู่ใน latestDraftIds (ตัวใดก็ได้)
         .is("video_timestamp_seconds", null);
       hasCustomExamQuestions = (questions?.length ?? 0) > 0;
       if (questionsError) customExamIssue = "ตรวจสอบบททดสอบท้ายคอร์สไม่สำเร็จ กรุณาลองใหม่";
@@ -315,7 +315,7 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
         }
         if (interactionType === "sequencing") {
           const items = (question.answer_data as { items?: { text: string }[] } | null)?.items ?? [];
-          return items.filter((item) => item.text?.trim()).length < 2;
+          return items.filter((item) => item.text?.trim()).length < 2;//ช็คว่ามี item กรอกครบอย่างน้อย 2 รายการไหม
         }
         if (interactionType === "drag_drop") {
           // เช็คโครงสร้างเบา ๆ ว่าเฉลยครบ (ตัวตรวจเต็มรันตอนบันทึกแล้ว) — เขียนตรงนี้แทนการ import
@@ -327,8 +327,8 @@ export async function checkCourseReadiness(courseId: string): Promise<CourseRead
             typeof data.template !== "string" ||
             !Array.isArray(data.blanks) ||
             data.blanks.length < 1 ||
-            !correctMap ||
-            data.blanks.some((blank) => !Object.prototype.hasOwnProperty.call(correctMap, blank.id))
+            !correctMap || //ไม่มี correctMap
+            data.blanks.some((blank) => !Object.prototype.hasOwnProperty.call(correctMap, blank.id)) //มี blank ตัวไหนที่ยังไม่มีเฉลยใน correctMap
           );
         }
         if (interactionType === "multi_select") {
@@ -444,7 +444,7 @@ export async function submitCourseForReview(courseId: string): Promise<{ error?:
   if (draftIdsToSubmit.length > 0) {
     const { error: draftUpdateError } = await supabase
       .from("lesson_drafts")
-      .update({ status: "pending_review", submitted_at: submittedAt })
+      .update({ status: "pending_review", submitted_at: submittedAt })//เปลี่ยนสถานะเป็นรอตรวจและส่งเข้าตรวจ
       .in("id", draftIdsToSubmit);
     if (draftUpdateError) return { error: "อัปเดตสถานะบทเรียนไม่สำเร็จ" };
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-
+//ตำแหน่งที่นักเรียนดูวิดีโอค้างไว้ล่าสุด ของเลสสันนั้น (resume playback) แล้วส่งกลับเป็นวินาทีใน lastPositionSeconds เพื่อให้ player กระโดดไปเล่นต่อจากจุดเดิม
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ lessonId: string }> }

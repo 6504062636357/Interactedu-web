@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import QuestionBankList from "@/components/teacher/QuestionBankList";
 
-type TopicTagRow = {
+type TopicTagRow = { //object ที่ได้กลับมาจาก query นี้ หน้าตาเป็นแบบนี้
   course_id: string | null;
   lesson_id: string | null;
   courses: { title: string } | null;
@@ -38,7 +38,7 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
   // RLS จัดการ scope ให้อยู่แล้ว (owner + public + department ที่ match category)
-  // ครูเห็นเฉพาะข้อสอบที่ตัวเองสร้าง (ไม่ยุ่งกับของครูท่านอื่น) — แอดมินยังเห็นทั้งหมด
+  // ครูเห็นเฉพาะข้อสอบที่ตัวเองสร้าง (ไม่ยุ่งกับของครูท่านอื่น) — แอดมินยังเห็นข้อสอบทั้งหมด
   let bankQuery = supabase
     .from("question_bank")
     .select(`
@@ -62,7 +62,7 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
     .order("title", { ascending: true });
   const ownCourses = (ownCourseRows ?? []).map((course) => ({ id: course.id as string, title: (course.title as string) ?? "" }));
 
-  const questions = (data ?? []).map((question) => ({
+  const questions = (data ?? []).map((question) => ({ //แปลงข้อมูลที่ได้จาก query ให้เป็น object ที่ใช้ใน componentต่อ
     id: question.id,
     questionText: question.question_text,
     category: question.category,
@@ -70,7 +70,7 @@ export default async function QuestionBankPage(): Promise<ReactElement> {
     usageType: question.usage_type,
     interactionType: question.interaction_type ?? "multiple_choice",
     privacyScope: question.privacy_scope,
-    isOwner: question.owner_teacher_id === user.id,
+    isOwner: question.owner_teacher_id === user.id,//เช็คว่าข้อสอบนี้เป็นของเราเองไหม
     courseIds: ((question.question_bank_topic_tags ?? []) as unknown as TopicTagRow[])
       .map((tag) => tag.course_id)
       .filter((id): id is string => Boolean(id)),

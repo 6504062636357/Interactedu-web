@@ -286,7 +286,7 @@ export default function StandaloneScormPlayer({ params }: PlayProps) {
 
         // ต่อคิวไว้กับตัวก่อนหน้าเสมอ (ไม่ว่าตัวก่อนหน้าจะสำเร็จหรือ error ก็ยิงตัวถัดไปต่อได้ — แค่
         // ต้อง "รอให้ตัวก่อนหน้าจบก่อน" ไม่ใช่ยิงพร้อมกันหลายตัว) กันปัญหาที่ commit เก่ากว่าเสร็จช้ากว่า
-        // ทำให้ cmi_data ล่าสุดโดนทับด้วยของเก่า (ดูคอมเมนต์เต็มด้านบน setupCommitHook)
+        // ส่งความคืบหน้า ทำให้ cmi_data ล่าสุดโดนทับด้วยของเก่า (ดูคอมเมนต์เต็มด้านบน setupCommitHook)
         commitQueue = commitQueue
           .catch(() => undefined)
           .then(() =>

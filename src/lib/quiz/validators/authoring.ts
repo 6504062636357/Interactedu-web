@@ -8,7 +8,7 @@ import { parseDragDropAnswerData } from './drag-drop';
 export const MULTI_SELECT_LIMITS = { minChoices: 2, maxChoices: 10, maxChoiceLength: 300 } as const;
 
 export function validateMultiSelectAuthoring(
-  choices: { text: string; isCorrect: boolean }[] | null | undefined
+  choices: { text: string; isCorrect: boolean }[] | null | undefined //parameterตัวแปรที่จะรับค่าเข้ามาตอนฟังก์ชันถูกเรียก array ของ object แบบนี้ text,iscorrect
 ): string[] {
   const errors: string[] = [];
   if (!Array.isArray(choices)) return ['ต้องมีตัวเลือก'];
@@ -20,7 +20,7 @@ export function validateMultiSelectAuthoring(
     errors.push(`มีตัวเลือกได้ไม่เกิน ${MULTI_SELECT_LIMITS.maxChoices} ข้อ`);
   }
 
-  const seen = new Set<string>();
+  const seen = new Set<string>();//set เก็บตัวเลือกที่เจอแล้ว (ใช้เช็คซ้ำ)
   choices.forEach((c, i) => {
     const text = typeof c?.text === 'string' ? c.text.trim() : '';
     if (text === '') {
@@ -46,5 +46,5 @@ export function validateMultiSelectAuthoring(
 
 export function validateDragDropAuthoring(answerData: unknown): string[] {
   const parsed = parseDragDropAnswerData(answerData);
-  return parsed.ok ? [] : parsed.errors;
+  return parsed.ok ? [] : parsed.errors;//โยนไปให้ parseDragDropAnswerData เช็คแทน แล้วแปลงผลลัพธ์
 }

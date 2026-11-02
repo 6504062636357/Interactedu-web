@@ -15,7 +15,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const message = error instanceof Error ? error.message : "Unable to load final exam";
     return NextResponse.json({ error: message }, { status: /not found/i.test(message) ? 404 : /required/i.test(message) ? 403 : 500 });
   }
-}
+} //ขอสอบท้ายคอร์ส GET: โหลดข้อมูลคำถามที่สุ่มไว้แล้วของนักเรียนคนนี้ (ถ้าเคยสอบแล้ว) หรือโหลด config ของข้อสอบ (ถ้ายังไม่เคยสอบ)
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ courseId: string }> }) {
   const { courseId } = await params;
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!Array.isArray(body.answers)) return NextResponse.json({ error: "answers must be an array" }, { status: 400 });
 
   try {
-    const grade = await gradeCourseFinalExam(supabase, user.id, courseId, body.answers);
+    const grade = await gradeCourseFinalExam(supabase, user.id, courseId, body.answers);//เรียกฟังก์ชันตรวจคำตอบจากไฟล์ course-final-exam.ts
     let certificateIssued = false;
     let certificateId: string | null = null;
     let certificateDownloadUrl: string | null = null;
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       certificate_id: certificateId,
       certificate_download_url: certificateDownloadUrl,
       message,
-    });
+    });//ระกอบผลลัพธ์ทั้งหมดส่งกลับไปให้หน้าเว็ 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Final exam submission failed";
     const status = /not found/i.test(message) ? 404 : /required|invalid|answer every|complete every/i.test(message) ? 400 : 500;

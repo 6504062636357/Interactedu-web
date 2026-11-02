@@ -173,7 +173,7 @@ function CategoryQuestionList({
     setPage(1);
   }
 
-  function toggleSelect(id: string) {
+  function toggleSelect(id: string) { //ฟังก์ชัน "สลับการติ๊กเลือก" ของคำถามแต่ละข้อ
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -182,7 +182,7 @@ function CategoryQuestionList({
     });
   }
 
-  function toggleSelectAllOnPage() {
+  function toggleSelectAllOnPage() { 
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (allOnPageSelected) {
@@ -198,7 +198,7 @@ function CategoryQuestionList({
     setConfirmTarget({ type: "single", id });
   }
 
-  function handleBulkDelete() {
+  function handleBulkDelete() { 
     if (selectedIds.size === 0) return;
     setConfirmTarget({ type: "bulk" });
   }

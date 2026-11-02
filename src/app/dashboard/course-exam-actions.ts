@@ -126,7 +126,7 @@ export async function saveCourseFinalExam(input: {
   const { error: deleteConfigError } = await supabase
     .from("course_exam_configs")
     .delete()
-    .eq("course_id", input.courseId);
+    .eq("course_id", input.courseId);//ลบแถวที่ course_id ตรงกับคอร์สนี้
   if (deleteConfigError) return { error: `ลบกติกาสุ่มข้อสอบเดิมไม่สำเร็จ: ${deleteConfigError.message}` };
 
   for (let questionIndex = 0; questionIndex < input.questions.length; questionIndex += 1) {
@@ -135,7 +135,7 @@ export async function saveCourseFinalExam(input: {
     const { data: createdQuestion, error: questionError } = await supabase
       .from("quiz_questions")
       .insert({
-        lesson_draft_id: targetDraft.id,
+        lesson_draft_id: targetDraft.id,//ผูกคำถามนี้กับ draft ที่หาไว้ก่อนหน้า (บทเรียนสุดท้ายที่มีเนื้อหา
         question_text: question.questionText.trim(),
         explanation: question.explanation?.trim() || null,
         video_timestamp_seconds: null,

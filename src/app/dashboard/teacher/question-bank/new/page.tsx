@@ -12,7 +12,7 @@ export default async function NewQuestionBankPage(): Promise<ReactElement> {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
-  // ดึงบทเรียนของครูคนนี้ทุกคอร์ส เพื่อผูก tag
+  // ดึงบทเรียนของครูคนนี้ทุกคอร์ส เพื่อผูก tag !inner) → ดึงเฉพาะ lessons ที่ join กับ courses สำเร็จจริงๆ เท่านั้น ถ้า lesson ไหนไม่มี course คู่กันจะถูกตัดทิ้ง
   const { data: lessonsData } = await supabase
   .from("lessons")
   .select("id, title, order_index, course_id, courses!inner(title, created_by, category)")

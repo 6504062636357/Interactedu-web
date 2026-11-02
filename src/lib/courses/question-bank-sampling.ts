@@ -76,12 +76,12 @@ export interface MatchingDisplay {
 // drag_drop: สลับลำดับคลังคำแบบ deterministic (seed ต่อคนต่อข้อ) และ "ไม่ส่ง correct_map" ออกไปเด็ดขาด
 // ข้อมูลเฉลยผิดรูปแบบ (ไม่ควรเกิด เพราะตรวจตอนบันทึกแล้ว) = throw ข้อความสุภาพ + log รายละเอียดไว้ฝั่ง server
 // ไม่ปล่อยให้นักเรียนเจอข้อที่เล่นไม่ได้
-export function buildDragDropDisplay(
+export function buildDragDropDisplay(//สลับลำดับคำในคลังคำ (words) แบบสุ่มที่ทำซ้ำได้ และกรองเฉลยออก
   interactionType: string,
   answerData: unknown,
   seedNumber: number,
   questionId: string
-): DragDropDisplay | null {
+): DragDropDisplay | null { 
   if (interactionType !== "drag_drop") return null;
   const parsed = parseDragDropAnswerData(answerData);
   if (!parsed.ok) {
@@ -110,7 +110,7 @@ export function buildMatchingSequencingDisplay(
       left: seededShuffle(pairs.map((p) => p.left), seedNumber + seedFromString(questionId + ":left")),
       rightOptions: seededShuffle(pairs.map((p) => p.right), seedNumber + seedFromString(questionId + ":right")),
     };
-  } else if (interactionType === "sequencing" && answerData) {
+  } else if (interactionType === "sequencing" && answerData) {//สลับลำดับรายการทั้งหมด (ด้วย seed :items)
     const items = (answerData as SequencingAnswerData).items ?? [];
     sequencingDisplay = seededShuffle(items, seedNumber + seedFromString(questionId + ":items"));
   }
@@ -168,7 +168,7 @@ export class InsufficientQuestionBankError extends Error {
           .join("\n")
     );
     this.name = "InsufficientQuestionBankError";
-  }
+  }//สำหรับแต่ละ bucket: คำนวณจำนวนที่ขาด = ต้องการ - มีอยู่จริง (needed - available)
 }
 export async function loadSampledFinalExamQuestions(
   supabase: SupabaseClient,
@@ -227,11 +227,11 @@ export async function loadSampledFinalExamQuestions(
   const buckets: { filter: (q: BankQuestionRow) => boolean; count: number; label: string; constraintLessonId?: string; constraintDifficulty?: Difficulty }[] =
     params.customConstraints.map((constraint) => ({
       filter: (q) =>
-        q.difficulty === constraint.difficulty &&
+        q.difficulty === constraint.difficulty && //ต้องมีระดับความยากตรงกับที่ครูเลือก
         (constraint.lessonId
-          ? q.question_bank_topic_tags.some((tag) => tag.lesson_id === constraint.lessonId)
-          : q.question_bank_topic_tags.some((tag) => tag.course_id === params.courseId)),
-      count: constraint.count,
+          ? q.question_bank_topic_tags.some((tag) => tag.lesson_id === constraint.lessonId)//อันนี้ final exam เจาะจงเลือกบทเรียนที่ผูกกับคำถามไว้
+          : q.question_bank_topic_tags.some((tag) => tag.course_id === params.courseId)),//มี tag อย่างน้อย 1 ตัวที่ผูกกับคอร์สนี้ (ไม่สนว่าบทไหน — เพราะเลือก "ทั้งคอร์ส" ไว้)”
+      count: constraint.count,//ต้องการกี่ข้อสำหรับกติกานี้
       label: constraint.lessonId
         ? `${lessonLabelById.get(constraint.lessonId) ?? `บทเรียน ${constraint.lessonId}`} ระดับ ${constraint.difficulty}`
         : `ทั้งคอร์ส ระดับ ${constraint.difficulty}`,
@@ -246,18 +246,18 @@ export async function loadSampledFinalExamQuestions(
   const sufficientBuckets: { candidates: BankQuestionRow[]; count: number; label: string; specific: boolean }[] = [];
 
   for (const bucket of buckets) {
-    const candidates = pool.filter(bucket.filter);
+    const candidates = pool.filter(bucket.filter);//candidates=คำถามที่ตรงเงื่อนไขที่ครูตั้ง
     if (candidates.length < bucket.count) {
       // สร้าง diagnostics ละเอียด เฉพาะตอน error เท่านั้น (ไม่เปลืองถ้าไม่ error) เพื่อช่วยครู/แอดมินไล่หาสาเหตุ
       const totalInBankForCourse = pool.filter((q) =>
         q.question_bank_topic_tags.some((tag) => tag.course_id === params.courseId)
-      ).length;
+      ).length;//นับว่าในคลังมีคำถามที่ผูกกับคอร์สนี้ (ไม่สนบท/ระดับความยาก) ทั้งหมดกี่ข้อ
       const matchingDifficultyOnly = bucket.constraintDifficulty
         ? pool.filter((q) => q.difficulty === bucket.constraintDifficulty).length
-        : 0;
+        : 0;//นับว่าในคลังทั้งระบบ (ไม่สนบท/คอร์ส) มีคำถามระดับใดๆกี่ข้อ
       const matchingLessonTagOnly = bucket.constraintLessonId
         ? pool.filter((q) => q.question_bank_topic_tags.some((tag) => tag.lesson_id === bucket.constraintLessonId)).length
-        : 0;
+        : 0;//นับว่าในคลังทั้งระบบ (ไม่สนระดับความยาก) มีคำถามที่ผูกกับบท กี่ข้อ
 
       let note = "ไม่พบสาเหตุที่ชัดเจน โปรดตรวจสอบคลังข้อสอบด้วยตนเอง";
       if (bucket.constraintLessonId) {

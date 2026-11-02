@@ -170,7 +170,7 @@ export default function LessonDraftForm({
       dragDropForms[q.key] ??
       parseDragDropToForm(q.answerData) ?? { template: "", answers: [], distractors: [] }
     );
-  }
+  }//เช็คว่าคำถามนี้เคยมีฟอร์ม drag_drop อยู่แล้วหรือยัง ถ้าไม่มีก็สร้างฟอร์มเปล่าให้
 
   const [saving, setSaving] = useState<boolean>(false);
   const [savedDraftId, setSavedDraftId] = useState<string | null>(initialData?.draftId ?? null);
@@ -199,7 +199,7 @@ export default function LessonDraftForm({
     if (!videoPreviewUrl) return;
     return () => URL.revokeObjectURL(videoPreviewUrl);
   }, [videoPreviewUrl]);
-  
+  //จัดการตอนครูเลือกไฟล์วิดีโอใหม่ มาแทนวิดีโอเดิมของบทเรียน (จาก <input type="file">)
   const handleVideoChange = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -250,23 +250,23 @@ export default function LessonDraftForm({
   function removeQuestion(setter: typeof setVideoQuizQuestions, key: string): void {
     markDirty();
     setter((prev) => prev.filter((q) => q.key !== key));
-  }
+  }//ลบคำถามข้อที่เลือก (key) ออกจาก state ของคำถามในวิดีโอ
 
   function updateQuestionText(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
     markDirty();
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, questionText: text } : q)));
-  }
+  }//update คำถามข้อที่เลือก (key) ด้วยข้อความใหม่ (text) — ใช้กับ input/textarea ของคำถาม
 
   function updateQuestionExplanation(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, explanation: text || null } : q)));
     markDirty();
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, explanation: text || null } : q)));
-  }
+  }//แก้ไขคำอธิบาย (explanation) ของคำถามข้อหนึ่ง
 
   function updateQuestionImageCaption(setter: typeof setVideoQuizQuestions, key: string, text: string): void {
     markDirty();
     setter((prev) => prev.map((q) => (q.key === key ? { ...q, imageCaption: text || null } : q)));
-  }
+  }//แก้ไขคำบรรยายใต้ภาพ (imageCaption) ของคำถามข้อหนึ่ง
   function updateQuestionPins(
     setter: typeof setVideoQuizQuestions,
     key: string,
@@ -388,7 +388,7 @@ export default function LessonDraftForm({
         if (q.key !== key) return q;
         const data = (q.answerData as MatchingAnswerData | null | undefined) ?? { pairs: [] };
         return { ...q, answerData: { pairs: data.pairs.map((p, i) => (i === index ? { ...p, [field]: value } : p)) } };
-      })
+      })//แก้ field เดียวของ pair ที่ตำแหน่ง index
     );
   }
   function addMatchingPair(setter: typeof setVideoQuizQuestions, key: string): void {
@@ -398,7 +398,7 @@ export default function LessonDraftForm({
         if (q.key !== key) return q;
         const data = (q.answerData as MatchingAnswerData | null | undefined) ?? { pairs: [] };
         return { ...q, answerData: { pairs: [...data.pairs, { left: "", right: "" }] } };
-      })
+      })//เติม object ใหม่ว่างๆ ({left:””, right:””}) ต่อท้าย คือ "เอาคู่เดิมทุกคู่มา แล้วเพิ่มคู่ใหม่ (ว่างเปล่า) อีก 1 คู่ไปต่อท้าย"
     );
   }
   function removeMatchingPair(setter: typeof setVideoQuizQuestions, key: string, index: number): void {
@@ -408,7 +408,7 @@ export default function LessonDraftForm({
         if (q.key !== key) return q;
         const data = (q.answerData as MatchingAnswerData | null | undefined) ?? { pairs: [] };
         return { ...q, answerData: { pairs: data.pairs.filter((_, i) => i !== index) } };
-      })
+      })//.filter() — คัดเอาเฉพาะคู่ที่ตำแหน่ง (i) ไม่ตรงกับ index ที่จะลบ
     );
   }
 
@@ -421,9 +421,9 @@ export default function LessonDraftForm({
       prev.map((q) => {
         if (q.key !== key) return q;
         const data = (q.answerData as SequencingAnswerData | null | undefined) ?? { items: [], correct_order: [] };
-        const items = data.items.map((item, i) => (i === index ? { ...item, text } : item));
+        const items = data.items.map((item, i) => (i === index ? { ...item, text } : item));//แก้ text ของรายการที่ตำแหน่ง index
         return { ...q, answerData: { items, correct_order: items.map((item) => item.id) } };
-      })
+      })//แก้ไขข้อความของรายการที่ต้องเรียงลำดับ correct_order ไม่ได้เก็บไว้จากที่อื่นหรือคำนวณซับซ้อน แค่เอา id ของทุก item ในลำดับปัจจุบันมาเรียงเป็น array (items.map((item) => item.id))
     );
   }
   function addSequencingItem(setter: typeof setVideoQuizQuestions, key: string): void {
@@ -432,7 +432,7 @@ export default function LessonDraftForm({
       prev.map((q) => {
         if (q.key !== key) return q;
         const data = (q.answerData as SequencingAnswerData | null | undefined) ?? { items: [], correct_order: [] };
-        const items = [...data.items, { id: `item-${data.items.length}`, text: "" }];
+        const items = [...data.items, { id: `item-${data.items.length}`, text: "" }];//การสร้าง id ของรายการใหม่
         return { ...q, answerData: { items, correct_order: items.map((item) => item.id) } };
       })
     );
@@ -443,12 +443,13 @@ export default function LessonDraftForm({
       prev.map((q) => {
         if (q.key !== key) return q;
         const data = (q.answerData as SequencingAnswerData | null | undefined) ?? { items: [], correct_order: [] };
+        // ลบรายการที่ตำแหน่ง index ออกจาก array ของ items
         const items = data.items.filter((_, i) => i !== index).map((item, i) => ({ id: `item-${i}`, text: item.text }));
         return { ...q, answerData: { items, correct_order: items.map((item) => item.id) } };
       })
     );
   }
-  function moveSequencingItem(setter: typeof setVideoQuizQuestions, key: string, index: number, delta: number): void {
+  function moveSequencingItem(setter: typeof setVideoQuizQuestions, key: string, index: number, delta: number): void {//ดึงออกแล้วแทรก
     markDirty();
     setter((prev) =>
       prev.map((q) => {
@@ -490,14 +491,14 @@ export default function LessonDraftForm({
   //   const seconds = videoRef.current ? Math.floor(videoRef.current.currentTime) : 0;
   //   setVideoQuizQuestions((prev) => [...prev, createEmptyQuestion(seconds)]);
   // }
-    function handleAddQuizAtCurrentTime(): void {
+    function handleAddQuizAtCurrentTime(): void {//เปิด modal ปักหมุดแทนการสร้างคำถามใหม่ทันที
     const seconds = videoRef.current ? Math.floor(videoRef.current.currentTime) : 0;
     setPinModalTimestamp(seconds);
     setPinModalMode("custom");
     setCustomQuestionType("multiple_choice");
-    setSelectedBankQuestionId(null);
+    setSelectedBankQuestionId(null);//ล้างคำถามจากคลังที่เคยเลือกไว้
     setBankOptions([]);
-    setBankDifficultyFilter("all");
+    setBankDifficultyFilter("all");//ล้างตัวกรองความยาก
     setPinModalOpen(true);
   }
 
@@ -516,13 +517,13 @@ export default function LessonDraftForm({
     }
   }
 
-  function confirmPinModal(): void {
+  function confirmPinModal(): void {//ปะกคำถามตามเวลที่เลือกใย modal
     markDirty();
     if (pinModalMode === "custom") {
-      setVideoQuizQuestions((prev) => [...prev, createEmptyQuestion(pinModalTimestamp, customQuestionType)]);
-    } else if (pinModalMode === "bank_manual") {
+      setVideoQuizQuestions((prev) => [...prev, createEmptyQuestion(pinModalTimestamp, customQuestionType)]);//เพิ่ม คำถามเปล่า ต่อท้ายลิสต์ ผูกกับเวลาที่เลือก (pinModalTimestamp) และประเภทที่เลือก (customQuestionType)
+    } else if (pinModalMode === "bank_manual") {//หยิบคำถามจากคลัง (bank_manual) มาใส่ในบทเรียน
       const picked = bankOptions.find((q) => q.id === selectedBankQuestionId);
-      if (!picked) return;
+      if (!picked) return;//หาคำถามที่ครูเลือกไว้จากรายการ bankOptions
       // ===== แก้บั๊ก: เดิม copy มาแค่ choices/imageUrl — คำถามแบบจับคู่/เรียงลำดับจากคลังเลยถูกตีเป็น
       // ปรนัยไม่มีตัวเลือกไปเงียบๆ (ไม่มี interactionType/answerData ติดมาด้วย) ตอนนี้ copy ทุกฟิลด์
       // รวมคำบรรยาย/หมุดบนรูปด้วย ให้ตรงกับคำถามต้นฉบับในคลังจริงๆ =====
@@ -570,7 +571,7 @@ export default function LessonDraftForm({
     const sortedVideoQuizzes = useMemo(
     () => [...videoQuizQuestions].sort((a, b) => (a.timestampSeconds ?? 0) - (b.timestampSeconds ?? 0)),
     [videoQuizQuestions]
-  );
+  );//เรียงลำดับคำถามจากเวลาน้อยไปมาก
   const sortedRandomMarkers = useMemo(
     () => [...randomMarkers].sort((a, b) => a.timestampSeconds - b.timestampSeconds),
     [randomMarkers]
@@ -714,7 +715,7 @@ export default function LessonDraftForm({
           imagePins: imageUrl && imagePins && imagePins.length > 0 ? imagePins : null,
           interactionType,
           answerData,
-        };
+        };//ส่งเข้า server
       }
     );
 
@@ -735,11 +736,11 @@ export default function LessonDraftForm({
 
     // ความยาววิดีโอจริงที่ browser จับได้จาก <video> ตอนโหลด metadata (videoDuration)
     // ส่งไปเก็บที่ server ด้วย เพราะก่อนหน้านี้ server คำนวณความยาวจาก video segment
-    // เท่านั้น ซึ่งบทเรียนส่วนใหญ่ไม่ได้แบ่ง segment เลยได้ 0 เสมอ
+    // เท่านั้น ซึ่งบทเรียนส่วนใหญ่ไม่ได้แบ่ง segment เลยได้ 0 เสมอ ปัดค ยาววิดิโอเป็นจำนวนเต็ม
     const videoDurationSeconds = videoDuration > 0 ? Math.round(videoDuration) : 0;
-
+//แปลว่าบทเรียนนี้เคยบันทึกลงฐานข้อมูลแล้ว
     return savedDraftId && savedLessonId
-      ? await updateLessonDraft({
+      ? await updateLessonDraft({//(ใช่)บอกว่าแก้ draft/lesson ไหน
           courseId,
           draftId: savedDraftId,
           lessonId: savedLessonId,
@@ -751,7 +752,7 @@ export default function LessonDraftForm({
           questions: allQuestions,
           randomMarkers: allRandomMarkers,
         })
-      : await saveLessonDraft({
+      : await saveLessonDraft({//(ไม่ )ยังไม่เคยสร้างบทเรียนนี้มาก่อน บอกว่าสร้างในหมวดไหน
           courseId,
           moduleId,
           title,
@@ -768,7 +769,7 @@ export default function LessonDraftForm({
     setError(null);
     setSubmitError(null);
     setSaving(true);
-    const result = await saveCurrentDraft();
+    const result = await saveCurrentDraft();//ตรวจข้อมูล → จัดรูปแบบ → ส่งไปสร้างหรืออัปเดตที่เซิร์ฟเวอร์
     setSaving(false);
 
     if (result.error) {

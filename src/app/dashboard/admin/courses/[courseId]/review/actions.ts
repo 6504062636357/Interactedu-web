@@ -30,7 +30,7 @@ export async function approveCourse(courseId: string): Promise<{ error?: string 
     .maybeSingle();
 
   if (!courseInfo) return { error: "ไม่พบคอร์สนี้" };
-  const isOwnCourse = courseInfo.created_by === user!.id;
+  const isOwnCourse = courseInfo.created_by === user!.id;//เช็คว่า คนที่กด "อนุมัติ" คือเจ้าของคอร์สเองหรือเปล่า user! (ใส่ ! เพราะผ่าน requireAdmin() มาแล้วมั่นใจว่า user ไม่เป็น null แน่ — non-null assertion)
   const readiness = await checkCourseReadiness(courseId);
   if (!readiness.ready) {
     return { error: readiness.examIssue ?? (!readiness.hasLessons ? "กรุณาเพิ่มบทเรียนก่อนเผยแพร่" : "กรุณาเพิ่มวิดีโอและตรวจสอบควิซของทุกบทให้ครบก่อนเผยแพร่") };
@@ -189,7 +189,7 @@ export async function rejectCourse(courseId: string, reason: string): Promise<{ 
   const draftIds = lessons
     .flatMap(
       (l) => (l as unknown as { lesson_drafts: { id: string; status: string }[] }).lesson_drafts ?? []
-    )
+    )//.flatMap() เพื่อรวบ lesson_drafts ของทุกบทเรียนให้แบนเป็น array เดียว
     .filter((d) => d.status === "submitted" || d.status === "pending_review")
     .map((d) => d.id);
 

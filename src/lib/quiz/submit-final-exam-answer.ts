@@ -50,4 +50,4 @@ export async function submitFinalExamAnswer({
   }
 
   return { attempt_question: data, result };
-}
+}//รับคำตอบของนักเรียน 1 ข้อ ตรวจ แล้วบันทึกลงฐานข้อมูล

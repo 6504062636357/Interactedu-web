@@ -28,7 +28,7 @@ import type { DragDropDisplay, ExamInteractionType } from "@/types/interaction";
 import DragDropQuestion from "@/components/courses/DragDropQuestion";
 import { isComplete, sanitizePlacements } from "@/lib/quiz/drag-drop-state";
 import { splitTemplate } from "@/lib/quiz/drag-drop-form";
-
+//รวบรวมคำตอบที่นักเรียนกรอกไว้ แปลงให้ตรงรูปแบบที่ server ต้องการ แล้วส่งไปตรวจ
 // ===== เพิ่มใหม่: หมุดตัวเลขชี้เป้าบนภาพ (อ่านอย่างเดียวฝั่งนักเรียน ไม่มี logic แก้ไข) =====
 interface ImagePin { id: string; x: number; y: number }
 

@@ -175,7 +175,7 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
       }
 
       setSavingStep("กำลังสร้างคอร์ส...");
-      const result = await createCourse({
+      const result = await createCourse({ //เรียกฟังชันและส่งค่าเข้าไป
         title,
         courseCode,
         category: finalCategory,
@@ -229,7 +229,7 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
                 onChange={(event) => {
                   // แปลงเป็นตัวพิมพ์ใหญ่ให้อัตโนมัติตามมาตรฐานรหัสวิชา (react-2026 -> REACT-2026)
                   setCourseCode(event.target.value.toUpperCase());
-                  setFieldErrors((prev) => (prev.courseCode ? { ...prev, courseCode: undefined } : prev));
+                  setFieldErrors((prev) => (prev.courseCode ? { ...prev, courseCode: undefined } : prev)); //เคลียร์ข้อความ error เก่าทิ้ง
                 }}
                 placeholder="เช่น WEB101"
                 aria-invalid={!!fieldErrors.courseCode}

@@ -111,7 +111,7 @@ async function loadCourseExamData(
   if (enrollmentError) throw new Error(enrollmentError.message);
   if (!enrollment) throw new Error("An approved enrollment is required");
 
-  let { data: course, error: courseError } = await supabase
+  let { data: course, error: courseError } = await supabase // โหลดข้อมูลคอร์สใช้ let (ไม่ใช่ const) เพราะค่า course/courseError อาจถูกเขียนทับใหม่ถ้าเข้าเงื่อนไข fallback
     .from("courses")
     .select("id, title, certificate_enabled, certificate_pass_percentage")
     .eq("id", courseId)
@@ -125,7 +125,7 @@ async function loadCourseExamData(
   }
   if (courseError) throw new Error(courseError.message);
   if (!course) throw new Error("Course not found");
-
+//ดึงบทเรียนทั้งหมด เรียงตาม order_index
   const { data: lessonsData, error: lessonsError } = await supabase
     .from("lessons")
     .select("id, title, order_index, scorm_version")
@@ -134,7 +134,7 @@ async function loadCourseExamData(
   if (lessonsError) throw new Error(lessonsError.message);
   const lessons = (lessonsData ?? []) as LessonRow[];
   if (lessons.length === 0) throw new Error("Course has no lessons");
-
+//trackingData — ดึงสถานะว่านักเรียนคนนี้ (enrollment.id) ดูวิดีโอจบบทไหนไปแล้วบ้าง (video_completed)
   const lessonIds = lessons.map((lesson) => lesson.id);
   const [{ data: draftsData, error: draftsError }, { data: trackingData, error: trackingError }] =
     await Promise.all([
@@ -150,7 +150,7 @@ async function loadCourseExamData(
     ]);
   if (draftsError) throw new Error(draftsError.message);
   if (trackingError) throw new Error(trackingError.message);
-
+//หา draft ล่าสุดของแต่ละบทเรียน
   const latestDraftByLesson = new Map<string, DraftRow>();
   for (const draft of (draftsData ?? []) as DraftRow[]) {
     const current = latestDraftByLesson.get(draft.lesson_id);
@@ -173,7 +173,7 @@ async function loadCourseExamData(
   //   : { data: [], error: null };
   // if (questionsError) throw new Error(questionsError.message);
   // build_mode/total_questions/preset_type ยังอยู่ในคอลัมน์เดิม (ยุบโหมด preset ออกแล้ว ไม่ต้อง
-  // migrate schema) แต่ตอนสุ่มจริงใช้แค่ custom_constraints เป็นแหล่งความจริงเดียวพอ
+  // migrate schema) แต่ตอนสุ่มจริงใช้แค่ custom_constraints เป็นแหล่งความจริงเดียวพอ ดึง examConfig เพื่อตัดสินเส้นทาง
   const { data: examConfig, error: examConfigError } = await supabase
   .from("course_exam_configs")
   .select("custom_constraints")
@@ -296,7 +296,7 @@ export async function getCourseFinalExam(
   courseId: string
 ): Promise<CourseFinalExamOverview> {
   const data = await loadCourseExamData(supabase, userId, courseId, false);
-  const eligible = data.completedLessonIds.size === data.lessons.length;
+  const eligible = data.completedLessonIds.size === data.lessons.length;//check ว่าเรียนครบทุกบทเรียนหรือยังถึงจะมีสิทธิ์ทำข้อสอบปลายคอร์ส
 
   return {
     courseId,
@@ -312,7 +312,7 @@ export async function getCourseFinalExam(
   const lessonA = data.lessonById.get(resolveLessonId(a, data.lessonIdByDraft))?.order_index ?? 0;
   const lessonB = data.lessonById.get(resolveLessonId(b, data.lessonIdByDraft))?.order_index ?? 0;
   return lessonA - lessonB || a.order_index - b.order_index;
-})
+})//เรียงตามบทก่อน (บท 1 มาก่อนบท 2) ถ้าอยู่บทเดียวกัน ค่อยเรียงตามลำดับคำถามในบทนั้น ค่าน้อยกว่า 0 → a มาก่อน b ค่ามากกว่า 0 → b มาก่อน a ค่าเท่ากับ 0 → ถือว่าเท่ากัน ไม่ต้องสลับ
 .map((question) => {
   const lessonId = resolveLessonId(question, data.lessonIdByDraft);
           return {
@@ -356,7 +356,7 @@ export async function gradeCourseFinalExam(
     if (typeof answer.questionId !== "string") throw new Error("Invalid exam answer");
     answersByQuestion.set(answer.questionId, answer);
   }
-  if (answersByQuestion.size !== data.questions.length) throw new Error("Answer every question before submitting");
+  if (answersByQuestion.size !== data.questions.length) throw new Error("Answer every question before submitting");//จำนวนคำตอบที่ไม่ซ้ำกัน (Map.size) เท่ากับจำนวนคำถามทั้งหมดไหม — ถ้าน้อยกว่า แปลว่านักเรียนตอบไม่ครบทุกข้อ
 
   const details = data.questions.map((question) => {
     const answer = answersByQuestion.get(question.id);
@@ -368,7 +368,7 @@ export async function gradeCourseFinalExam(
     if (interactionType === "matching" || interactionType === "sequencing") {
       const studentAnswer: MatchingStudentAnswer | SequencingStudentAnswer =
         interactionType === "matching"
-          ? { pairs: answer.matchingPairs ?? [] }
+          ? { pairs: answer.matchingPairs ?? [] }//
           : { order: answer.sequenceOrder ?? [] };
       const result = validateAnswer(
         { id: question.id, interaction_type: interactionType, answer_data: question.answerData ?? null },
@@ -386,9 +386,9 @@ export async function gradeCourseFinalExam(
     // ===== drag_drop: ตรวจผ่าน validateAnswer() ด้วย answer_data จริงที่เก็บไว้ฝั่ง server (ไม่ใช่ display ที่ตัดเฉลยแล้ว)
     // input ผิดรูปแบบ (ยังเติมไม่ครบ/ใช้คำซ้ำ/ช่องแปลกปลอม) → "Invalid exam answer" (route ตอบ 400) + log เหตุผลไว้ฝั่ง server =====
     if (interactionType === "drag_drop") {
-      const result = validateAnswer(
-        { id: question.id, interaction_type: "drag_drop", answer_data: question.answerData ?? null },
-        { placements: answer.dragDropPlacements ?? {} }
+      const result = validateAnswer(//validateAnswer คือ ฟังก์ชันกลางสำหรับตรวจคำตอบ
+        { id: question.id, interaction_type: "drag_drop", answer_data: question.answerData ?? null },//ตัวคำถามพร้อมเฉลย
+        { placements: answer.dragDropPlacements ?? {} }//ตัวคำตอบนักเรียน (map ของ id → id)
       );
       if (result.error) {
         console.warn(`[final-exam] invalid drag_drop answer — question: ${question.id}: ${result.error}`);
@@ -420,7 +420,7 @@ export async function gradeCourseFinalExam(
     }
 
     // ทางเดิม: multiple_choice / true_false ตรวจแบบ choice-index ตรงๆ เหมือนเดิมทุกอย่าง
-    const selectedChoiceIndex = answer.selectedChoiceIndex;
+    const selectedChoiceIndex = answer.selectedChoiceIndex;//ดึงคำตอบนักเรียนออกมา
     if (!Number.isInteger(selectedChoiceIndex) || (selectedChoiceIndex as number) < 0) {
       throw new Error("Invalid exam answer");
     }
@@ -536,7 +536,7 @@ export async function gradeCourseFinalExam(
   // "ผลสอบปลายคอร์ส" ไม่ผูกกับบทเรียนไหนอีกต่อไป (ก่อนหน้านี้ยัดใส่ scorm_tracking ของ
   // "บทเรียนสุดท้ายตามลำดับอาเรย์" ซึ่งพังถ้าครูเพิ่มบทใหม่ทีหลัง หรือ throw ถ้า enrollment
   // ไม่เคยมีแถว scorm_tracking ของบทนั้นมาก่อน — ทั้งสองปัญหาหายไปเพราะ quiz_attempts
-  // ผูกกับ enrollment_id ตรงๆ ไม่ต้องอิงบทเรียนใดบทเรียนหนึ่งเลย)
+  // ผูกกับ enrollment_id ตรงๆ ไม่ต้องอิงบทเรียนใดบทเรียนหนึ่งเลย) เก็บแค่ภาพรวม (ใคร สอบตอนไหน ได้กี่คะแนน ผ่านไหม)
   const { data: quizAttempt, error: quizAttemptError } = await supabase
     .from("quiz_attempts")
     .insert({
@@ -565,7 +565,7 @@ export async function gradeCourseFinalExam(
       .from("quiz_attempt_questions")
       .insert(attemptQuestionRows);
     if (answerSaveError) throw new Error(answerSaveError.message);
-  } else {
+  } else {//มาจาก quiz_questions (โหมดพิมพ์เอง)
     // ทางเดิม: ไม่มี examConfig = คำถามยังมาจาก quiz_questions (โหมด "กำหนดข้อสอบเอง")
     // quiz_attempt_questions.question_id มี FK ผูกกับ question_bank เท่านั้น จะยัด id จาก
     // quiz_questions ลงไปตรงๆ ไม่ได้ (FK จะพัง) รายละเอียดรายข้อของทางนี้เลยยังคงไปที่
@@ -611,7 +611,7 @@ export async function gradeCourseFinalExam(
   //
   // เป็นการเสริม data model ให้ครบ ไม่ใช่ผลตัดสินสอบ (คะแนนจริงบันทึกลง quiz_attempts สำเร็จไปแล้ว
   // ก่อนหน้านี้) ถ้าขั้นตอนนี้พลาดจึงแค่ log ไว้ ไม่ทำให้การตรวจข้อสอบทั้งหมดกลายเป็น error
-  try {
+  try {//Sync คะแนนกลับเข้า SCORM cmi_data
     const { data: trackingRows, error: trackingFetchError } = await supabase
       .from("scorm_tracking")
       .select("id, lesson_id, cmi_data")

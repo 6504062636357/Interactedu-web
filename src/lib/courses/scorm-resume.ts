@@ -26,7 +26,7 @@ function flattenPlayableItems(items: ResumeManifestItem[]): ResumeManifestItem[]
   return result;
 }
 
-/** Selects the SCO that should open when a learner returns to a lesson. */
+//เลือกว่าเปิดบทเรียนแล้วจะเริ่มเล่น SCO (ช่วง) ไหน
 export function selectResumeScoPath(input: ResumeSelectionInput): string | null {
   const allItems = flattenPlayableItems(input.manifest?.items ?? []);
   const playableItems = input.scormSource === "imported"
@@ -41,7 +41,7 @@ export function selectResumeScoPath(input: ResumeSelectionInput): string | null 
 
   const completed = new Set(input.completedScos);
   const incompleteItems = playableItems.filter((item) => item.href && !completed.has(item.href));
-
+  //คัดเอาเฉพาะช่วงที่ผู้เรียนยังเรียนไม่จบ
   // Generated chapters share one video timeline. Prefer the unfinished chapter
   // containing the saved CMI location so a learner who skipped around returns
   // to the exact chapter they last watched.
@@ -51,7 +51,7 @@ export function selectResumeScoPath(input: ResumeSelectionInput): string | null 
       typeof item.endSeconds === "number" &&
       input.resumeSeconds >= item.startSeconds &&
       input.resumeSeconds < item.endSeconds
-    );
+    );//เป็นวินาทีที่อยู่ระหว่างตัวเริ่มและจบ เอามาเป็นวิดิทีที่เล่นค้างไว้
     if (itemAtSavedTime?.href) return itemAtSavedTime.href;
   }
 

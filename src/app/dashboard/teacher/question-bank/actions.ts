@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 import { validateDragDropAuthoring, validateMultiSelectAuthoring } from "@/lib/quiz/validators/authoring";
 import { DRAG_DROP_ENABLED, MULTI_SELECT_ENABLED } from "@/lib/quiz/config/rollout";
-
+//สร้าง, แก้ไข, ลบ, และคัดลอกคำถาม
 // แปลง error ดิบจากฐานข้อมูล (เช่น "violates check constraint ...") เป็นข้อความที่ครูอ่านรู้เรื่อง
 // — ข้อความเทคนิคเต็มยังถูก log ฝั่งเซิร์ฟเวอร์ไว้ให้ผู้ดูแลตรวจสอบ ไม่ส่งไปให้ผู้ใช้เห็น
 function toTeacherSaveError(error: { message?: string; code?: string } | null | undefined, action: "save" | "delete" = "save"): string {
@@ -78,7 +78,7 @@ function validateQuestion(input: QuestionBankInput): string | null {
   // multi_select: ตรวจแยกก่อน (ถูกได้หลายข้อ) — ใช้ได้ทั้ง Final Exam และ Pop-up Quiz (popup UI ใน generate.ts รองรับแล้ว)
   if (input.interactionType === "multi_select") {
     if (!MULTI_SELECT_ENABLED) return "ยังไม่เปิดให้ใช้คำถามแบบ Multiple Select";
-    const problems = validateMultiSelectAuthoring(input.choices.filter((choice) => choice.text.trim()));
+    const problems = validateMultiSelectAuthoring(input.choices.filter((choice) => choice.text.trim()));//ส่งชอยส์ไปตรวจที่ฟังชัน
     return problems.length > 0 ? problems.join(" / ") : null;
   }
 
@@ -106,10 +106,10 @@ function validateQuestion(input: QuestionBankInput): string | null {
   return null;
 }
 
-function buildTagRows(
-  questionId: string,
+function buildTagRows( //ตัวแปลง tag ที่ครูเลือก ให้กลายเป็นแถวพร้อม insert ลง database
+  questionId: string,//เป็น parameter ของฟังชันนี้ที่รอรับค่าเวลาฟังชันนี้ถูกเรียก
   topicTags: QuestionBankTopicTagInput[],
-  courseMap: Map<string, string>,
+  courseMap: Map<string, string>, //แปลง courseId → courseTitle, lessonId → lessonTitle เพื่อสร้าง topic_label
   lessonMap: Map<string, string>
 ) {
   return topicTags.map((tag) => {
@@ -132,40 +132,40 @@ function buildTagRows(
 // final exam/popup quiz ของคอร์สคนอื่นทันทีโดยเจ้าของคอร์สไม่รู้ตัว ฟังก์ชันนี้เช็คสิทธิ์ก่อนบันทึกจริง
 async function verifyTopicTagOwnership(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  topicTags: QuestionBankTopicTagInput[],
+  topicTags: QuestionBankTopicTagInput[], //รอรับค่าจาก questionBankInput.topicTags ที่ครูเลือกมา
   teacherId: string,
   isAdmin: boolean
 ): Promise<string | null> {
   if (isAdmin || topicTags.length === 0) return null;
 
-  const courseIds = [...new Set(topicTags.map((t) => t.courseId))];
+  const courseIds = [...new Set(topicTags.map((t) => t.courseId))];//array ของ courseId ที่ไม่ซ้ำกัน
   const [{ data: courses }, { data: coTeaching }] = await Promise.all([
     supabase.from("courses").select("id, created_by, title").in("id", courseIds),
     supabase.from("course_teachers").select("course_id").eq("teacher_id", teacherId).in("course_id", courseIds),
   ]);
 
-  const foundIds = new Set((courses ?? []).map((c) => c.id));
-  const missing = courseIds.filter((id) => !foundIds.has(id));
+  const foundIds = new Set((courses ?? []).map((c) => c.id));//Set ที่เก็บ id ของ course ทั้งหมดที่ query จาก DB แล้วเจอจริง
+  const missing = courseIds.filter((id) => !foundIds.has(id));//array ของ courseId ที่ถูกอ้างถึงใน topicTags (ฝั่ง input ที่ user ส่งมา) แต่ หาไม่เจอใน DB
   if (missing.length > 0) return "พบคอร์สที่เลือกไม่มีอยู่จริงในระบบ กรุณาเลือกคอร์สใหม่";
 
-  const coTeachingIds = new Set((coTeaching ?? []).map((r) => r.course_id));
-  const unauthorized = (courses ?? []).filter((c) => c.created_by !== teacherId && !coTeachingIds.has(c.id));
+  const coTeachingIds = new Set((coTeaching ?? []).map((r) => r.course_id));//Set ของ course_id ทั้งหมดที่ teacher คนนี้เป็นผู้สอนร่วม
+  const unauthorized = (courses ?? []).filter((c) => c.created_by !== teacherId && !coTeachingIds.has(c.id)); //รายการ course ที่ teacher คนนี้พยายามแก้ไข/ใช้งาน แต่ ไม่มีสิทธิ์
   if (unauthorized.length > 0) {
     return `ไม่มีสิทธิ์ผูกคำถามกับคอร์สนี้: ${unauthorized.map((c) => c.title).join(", ")}`;
   }
   return null;
 }
 
-async function fetchTitleMaps(
+async function fetchTitleMaps( //ดึงชื่อคอร์สและบทเรียนจาก courseId/lessonId ที่ครูเลือกมา เพื่อสร้าง topic_label
   supabase: Awaited<ReturnType<typeof createClient>>,
   topicTags: QuestionBankTopicTagInput[]
 ) {
-  const courseIds = [...new Set(topicTags.map((t) => t.courseId))];
-  const lessonIds = [...new Set(topicTags.map((t) => t.lessonId).filter((id): id is string => !!id))];
+  const courseIds = [...new Set(topicTags.map((t) => t.courseId))];//array ของ courseId ที่ไม่ซ้ำกัน
+  const lessonIds = [...new Set(topicTags.map((t) => t.lessonId).filter((id): id is string => !!id))];//array ของ lessonId ที่ไม่ซ้ำกัน (กรอง null ออก)
 
   const [{ data: courses }, { data: lessons }] = await Promise.all([
     courseIds.length
-      ? supabase.from("courses").select("id, title").in("id", courseIds)
+      ? supabase.from("courses").select("id, title").in("id", courseIds) //.in("id", courseIds) → "เอาแถวที่ id ตรงกับตัวใดตัวหนึ่งใน courseIds"
       : Promise.resolve({ data: [] as { id: string; title: string }[] }),
     lessonIds.length
       ? supabase.from("lessons").select("id, title").in("id", lessonIds)
@@ -173,8 +173,8 @@ async function fetchTitleMaps(
   ]);
 
   return {
-    courseMap: new Map((courses ?? []).map((c) => [c.id, c.title])),
-    lessonMap: new Map((lessons ?? []).map((l) => [l.id, l.title])),
+    courseMap: new Map((courses ?? []).map((c) => [c.id, c.title])),//ค้นหา ชื่อวิชา (title) จาก course id
+    lessonMap: new Map((lessons ?? []).map((l) => [l.id, l.title])),//ค้นหา ชื่อบทเรียน  จาก lesson id
   };
 }
 
@@ -189,7 +189,7 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
   const ownershipError = await verifyTopicTagOwnership(supabase, input.topicTags, auth.user.id, auth.isAdmin);
   if (ownershipError) return { error: ownershipError };
 
-  const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);
+  const isChoiceBased = CHOICE_BASED_TYPES.includes(input.interactionType);//เช็คว่า interaction type นี้เป็นแบบเลือกตัวเลือกไหม
 
   const { data: question, error: questionError } = await supabase
     .from("question_bank")
@@ -215,13 +215,13 @@ export async function createQuestionBankItem(input: QuestionBankInput): Promise<
   if (isChoiceBased) {
     const choiceRows = input.choices
       .filter((choice) => choice.text.trim())
-      .map((choice, index) => ({
+      .map((choice, index) => ({ //แปลง choice แต่ละตัวเป็น row
         question_id: question.id,
         choice_text: choice.text.trim(),
         is_correct: choice.isCorrect,
         order_index: index,
       }));
-    const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
+    const { error: choicesError } = await supabase.from("question_bank_choices").insert(choiceRows); //insert ทั้งก้อนลงตาราง question_bank_choices
     if (choicesError) return { error: toTeacherSaveError(choicesError) };
   }
   // const choiceRows = input.choices
@@ -284,7 +284,7 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
     .eq("id", id);
   if (updateError) return { error: toTeacherSaveError(updateError) };
 
-  // แทนที่ choices/tags ทั้งชุด (ง่ายและปลอดภัยกว่า diff รายตัว)
+  // แทนที่ choices/tags ทั้งชุด (ง่ายและปลอดภัยกว่า diff รายตัว) ลบของเก่าทั้งหมด แล้ว insert ของใหม่ทั้งหมด
   const { error: deleteChoicesError } = await supabase.from("question_bank_choices").delete().eq("question_id", id);
   if (deleteChoicesError) return { error: toTeacherSaveError(deleteChoicesError) };
   // const choiceRows = input.choices
@@ -292,7 +292,7 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
   //   .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
   // const { error: insertChoicesError } = await supabase.from("question_bank_choices").insert(choiceRows);
   // if (insertChoicesError) return { error: toTeacherSaveError(insertChoicesError) };
-    if (isChoiceBased) {
+    if (isChoiceBased) { //หลังลบแล้ว ก็ insert ของใหม่ทั้งชุดเข้าไป
     const choiceRows = input.choices
       .filter((choice) => choice.text.trim())
       .map((choice, index) => ({ question_id: id, choice_text: choice.text.trim(), is_correct: choice.isCorrect, order_index: index }));
@@ -306,7 +306,7 @@ export async function updateQuestionBankItem(id: string, input: QuestionBankInpu
     const { courseMap, lessonMap } = await fetchTitleMaps(supabase, input.topicTags);
     const { error: insertTagsError } = await supabase
       .from("question_bank_topic_tags")
-      .insert(buildTagRows(id, input.topicTags, courseMap, lessonMap));
+      .insert(buildTagRows(id, input.topicTags, courseMap, lessonMap));//ลบ tag เก่าทั้งหมดก่อน แล้วค่อย insert tag ใหม่ (ถ้ามี)
     if (insertTagsError) return { error: toTeacherSaveError(insertTagsError) };
   }
 
@@ -324,7 +324,7 @@ export async function deleteQuestionBankItem(id: string): Promise<{ error?: stri
   if (!existing) return { error: "ไม่พบคำถามนี้" };
   if (!auth.isAdmin && existing.owner_teacher_id !== auth.user.id) return { error: "ไม่มีสิทธิ์ลบคำถามนี้" };
 
-  const { error } = await supabase.from("question_bank").delete().eq("id", id);
+  const { error } = await supabase.from("question_bank").delete().eq("id", id); //ลบแถวที่ id ตรงกัน
   if (error) return { error: toTeacherSaveError(error, "delete") };
 
   revalidatePath("/dashboard/teacher/question-bank");

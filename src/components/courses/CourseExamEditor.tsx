@@ -55,7 +55,7 @@ interface CustomConstraintRow {
   count: number;
 }
 
-function emptyQuestion(): EditableQuestion {
+function emptyQuestion(): EditableQuestion {//สร้าง "คำถามเปล่า" เริ่มต้น 1 ข้อ สำหรับใช้ตอนที่ครูกด “+ เพิ่มคำถาม” หรือตอนเปิดหน้าสร้างบททดสอบครั้งแรกที่ยังไม่มีคำถามอยู่เลย
   return {
     key: crypto.randomUUID(),
     questionText: "",
@@ -95,7 +95,7 @@ function toEditableQuestion(input: CourseExamQuestionInput): EditableQuestion {
   const dragDrop: DragDropFormState =
     (input.interactionType === "drag_drop" ? parseDragDropToForm(answerData) : null) ??
     { template: "", answers: [], distractors: [] };
-  return {
+  return { //โหลด initialQuestions (รูปแบบดิบจาก DB) มาแปลงเป็น EditableQuestion[] ด้วยฟังก์ชันนี้ทีละข้อ เพื่อให้ฟอร์มแสดงผลและแก้ไขได้ถูกต้อง
     key: crypto.randomUUID(),
     questionText: input.questionText,
     explanation: input.explanation,
@@ -116,10 +116,10 @@ export default function CourseExamEditor({
   lessons,
   initialExamConfig,
   workspace = "teacher",
-  readOnly = false, // ⬅️ ใหม่: default false เพื่อไม่กระทบหน้า teacher เดิม
+  readOnly = false, // ใหม่: default false เพื่อไม่กระทบหน้า teacher เดิม
 }: {
   courseId: string;
-  initialQuestions: CourseExamQuestionInput[];
+  initialQuestions: CourseExamQuestionInput[];//คำถามที่เคยบันทึกไว้แล้ว (โหมด "กำหนดข้อสอบเอง") โหลดมาจาก server
   lessons: { id: string; title: string }[];
   workspace?: "teacher" | "admin";
   readOnly?: boolean; // ⬅️ ใหม่
@@ -133,25 +133,26 @@ export default function CourseExamEditor({
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialExamConfig ? "random" : "manual");
 
   const [questions, setQuestions] = useState<EditableQuestion[]>(
-    initialQuestions.length ? initialQuestions.map(toEditableQuestion) : [emptyQuestion()]
-  );
+    initialQuestions.length ? initialQuestions.map(toEditableQuestion) : [emptyQuestion()]//ถ้ามีก็แก้ไขคำถามได้
+  ); //ถ้ายังไม่มีเลย (คอร์สใหม่ยังไม่เคยสร้างข้อสอบ) → เริ่มด้วยคำถามเปล่า 1 ข้อจาก emptyQuestion()
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
-  function updateQuestion(key: string, updates: Partial<EditableQuestion>) {
+  const [isDirty, setIsDirty] = useState(false); // มีการแก้ไขที่ยังไม่ได้บันทึกหรือไม่
+  //แก้ไขคำถามหรือส่วนใดส่วนนึงของคำถามนั้นจากการหา id ที่ตรงกัน เช่นแก้ไขหมุดภาพ
+  function updateQuestion(key: string, updates: Partial<EditableQuestion>) {//object ที่มีเฉพาะ field ที่ต้องการแก้ไข ไม่ต้องส่งทั้งก้อน EditableQuestion มา
     if (readOnly) return; //กันเผื่อ event หลุดมา
-    setIsDirty(true);
-    setQuestions((current) => current.map((question) => question.key === key ? { ...question, ...updates } : question));
+    setIsDirty(true);//ช้บอกระบบว่า "ข้อมูลตอนนี้ต่างจากที่เคยบันทึกไว้แล้ว" (ยังไม่ได้กด "บันทึก")
+    setQuestions((current) => current.map((question) => question.key === key ? { ...question, ...updates } : question));//ถ้า question.key === key (เจอคำถามข้อที่ต้องการแก้) → สร้าง object ใหม่โดย spread ค่าเดิมของคำถามนั้นก่อน (...question) แล้วทับด้วยค่าใหม่ (...updates)
   }
 
   // ===== เพิ่มใหม่: รูปภาพประกอบคำถาม (ไม่บังคับ) =====
-  const [uploadingImageKey, setUploadingImageKey] = useState<string | null>(null);
+  const [uploadingImageKey, setUploadingImageKey] = useState<string | null>(null);	//เก็บว่าตอนนี้ "ข้อไหน" (key) กำลังอัปโหลดรูปอยู่ (ใช้โชว์ "กำลังอัปโหลด..." เฉพาะข้อนั้น และ disable ปุ่มอัปโหลดของข้อนั้นไม่ให้กดซ้ำ)
   const [imageUploadErrors, setImageUploadErrors] = useState<Record<string, string>>({});
   // ===== เพิ่มใหม่: ชื่อ/ขนาดไฟล์รูป + Lightbox (ปักหมุด/แคปชัน) — key ของคำถาม เพราะหน้านี้มีได้หลายข้อ
   // (ตามแบบ LessonDraftForm.tsx ที่เป็น array คำถามเหมือนกัน) =====
   const [imageFileMeta, setImageFileMeta] = useState<Record<string, { name: string; size: number }>>({});
-  const [lightboxKey, setLightboxKey] = useState<string | null>(null);
+  const [lightboxKey, setLightboxKey] = useState<string | null>(null);//เก็บว่า "ข้อไหน" กำลังเปิด Lightbox (popup ขยายรูปเพื่อปักหมุด) อยู่
 
   async function handleQuestionImageUpload(key: string, file: File | null) {
     if (readOnly || !file) return;
@@ -161,7 +162,7 @@ export default function CourseExamEditor({
       return;
     }
     setImageUploadErrors((prev) => { const next = { ...prev }; delete next[key]; return next; });
-    setUploadingImageKey(key);
+    setUploadingImageKey(key);//เก็บว่าคำถามไหน (key) กำลังอัปโหลดอยู่
     try {
       const res = await fetch("/api/questions/image-upload-url", {
         method: "POST",
@@ -187,14 +188,14 @@ export default function CourseExamEditor({
     }
   }
 
-  function updateChoice(key: string, choiceIndex: number, text: string) {
+  function updateChoice(key: string, choiceIndex: number, text: string) {//updateChoice แก้ไขข้อความตัวเลือกของคำถามข้อที่กำหนด (key) โดยระบุ index ของ choice ที่ต้องการแก้ไข
     if (readOnly) return; 
     setIsDirty(true); 
     setQuestions((current) => current.map((question) => question.key === key ? {
       ...question,
       choices: question.choices.map((choice, index) => index === choiceIndex ? { ...choice, text } : choice),
     } : question));
-  }
+  }//สร้าง object ใหม่ { ...choice, text } — เอาค่าเดิมมาทั้งหมด (เช่น isCorrect) แล้วทับแค่ text ด้วยค่าใหม่ที่ผู้ใช้พิมพ์
 
   function setCorrectChoice(key: string, choiceIndex: number) {
     if (readOnly) return;
@@ -204,8 +205,8 @@ export default function CourseExamEditor({
       // multi_select ติ๊กถูกได้หลายข้อ (สลับค่าเฉพาะข้อที่กด) / ประเภทอื่นถูกได้ข้อเดียว
       choices: question.choices.map((choice, index) =>
         question.interactionType === "multi_select"
-          ? (index === choiceIndex ? { ...choice, isCorrect: !choice.isCorrect } : choice)
-          : { ...choice, isCorrect: index === choiceIndex }
+          ? (index === choiceIndex ? { ...choice, isCorrect: !choice.isCorrect } : choice)//multi_select ติ๊กถูกได้หลายข้อ (สลับค่าเฉพาะข้อที่กด)
+          : { ...choice, isCorrect: index === choiceIndex }//ไม่ใช่ multi_select ตัวที่กด → isCorrect: true
       ),
     } : question));
   }
@@ -249,7 +250,7 @@ export default function CourseExamEditor({
     if (readOnly) return;
     setIsDirty(true);
     setQuestions((current) => current.map((question) => (question.key === key ? { ...question, dragDrop } : question)));
-  }
+  }//สร้างคำถามใหม่ โดย spread ค่าเดิม (...question) แล้วทับทั้งฟิลด์ dragDrop ด้วยค่าใหม่ที่รับมาตรงๆ
 
   // ===== เพิ่มใหม่: matching (จับคู่ซ้าย-ขวา) — จัดการต่อคำถาม (question.key) เพราะโหมดนี้มีได้หลายข้อ =====
   function updateMatchingPair(key: string, index: number, field: "left" | "right", value: string) {
@@ -258,21 +259,21 @@ export default function CourseExamEditor({
     setQuestions((current) => current.map((question) => question.key === key ? {
       ...question,
       matchingPairs: question.matchingPairs.map((pair, i) => i === index ? { ...pair, [field]: value } : pair),
-    } : question));
+    } : question)); //ไล่ทุกคู่ในคำถามนั้น ถ้า i (ลำดับคู่) ตรงกับ index ที่ส่งมา → แก้ field ที่ระบุ ถ้าไม่ตรง → คืนคู่เดิม
   }
   function addMatchingPair(key: string) {
     if (readOnly) return;
     setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key
       ? { ...question, matchingPairs: [...question.matchingPairs, { left: "", right: "" }] }
-      : question));
-  }
+      : question)); 
+  }//สร้าง array ใหม่โดย spread คู่เดิมทั้งหมด (...question.matchingPairs) แล้วเติมคู่ว่างใหม่ { left: "", right: "" } ต่อท้าย — ใช้ตอนกดปุ่ม “+ เพิ่มคู่จับคู่”
   function removeMatchingPair(key: string, index: number) {
     if (readOnly) return;
     setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key
       ? { ...question, matchingPairs: question.matchingPairs.filter((_, i) => i !== index) }
-      : question));
+      : question));//เก็บเฉพาะคู่ที่ i !== index (คือทุกคู่ ยกเว้นตัวที่ตรงกับ index ที่จะลบ)
   }
 
   // ===== เพิ่มใหม่: sequencing (เรียงลำดับ) — เก็บแค่ text[] เรียงจากบนลงล่าง (ลำดับที่กรอก = ลำดับที่ถูก) =====
@@ -281,7 +282,7 @@ export default function CourseExamEditor({
     setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key
       ? { ...question, sequencingItems: question.sequencingItems.map((text, i) => i === index ? value : text) }
-      : question));
+      : question));//เวลาจะแก้ก็แค่แทนที่ค่า string นั้นตรงๆ (value)
   }
   function addSequencingItem(key: string) {
     if (readOnly) return;
@@ -296,7 +297,7 @@ export default function CourseExamEditor({
     setQuestions((current) => current.map((question) => question.key === key
       ? { ...question, sequencingItems: question.sequencingItems.filter((_, i) => i !== index) }
       : question));
-  }
+  }//ตัวที่ i !== index ออก
   function moveSequencingItem(key: string, index: number, delta: number) {
     if (readOnly) return;
     setIsDirty(true);
@@ -305,9 +306,9 @@ export default function CourseExamEditor({
       const next = [...question.sequencingItems];
       const target = index + delta;
       if (target < 0 || target >= next.length) return question;
-      [next[index], next[target]] = [next[target], next[index]];
+      [next[index], next[target]] = [next[target], next[index]];//วิธีสลับค่า 2 ตัวโดยไม่ต้องใช้ตัวแปรชั่วคราว (temp)
       return { ...question, sequencingItems: next };
-    }));
+    }));//delta — ทิศทางที่จะขยับ: -1 = ขยับขึ้น (ไปทางซ้าย/บน), +1 = ขยับลง
   }
   // ===== เพิ่มใหม่: ลาก-วางสลับลำดับ (ตามแบบ LessonDraftForm.tsx/QuestionBankForm.tsx) — ต้องเก็บ
   // key ของคำถามด้วย เพราะหน้านี้มีได้หลายข้อ ลากแค่ในการ์ดคำถามเดียวกันเท่านั้น
@@ -317,9 +318,9 @@ export default function CourseExamEditor({
     setIsDirty(true);
     setQuestions((current) => current.map((question) => {
       if (question.key !== key) return question;
-      const next = [...question.sequencingItems];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
+      const next = [...question.sequencingItems];//spread sequencingItems เดิมออกมาเป็น array ใหม่ชื่อ next
+      const [moved] = next.splice(fromIndex, 1);//.splice() คืนค่ากลับมาเป็น array ของสิ่งที่ถูกลบ (ไม่ใช่คืน array ที่เหลือ) เช่นถ้าลบ 1 ตัว จะได้ผลลัพธ์เป็น ["ค่าที่ถูกลบ"]
+      next.splice(toIndex, 0, moved);//next ที่เราสร้างไว้ ถูกตัดตัวนั้นออกไปแล้วจริงๆ (array สั้นลง 1 ตัว) เพราะ splice mutate ตัวมันเอง
       return { ...question, sequencingItems: next };
     }));
   }
@@ -351,7 +352,7 @@ export default function CourseExamEditor({
       ? { ...question, imagePins: (question.imagePins ?? []).slice(0, -1) }
       : question));
   }
-  function clearImagePins(key: string) {
+  function clearImagePins(key: string) { // ลบหมุดทั้งหมดของคำถามข้อนั้น (ไม่ลบรูปภาพ)
     if (readOnly) return;
     setIsDirty(true);
     setQuestions((current) => current.map((question) => question.key === key
@@ -360,7 +361,7 @@ export default function CourseExamEditor({
   }
 
   async function save() {
-    if (readOnly) return; // ⬅️ ใหม่: กันยิง action จากฝั่ง admin เด็ดขาด
+    if (readOnly) return; // ใหม่: กันยิง action จากฝั่ง admin เด็ดขาด
 
     if (lessons.length === 0) {
       setError("กรุณาเพิ่มและบันทึกบทเรียนอย่างน้อย 1 บทก่อนสร้างบททดสอบท้ายคอร์ส");

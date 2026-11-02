@@ -115,7 +115,8 @@ async function fetchFromR2(key: string): Promise<Buffer> {
   return Buffer.from(byteArray);
 }
 
-
+//เช็คว่า บทก่อนหน้าเรียนจบแล้ว ถ้ายังไม่จบจะขึ้นหน้า "บทเรียนนี้ยังไม่ปลดล็อค"
+//ไปดึงไฟล์ (lesson.html, JS, CSS) จาก Cloudflare R2 แล้วส่งให้ iframe
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ courseId: string; lessonId: string; path: string[] }> }

@@ -40,9 +40,9 @@ export interface FillInBlankAnswerData {
 // words = คลังคำทั้งหมด (รวมตัวหลอกที่ไม่อยู่ใน correct_map) / correct_map = blank_id -> word_id ที่ถูก
 export interface DragDropAnswerData {
   template: string;
-  blanks: { id: string }[];
+  blanks: { id: string }[];//ลำดับช่องว่าง
   words: { id: string; text: string }[];
-  correct_map: Record<string, string>;
+  correct_map: Record<string, string>;//key ต้องเป็น blank id ส่วน value น่าจะเป็น word id <key,value>
 }
 
 // ข้อมูล "แสดงผล" ของ drag_drop ที่ส่งให้นักเรียน — สลับลำดับคำแล้ว และ **ไม่มี correct_map**

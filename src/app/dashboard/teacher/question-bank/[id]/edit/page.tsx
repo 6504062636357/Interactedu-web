@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import QuestionBankForm from "@/components/teacher/QuestionBankForm";
 
 export default async function EditQuestionBankPage({ params }: { params: Promise<{ id: string }> }): Promise<ReactElement> {
-  const { id } = await params;
+  const { id } = await params; // ดึง id ของคำถาม
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirect=/dashboard/teacher/question-bank/${id}/edit`);
@@ -14,14 +14,14 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
   if (profile?.role !== "teacher" && profile?.role !== "admin") redirect("/");
 
   const [{ data: question }, { data: lessonsData }] = await Promise.all([
-    supabase
+    supabase //ดึงข้อมูลคำถามที่ต้องการแก้ไข
       .from("question_bank")
       .select("*, interaction_type, answer_data, question_bank_choices(choice_text, is_correct, order_index), question_bank_topic_tags(course_id, lesson_id)")
       .eq("id", id)
       .maybeSingle(),
-    supabase
+    supabase //ดึงบทเรียนทั้งหมดของทุกคอร์สที่ครูคนนี้เป็นเจ้าของ
       .from("lessons")
-      .select("id, title, order_index, course_id, courses!inner(title, created_by, category)")
+      .select("id, title, order_index, course_id, courses!inner(title, created_by, category)") //!inner = inner join (เอาเฉพาะที่ join สำเร็จจริง)
       .eq("courses.created_by", user.id)
       .order("order_index", { ascending: true }),
   ]);
@@ -58,8 +58,8 @@ export default async function EditQuestionBankPage({ params }: { params: Promise
       .map((tag: { course_id: string | null; lesson_id: string | null }) => ({ courseId: tag.course_id as string, lessonId: tag.lesson_id })),
     choices: [...(question.question_bank_choices ?? [])]
       .sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index)
-      .map((choice: { choice_text: string; is_correct: boolean }) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),
-  };
+      .map((choice: { choice_text: string; is_correct: boolean }) => ({ text: choice.choice_text, isCorrect: choice.is_correct })),//เปลี่ยนชื่อให้เป็น object ที่ใช้ใน component ต่อ
+  };//หลัง sort แล้วจะได้ index 0 มาก่อน 
 
   return (
     <div className="mx-auto max-w-3xl">
