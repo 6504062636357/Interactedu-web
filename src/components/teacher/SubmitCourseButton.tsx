@@ -1,28 +1,25 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitCourseForReview } from "@/app/dashboard/teacher/courses/actions";
 
 interface SubmitCourseButtonProps {
   courseId: string;
   ready: boolean;
+  awaitingReview: boolean;
 }
 
-export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButtonProps) {
+export default function SubmitCourseButton({ courseId, ready, awaitingReview }: SubmitCourseButtonProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const router = useRouter();
 
-  // แจ้งเตือนความสำเร็จให้หายไปเองหลังจากแสดงสักครู่ ไม่ต้องรอผู้ใช้กดปิด
-  useEffect(() => {
-    if (!submitted) return;
-    const timer = setTimeout(() => setSubmitted(false), 4000);
-    return () => clearTimeout(timer);
-  }, [submitted]);
+  const waitingForReview = awaitingReview || submitted;
 
   function handleClick() {
+    if (isPending || waitingForReview) return;
     setError(null);
     setSubmitted(false);
     startTransition(async () => {
@@ -46,7 +43,7 @@ export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButt
       <button
         type="button"
         onClick={handleClick}
-        disabled={isPending}
+        disabled={isPending || waitingForReview}
         aria-busy={isPending}
         // ★ ปุ่มนี้อยู่แถวเดียวกับ "เอกสารประกอบ" / "บททดสอบท้ายคอร์ส" / "+ เพิ่มบทเรียนใหม่"
         // ต้องยึด class ชุดเดียวกับปุ่มพวกนั้น (13px) ไม่ใช่ "Edit บทเรียน" (12.5px คนละแถว)
@@ -56,9 +53,9 @@ export default function SubmitCourseButton({ courseId, ready }: SubmitCourseButt
             ? "bg-[#0F1B3D]/55 hover:bg-[#0F1B3D]/70"
             : "bg-[#0F1B3D] hover:bg-[#0F1B3D]/90"
         }`}
-        title={!ready ? "กดเพื่อตรวจสอบว่ายังขาดข้อมูลส่วนใด" : undefined}
+        title={!waitingForReview && !ready ? "กดเพื่อตรวจสอบว่ายังขาดข้อมูลส่วนใด" : undefined}
       >
-        {isPending ? "กำลังส่ง..." : "ส่งคอร์สเข้าตรวจ"}
+        {waitingForReview ? "ส่งแล้ว · รอการตรวจสอบ" : isPending ? "กำลังส่ง..." : "ส่งคอร์สเข้าตรวจ"}
       </button>
       {error && (
         <p className="max-w-xs text-right text-[11.5px] font-semibold text-red-600">{error}</p>

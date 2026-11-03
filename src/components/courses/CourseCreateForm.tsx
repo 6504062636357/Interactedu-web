@@ -170,7 +170,16 @@ export default function CourseCreateForm({ workspace }: { workspace: Workspace }
         const extension = coverFile.name.split(".").pop();
         const path = `${crypto.randomUUID()}.${extension}`;
         const { error: uploadError } = await supabase.storage.from("course-covers").upload(path, coverFile);
-        if (uploadError) throw new Error(`อัปโหลดปกคอร์สไม่สำเร็จ: ${uploadError.message}`);
+        if (uploadError) {
+          const message = uploadError.message.toLowerCase();
+          if (
+            Number(uploadError.statusCode) === 429 ||
+            message.includes("too many connections")
+          ) {
+            throw new Error("ระบบอัปโหลดรูปปกไม่พร้อมใช้งานชั่วคราว ยังไม่ได้สร้างคอร์ส กรุณารอสักครู่แล้วกดบันทึกอีกครั้ง ข้อมูลที่กรอกยังอยู่ในหน้านี้ หากยังพบปัญหา กรุณาติดต่อผู้ดูแลระบบ");
+          }
+          throw new Error(`อัปโหลดปกคอร์สไม่สำเร็จ: ${uploadError.message}`);
+        }
         coverImageUrl = supabase.storage.from("course-covers").getPublicUrl(path).data.publicUrl;
       }
 

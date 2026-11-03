@@ -175,7 +175,7 @@ export default async function CourseDetailPage({ params }: PageProps): Promise<R
               </Link>
               <Link href={`/dashboard/teacher/courses/${course.id}/lessons/new`} className="shrink-0 rounded-full border border-transparent bg-[#FF5A3C] px-5 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#EB4A2D]">+ เพิ่มบทเรียนใหม่</Link>
               {course.status !== "published" && (
-                <SubmitCourseButton courseId={course.id} ready={readiness.ready} />
+                <SubmitCourseButton key={`${course.id}:${course.status}`} courseId={course.id} ready={readiness.ready} awaitingReview={course.status === "pending"} />
               )}
                 </>
               )}

@@ -394,11 +394,16 @@ export async function submitCourseForReview(courseId: string): Promise<{ error?:
 
   const { data: course, error: courseError } = await supabase
     .from("courses")
-    .select("id, title, created_by")
+    .select("id, title, created_by, status")
     .eq("id", courseId)
     .maybeSingle();
   if (courseError || !course) return { error: "ไม่พบคอร์สนี้" };
   if (course.created_by !== user.id) return { error: "ไม่มีสิทธิ์ส่งคอร์สนี้เข้าตรวจ" };
+  // การส่งซ้ำจากหน้าเก่าต้องไม่เปลี่ยนเวลาส่งหรือแจ้งเตือนแอดมินซ้ำ
+  if (course.status === "pending") return {};
+  if (course.status !== "draft" && course.status !== "rejected") {
+    return { error: "สถานะคอร์สนี้ไม่สามารถส่งเข้าตรวจได้" };
+  }
 
   const readiness = await checkCourseReadiness(courseId);
 

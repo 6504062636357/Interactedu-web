@@ -84,12 +84,12 @@ export default function LoginPage() {
     if (message.includes("invalid login credentials") || message.includes("invalid email or password")) {
       return INVALID_CREDENTIALS_MESSAGE;
     }
-    if (message.includes("rate limit") || message.includes("too many")) {
+    if (message.includes("rate limit") || message.includes("too many requests")) {
       return RATE_LIMIT_MESSAGE;
     }
-    // เน็ตหลุดจริงๆ แต่ navigator.onLine ยังไม่ทันเปลี่ยนเป็น false (บาง browser/dev-tool)
+    // Fetch ล้มเหลวไม่ได้ยืนยันว่าออฟไลน์ อาจติดต่อบริการเข้าสู่ระบบไม่ได้
     if (message.includes("failed to fetch") || message.includes("network error") || message.includes("networkerror")) {
-      return OFFLINE_MESSAGE;
+      return "ไม่สามารถเชื่อมต่อบริการเข้าสู่ระบบได้ในขณะนี้ กรุณารอสักครู่แล้วลองใหม่อีกครั้ง";
     }
     if (message.includes("timeout") || message.includes("timed out")) {
       return SYSTEM_ERROR_MESSAGE;

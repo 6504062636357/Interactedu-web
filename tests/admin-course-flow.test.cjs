@@ -86,6 +86,43 @@ function setup(options = {}) {
   return { teacher, review, editor, tables, course, lesson, draft, question, writes, generated, notifications };
 }
 
+test('submitting a pending course again does not write or notify', async () => {
+  const app = setup();
+  app.course.status = 'pending';
+  assert.equal((await app.teacher.submitCourseForReview('course')).error, undefined);
+  assert.equal(app.writes.length, 0);
+  assert.equal(app.notifications.length, 0);
+});
+
+test('draft and rejected courses can submit once, then repeated submissions are ignored', async () => {
+  for (const status of ['draft', 'rejected']) {
+    const app = setup();
+    app.course.status = status;
+    assert.equal((await app.teacher.submitCourseForReview('course')).error, undefined);
+    assert.equal(app.course.status, 'pending');
+    assert.equal(app.draft.status, 'pending_review');
+    const writes = app.writes.length;
+    assert.equal(app.notifications.length, 1);
+    assert.equal((await app.teacher.submitCourseForReview('course')).error, undefined);
+    assert.equal(app.writes.length, writes);
+    assert.equal(app.notifications.length, 1);
+  }
+});
+
+test('submission rejects nonowners and closed course states without writes', async () => {
+  for (const options of [{ owner: 'another-teacher' }, { noUser: true }, {}]) {
+    const app = setup(options);
+    app.course.status = 'published';
+    assert.ok((await app.teacher.submitCourseForReview('course')).error);
+    assert.equal(app.writes.length, 0);
+    assert.equal(app.notifications.length, 0);
+  }
+  const archived = setup();
+  archived.course.status = 'archived';
+  assert.ok((await archived.teacher.submitCourseForReview('course')).error);
+  assert.equal(archived.writes.length, 0);
+});
+
 test('admin cannot publish or approve an exam when no final exam exists', async () => {
   const app = setup({ noExam: true });
   assert.ok((await app.review.approveCourse('course')).error);
@@ -223,6 +260,27 @@ function draftWorkspace() {
   const tree = app.exports.CourseWorkspaceSaveProvider({ enabled: true, children: null });
   return { ...app, ...tree.props.value };
 }
+
+test('submission button stays disabled after success or when pending on reload', () => {
+  for (const [awaitingReview, submitted] of [[true, false], [false, true], [false, false]]) {
+    let index = 0;
+    let calls = 0;
+    const app = loadClient('src/components/teacher/SubmitCourseButton.tsx', {
+      react: {
+        useState: () => [[null, submitted][index++], () => {}],
+        useTransition: () => [false, () => { calls++; }],
+      },
+      'next/navigation': { useRouter: () => ({ refresh() {} }) },
+      '@/app/dashboard/teacher/courses/actions': { submitCourseForReview() {} },
+    });
+    const tree = app.exports.default({ courseId: 'course', ready: true, awaitingReview });
+    const button = tree.props.children[0];
+    assert.equal(button.props.disabled, awaitingReview || submitted);
+    assert.equal(button.props.children, awaitingReview || submitted ? 'ส่งแล้ว · รอการตรวจสอบ' : 'ส่งคอร์สเข้าตรวจ');
+    button.props.onClick();
+    assert.equal(calls, awaitingReview || submitted ? 0 : 1);
+  }
+});
 
 test('draft save waits for all sections and ignores repeated clicks', async () => {
   const app = draftWorkspace();
